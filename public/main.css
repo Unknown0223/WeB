@@ -1,0 +1,849 @@
+/* =================================================================== */
+/* === LOYIHA UCHUN UMUMIY STILLAR (main.css) === */
+/* =================================================================== */
+
+/* --- Global Sozlamalar --- */
+
+/* Google Fonts import */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' );
+
+/* Asosiy o'zgaruvchilar (CSS Variables) */
+:root {
+    --bg-color: #1a1c23;
+    --surface-color: #242731;
+    --header-bg: #2c2f3a;
+    --text-primary: #f0f0f0;
+    --text-secondary: #a0a0a0;
+    --border-color: #3a3d4a;
+    --blue-color: #007bff;
+    --green-color: #28a745;
+    --red-color: #dc3545;
+    --yellow-color: #ffc107;
+    --border-radius: 12px;
+    --transition-speed: 0.3s;
+    --glow-color: #4CAF50; /* Brending uchun standart rang */
+}
+
+/* Umumiy body stili */
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    margin: 0;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* =================================================================== */
+/* === ASOSIY SAHIFA (index.html) UCHUN STILLAR === */
+/* =================================================================== */
+
+.main-wrapper {
+    display: grid;
+    grid-template-columns: 320px 1fr 280px;
+    gap: 25px;
+    padding: 25px;
+    max-width: 1920px;
+    margin: 0 auto;
+    height: calc(100vh - 50px);
+}
+
+.sidebar, .container, .right-column {
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar, .container, .global-controls, .user-profile-card {
+    background-color: var(--surface-color);
+    padding: 20px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+.container {
+    padding: 25px;
+}
+
+.right-column {
+    gap: 25px;
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+/* --- Chap panel (Sidebar) --- */
+
+.sidebar-header {
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.brand-logo {
+    display: inline-block;
+    padding: 5px 15px;
+    color: var(--glow-color);
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    text-decoration: none;
+    position: relative;
+    z-index: 1;
+    font-family: 'Arial', sans-serif;
+    text-align: center;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+.brand-logo:hover {
+    transform: scale(1.05);
+}
+.logo-border-effect {
+    transition: all 0.5s;
+    padding: 10px;
+    border-radius: 10px;
+}
+
+
+/* *** YANGILANGAN: Sana filtri uchun *** */
+.filter-date-wrapper {
+    margin-bottom: 15px;
+}
+.filter-date-wrapper label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+.flatpickr-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.flatpickr-wrapper .form-control {
+    padding-right: 35px; /* X tugmasi uchun joy */
+}
+.flatpickr-wrapper .input-button {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    color: var(--red-color); /* Qizil rang */
+    opacity: 0.7;
+    transition: opacity var(--transition-speed);
+    padding: 5px;
+    line-height: 1;
+}
+.flatpickr-wrapper .input-button:hover {
+    opacity: 1;
+}
+
+
+.search-wrapper {
+    margin-bottom: 15px;
+}
+
+.filter-controls {
+    margin-bottom: 15px;
+}
+.filter-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.filter-btn {
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    background-color: var(--header-bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all var(--transition-speed);
+}
+.filter-btn:hover {
+    background-color: #4a4e5c;
+    color: var(--text-primary);
+}
+.filter-btn.active {
+    background-color: var(--blue-color);
+    color: white;
+    border-color: var(--blue-color);
+}
+
+.report-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    margin-right: -10px;
+    padding-right: 10px;
+}
+.report-item {
+    background-color: var(--header-bg);
+    padding: 12px 15px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all var(--transition-speed);
+    border-left: 4px solid transparent;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.report-item:hover {
+    transform: translateX(5px);
+    background-color: #3e4250;
+}
+.report-item.active {
+    background-color: #3e4250;
+    border-left-color: var(--green-color);
+}
+.report-item-content {
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.report-edit-info {
+    font-size: 12px;
+    color: var(--yellow-color);
+    font-weight: 600;
+}
+
+/* Pagination stillari */
+.pagination-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 15px;
+}
+.pagination-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    width: 36px;
+    height: 36px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-speed);
+}
+.pagination-btn:hover:not(:disabled) {
+    border-color: var(--blue-color);
+    color: var(--blue-color);
+}
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+#page-info {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* --- Markaziy qism (Container) --- */
+.header {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    margin-bottom: 25px;
+    gap: 20px;
+}
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+.header-center {
+    justify-self: center;
+    position: relative; /* Pulsatsiya uchun */
+}
+.header-right {
+    justify-self: end;
+}
+
+.badge {
+    padding: 8px 15px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    color: white;
+}
+#report-id-badge.new {
+    background-color: var(--blue-color);
+}
+#report-id-badge.saved {
+    background-color: var(--green-color);
+}
+
+/* --- O'ng panel (Right Column) --- */
+.user-profile-card {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+.user-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background-color: var(--blue-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.user-details .username {
+    font-weight: 600;
+    display: block;
+}
+.user-details .role {
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-transform: capitalize;
+}
+
+.global-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.global-btn {
+    padding: 12px 15px;
+    color: var(--text-primary);
+    background-color: var(--header-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all var(--transition-speed);
+    text-decoration: none;
+}
+.global-btn:hover {
+    border-color: var(--blue-color);
+    background-color: #3e4250;
+}
+.global-btn.logout {
+    border-color: var(--red-color);
+}
+.global-btn.logout:hover {
+    background-color: var(--red-color);
+    color: white;
+}
+
+/* --- Asosiy Jadval stillari --- */
+.table-wrapper {
+    overflow-x: auto;
+}
+#main-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+#main-table th {
+    text-align: left;
+    padding: 10px 15px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 12px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border-color);
+}
+#main-table td {
+    padding: 8px 15px;
+    vertical-align: middle;
+}
+#main-table tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+}
+#main-table tbody td:first-child {
+    font-weight: 600;
+}
+#main-table tfoot td {
+    font-weight: 700;
+    font-size: 18px;
+    padding-top: 20px;
+    text-align: right;
+}
+#main-table tfoot td:first-child {
+    text-align: left;
+}
+#grand-total {
+    color: var(--green-color);
+}
+
+/* --- Forma elementlari --- */
+.form-control, .date-badge, .location-badge {
+    width: 100%;
+    padding: 10px 15px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    font-size: 14px;
+    box-sizing: border-box;
+    transition: border-color var(--transition-speed), box-shadow var(--transition-speed);
+}
+.form-control:focus, .date-badge:focus, .location-badge:focus {
+    outline: none;
+    border-color: var(--blue-color);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.2);
+}
+.flatpickr-input {
+    background-color: var(--bg-color) !important;
+}
+
+/* --- Tugmalar (Buttons) --- */
+.controls {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 25px;
+    flex-wrap: wrap;
+}
+.btn {
+    padding: 12px 25px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all var(--transition-speed);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.btn-primary {
+    background-color: var(--blue-color);
+    color: white;
+}
+.btn-success {
+    background-color: var(--green-color);
+    color: white;
+}
+.btn-warning {
+    background-color: var(--yellow-color);
+    color: var(--bg-color);
+}
+.icon-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-speed);
+}
+.icon-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--yellow-color);
+}
+
+/* --- Xulosa (Summary) --- */
+.summary-wrapper {
+    margin-top: 30px;
+    background-color: var(--header-bg);
+    border-radius: var(--border-radius);
+    padding: 25px;
+}
+.summary-title {
+    text-align: center;
+    color: var(--blue-color);
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+.summary-list .summary-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.summary-list .summary-item:last-child {
+    border-bottom: none;
+}
+.summary-total {
+    margin-top: 20px;
+    background-color: var(--green-color);
+    color: #fff;
+    padding: 15px;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+/* =================================================================== */
+/* === KIRISH SAHIFASI (login.html) UCHUN STILLAR === */
+/* =================================================================== */
+
+body.login-page {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+.login-container {
+    background-color: var(--surface-color);
+    padding: 40px;
+    border-radius: var(--border-radius);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+    border: 1px solid var(--border-color);
+    transition: all 0.5s; /* Brending uchun */
+}
+.login-description {
+    color: var(--text-secondary);
+    margin-bottom: 30px;
+}
+.form-group {
+    margin-bottom: 20px;
+    text-align: left;
+}
+.login-btn {
+    width: 100%;
+}
+.error-text {
+    color: var(--red-color);
+    margin-top: 15px;
+    min-height: 1.2em;
+    font-weight: 500;
+}
+
+/* =================================================================== */
+/* === YORDAMCHI VA UMUMIY STILLAR === */
+/* =================================================================== */
+
+.hidden {
+    display: none !important;
+}
+
+/* --- Modal Oynalar --- */
+.modal {
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(5px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--transition-speed), visibility var(--transition-speed);
+}
+.modal:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+}
+.modal-content {
+    background-color: var(--surface-color);
+    padding: 30px;
+    border: 1px solid var(--border-color);
+    width: 90%;
+    border-radius: 15px;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    transform: scale(0.95);
+    transition: transform var(--transition-speed);
+}
+.modal:not(.hidden) .modal-content {
+    transform: scale(1);
+}
+.close-modal-btn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 5px;
+}
+.modal-title {
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 22px;
+}
+.modal-body {
+    max-height: 80vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* --- Toast (Bildirishnoma) --- */
+.toast {
+    position: fixed;
+    bottom: -100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: var(--green-color);
+    color: white;
+    padding: 15px 25px;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    z-index: 2000;
+    font-weight: 600;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.5s ease-in-out;
+}
+.toast:not(.hidden) {
+    opacity: 1;
+    visibility: visible;
+    bottom: 30px;
+}
+.toast.error {
+    background-color: var(--red-color);
+}
+
+/* --- Animatsiyalar --- */
+.skeleton-item {
+    background-color: var(--header-bg);
+    border-radius: 8px;
+    height: 60px;
+    margin-bottom: 10px;
+    animation: pulse-bg 1.5s infinite ease-in-out;
+}
+@keyframes pulse-bg {
+    0% { background-color: var(--header-bg); }
+    50% { background-color: #3c404d; }
+    100% { background-color: var(--header-bg); }
+}
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-secondary);
+    border: 2px dashed var(--border-color);
+    border-radius: var(--border-radius);
+}
+.empty-state.error {
+    color: var(--red-color);
+    border-color: var(--red-color);
+}
+.spinner {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s ease-in-out infinite;
+    margin-left: 10px;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* *** SANA MAYDONI UCHUN YAKUNIY STILLAR *** */
+.header-center.date-attention::after {
+    content: '';
+    position: absolute;
+    top: -5px; bottom: -5px; left: -5px; right: -5px;
+    border-radius: 12px; /* .form-control bilan bir xil */
+    animation: pulse-yellow 1.5s infinite;
+    pointer-events: none; /* Klik o'tib ketishi uchun */
+}
+@keyframes pulse-yellow {
+    0% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 193, 7, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0); }
+}
+.header-center.date-attention .flatpickr-input {
+    border-color: var(--yellow-color);
+}
+
+.header-center.date-invalid .flatpickr-input {
+    border-color: var(--red-color);
+    box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.3);
+}
+
+.header-center.date-valid .flatpickr-input {
+    border-color: var(--green-color);
+    box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.2);
+}
+
+
+/* --- Hisobot tarixi uchun stillar --- */
+.modal-content {
+    max-width: 1200px;
+}
+.ultimate-history-table {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+.ultimate-history-header {
+    display: grid;
+    grid-template-columns: 250px 150px repeat(auto-fit, minmax(100px, 1fr));
+    gap: 10px;
+    padding: 10px 20px;
+    background-color: var(--header-bg);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 1px solid var(--border-color);
+}
+.ultimate-history-header .col-value {
+    text-align: right;
+}
+.ultimate-history-body {
+    display: flex;
+    flex-direction: column;
+}
+.history-group {
+    display: grid;
+    grid-template-columns: 250px 1fr;
+    border-bottom: 2px solid var(--blue-color);
+}
+.history-group .col-meta {
+    padding: 10px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    border-right: 1px solid var(--border-color);
+}
+.history-group .timestamp {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+.history-group .user-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.group-changes-grid {
+    display: flex;
+    flex-direction: column;
+}
+.change-row {
+    display: grid;
+    grid-template-columns: 150px repeat(auto-fit, minmax(100px, 1fr));
+    gap: 10px;
+    align-items: center;
+    min-height: 60px;
+    border-bottom: 1px solid var(--border-color);
+}
+.group-changes-grid .change-row:last-child {
+    border-bottom: none;
+}
+.change-row .col-row-name {
+    padding: 10px;
+    font-weight: 500;
+    font-size: 15px;
+    border-right: 1px solid var(--border-color);
+    height: 100%;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+}
+.change-row .col-value {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    font-family: monospace;
+    font-size: 15px;
+    line-height: 1.4;
+    padding: 10px;
+    height: 100%;
+}
+.change-row .old-value {
+    color: var(--red-color);
+    text-decoration: line-through;
+    opacity: 0.8;
+}
+.change-row .new-value {
+    color: var(--green-color);
+    font-weight: 700;
+}
+
+/* --- BRENDING ANIMATSIYALARI --- */
+.anim-glow-pulse { animation: glow-pulse 2s infinite ease-in-out; }
+@keyframes glow-pulse { 0%, 100% { color: white; text-shadow: 0 0 5px var(--glow-color), 0 0 10px var(--glow-color), 0 0 15px var(--glow-color); } 50% { color: var(--glow-color); text-shadow: 0 0 10px var(--glow-color), 0 0 20px var(--glow-color), 0 0 30px var(--glow-color); } }
+.anim-flicker { animation: flicker 1.5s infinite alternate; }
+@keyframes flicker { 0%, 18%, 22%, 25%, 53%, 57%, 100% { text-shadow: 0 0 4px var(--glow-color), 0 0 11px var(--glow-color), 0 0 19px var(--glow-color); color: var(--glow-color); } 20%, 24%, 55% { text-shadow: none; color: #2c2c2c; } }
+.anim-scanner { animation: scanner 3s linear infinite; }
+@keyframes scanner { 0%, 100% { text-shadow: 0 0 5px var(--glow-color); } 50% { text-shadow: 0 0 20px var(--glow-color), 0 0 40px var(--glow-color); } }
+
+.border-glow { border: 2px solid var(--glow-color); box-shadow: 0 0 15px var(--glow-color); }
+.border-dashed { border: 2px dashed var(--glow-color); }
+.border-line-grow { position: relative; }
+.border-line-grow::before, .border-line-grow::after { content: ''; position: absolute; background: var(--glow-color); transition: all 1s; }
+.border-line-grow::before { top: 0; left: 0; width: 0; height: 2px; }
+.border-line-grow::after { bottom: 0; right: 0; width: 0; height: 2px; }
+.border-line-grow:hover::before, .border-line-grow:hover::after { width: 100%; }
+
+
+/* --- Moslashuvchanlik (Responsiveness) --- */
+@media (max-width: 1200px) {
+    .main-wrapper {
+        grid-template-columns: 320px 1fr;
+    }
+    .right-column {
+        grid-column: 1 / -1;
+        order: -1;
+    }
+    .user-profile-card {
+        max-width: 400px;
+    }
+    .global-controls {
+        flex-direction: row;
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 768px) {
+    .main-wrapper {
+        grid-template-columns: 1fr;
+        padding: 15px;
+    }
+    .header {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    .header-left, .header-center, .header-right {
+        justify-self: stretch;
+        width: 100%;
+    }
+    #location-select {
+        width: 100%;
+    }
+    .controls {
+        flex-direction: column;
+    }
+}

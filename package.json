@@ -1,0 +1,38 @@
+{
+  "name": "yandex_taxi_clone",
+  "version": "1.0.0",
+  "description": "Hisobotlarni boshqarish tizimi",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "dev": "node server.js",
+    "migrate:make": "knex migrate:make --knexfile knexfile.js",
+    "migrate:latest": "knex migrate:latest --knexfile knexfile.js",
+    "migrate:rollback": "knex migrate:rollback --knexfile knexfile.js"
+  },
+  "keywords": [
+    "report",
+    "dashboard",
+    "sqlite",
+    "telegram"
+  ],
+  "author": "Manus AI",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "bcrypt": "^5.1.1",
+    "connect-sqlite3": "^0.9.16",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "knex": "^3.1.0",
+    "multer": "^2.0.2",
+    "node-telegram-bot-api": "^0.66.0",
+    "sqlite3": "^5.1.7",
+    "string-similarity": "^4.0.4",
+    "uuid": "^10.0.0",
+    "webdatarocks": "^1.4.9"
+  }
+}

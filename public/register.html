@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ro'yxatdan o'tish</title>
+    
+    <!-- Umumiy uslublar fayli -->
+    <link rel="stylesheet" href="main.css"> 
+    <link rel="stylesheet" href="admin.css">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* Xabar matnlari uchun maxsus stillar */
+        .message-text {
+            margin-top: 15px;
+            min-height: 1.2em;
+            font-weight: 500;
+            transition: color 0.3s;
+            line-height: 1.5;
+        }
+        .message-text.error {
+            color: var(--red-color );
+        }
+        .message-text.success {
+            color: var(--green-color);
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body class="login-page">
+
+    <div class="login-container">
+        <div class="logo-border-effect">
+             <h2 class="brand-logo">MANUS</h2>
+        </div>
+        <p class="login-description">Yangi akkaunt yaratish</p>
+        
+        <form id="register-form">
+            <div class="form-group">
+                <input type="text" id="fullname" class="form-control" placeholder="To'liq ismingiz (F.I.Sh )" required>
+            </div>
+            <div class="form-group">
+                <input type="text" id="username" class="form-control" placeholder="Login o'ylab toping (faqat lotin harflari)" required pattern="[a-zA-Z0-9_]+" title="Faqat lotin harflari, raqamlar va pastki chiziq (_) mumkin.">
+            </div>
+            <div class="form-group">
+                <div class="secure-input-wrapper">
+                    <input type="password" id="password" class="form-control" placeholder="Parol (kamida 8 belgi)" required minlength="8" autocomplete="new-password">
+                    <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                </div>
+            </div>
+            <div class="form-group">
+                <div class="secure-input-wrapper">
+                    <input type="password" id="confirm-password" class="form-control" placeholder="Parolni tasdiqlang" required minlength="8" autocomplete="new-password">
+                    <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                </div>
+            </div>
+            
+            <!-- MAXFIY SO'Z UCHUN YANGI MAYDON (ID QO'SHILDI) -->
+            <div class="form-group">
+                <div class="secure-input-wrapper">
+                    <input type="password" id="secret-word" class="form-control" placeholder="Maxfiy so'z (kamida 6 belgi)" required minlength="6" autocomplete="new-password">
+                    <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                </div>
+                <small style="font-size: 12px; color: var(--text-secondary); margin-top: 5px; display: block;">Parolga o'xshamaydigan, esda qolarli so'z kiriting.</small>
+            </div>
+            
+            <button type="submit" class="btn btn-primary login-btn">SO'ROV YUBORISH</button>
+        </form>
+        
+        <!-- XABARLAR UCHUN YANGI MAYDON -->
+        <p id="message-area" class="message-text"></p>
+        
+        <p class="register-link" style="margin-top: 20px; font-size: 14px; color: var(--text-secondary);">
+            Akkauntingiz bormi? <a href="/login.html" style="color: var(--blue-color); text-decoration: none; font-weight: 600;">Tizimga kirish</a>
+        </p>
+    </div>
+
+    <!-- Bildirishnoma (Toast) -->
+    <div id="toast-notification" class="toast hidden"></div>
+
+    <!-- Tashqi kutubxonalar -->
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <!-- STRING-SIMILARITY KUTUBXONASI -->
+    <script src="https://cdn.jsdelivr.net/npm/string-similarity/compare-strings.min.js"></script>
+    
+    <script src="register.js"></script>
+    <script>
+        // Ikonkalarni ishga tushirish uchun
+        feather.replace( );
+
+        // Parolni ko'rsatish/yashirish logikasi
+        document.body.addEventListener('click', (e) => {
+            const toggleBtn = e.target.closest('.toggle-visibility-btn');
+            if (toggleBtn) {
+                const input = toggleBtn.closest('.secure-input-wrapper').querySelector('input');
+                const icon = toggleBtn.querySelector('i');
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    icon.setAttribute('data-feather', 'eye-off');
+                } else {
+                    input.type = 'password';
+                    icon.setAttribute('data-feather', 'eye');
+                }
+                feather.replace();
+            }
+        });
+    </script>
+</body>
+</html>

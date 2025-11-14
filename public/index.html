@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dinamik Hisobot Jadvali</title>
+    
+    <!-- Tashqi kutubxonalar va uslublar -->
+    <link rel="stylesheet" href="main.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+    <link rel="stylesheet" href="https://npmcdn.com/flatpickr/dist/plugins/rangePlugin.css">
+</head>
+<body class="main-page">
+
+    <div class="main-wrapper">
+        
+        <!-- 1. CHAP USTUN (Hisobotlar ro'yxati ) -->
+        <aside class="sidebar">
+            <!-- *** YANGI QO'SHILGAN LOGOTIP BLOKI *** -->
+            <div class="sidebar-header">
+                <div class="logo-border-effect">
+                    <a href="/" class="brand-logo">MANUS</a>
+                </div>
+            </div>
+            
+            <div class="filter-date-wrapper">
+                <label for="filter-date-range">Sana bo'yicha filtr</label>
+                <div class="flatpickr-wrapper"> <!-- O'rab turuvchi div qo'shildi -->
+                    <input type="text" id="filter-date-range" class="form-control" placeholder="Barcha sanalar" data-input>
+                    <a class="input-button" title="Tozalash" data-clear>
+                        <i data-feather="x"></i>
+                    </a>
+                </div>
+            </div>
+
+            <div class="search-wrapper">
+                <input type="text" id="search-input" class="form-control" placeholder="ID yoki filial bo'yicha qidirish...">
+            </div>
+
+            <div class="filter-controls">
+                <div id="report-filter-buttons" class="filter-buttons">
+                    <button class="filter-btn active" data-filter="all">Barchasi</button>
+                    <button class="filter-btn" data-filter="edited">Tahrirlangan</button>
+                    <button class="filter-btn" data-filter="unedited">Tahrirlanmagan</button>
+                </div>
+            </div>
+
+            <div id="saved-reports-list" class="report-list">
+                <!-- YUKLANISH HOLATI UCHUN SKELETON -->
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+            </div>
+
+            <!-- Pagination bloki -->
+            <div id="pagination-controls" class="pagination-controls hidden">
+                <!-- JS orqali to'ldiriladi -->
+            </div>
+        </aside>
+
+        <!-- 2. MARKAZIY USTUN (Asosiy jadval) -->
+        <main class="container">
+            <header class="header">
+                <div class="header-left">
+                    <span class="badge new" id="report-id-badge">YANGI</span>
+                    <button id="history-btn" class="icon-btn hidden" title="O'zgarishlar tarixi">
+                        <i data-feather="clock"></i>
+                    </button>
+                </div>
+                <div class="header-center">
+                    <input type="text" id="date-picker" class="form-control" placeholder="Sanani tanlang">
+                </div>
+                <div class="header-right">
+                    <select id="location-select" class="form-control"></select>
+                </div>
+            </header>
+
+            <div class="table-wrapper">
+                <table id="main-table">
+                    <thead></thead>
+                    <tbody></tbody>
+                    <tfoot></tfoot>
+                </table>
+            </div>
+
+            <div class="controls">
+                <button id="edit-btn" class="btn btn-warning hidden" data-permission="reports:edit_own"><i data-feather="edit"></i> TAHRIRLASH</button>
+                <button id="confirm-btn" class="btn btn-success"><i data-feather="check-circle"></i> TASDIQLASH VA SAQLASH</button>
+                <button id="excel-btn" class="btn btn-primary"><i data-feather="download"></i> EXCEL YUKLAB OLISH</button>
+            </div>
+
+            <div id="summary-wrapper" class="summary-wrapper hidden">
+                <h4 class="summary-title">Ma'lumotlar xulosasi</h4>
+                <div id="summary-list" class="summary-list"></div>
+                <div id="summary-total" class="summary-total"></div>
+            </div>
+        </main>
+
+        <!-- 3. O'NG USTUN (Global boshqaruv) -->
+        <aside class="right-column">
+            <div class="user-profile-card">
+                <div class="user-avatar"><i data-feather="user"></i></div>
+                <div class="user-details">
+                    <span id="current-username" class="username">Yuklanmoqda...</span>
+                    <span id="current-user-role" class="role"></span>
+                </div>
+            </div>
+            <div class="global-controls">
+                <button id="new-report-btn" class="global-btn" data-permission="reports:create"><i data-feather="plus-circle"></i> Yangi Hisobot</button>
+                <a href="/admin" id="admin-panel-btn" class="global-btn hidden"><i data-feather="settings"></i> Boshqaruv Paneli</a>
+                <button id="logout-btn" class="global-btn logout"><i data-feather="log-out"></i> Chiqish</button>
+            </div>
+        </aside>
+
+    </div>
+
+    <!-- MODAL OYNALAR -->
+    <!-- Hisobot tarixi uchun -->
+    <div id="history-modal" class="modal hidden">
+        <div class="modal-content">
+            <button class="close-modal-btn" data-target="history-modal"><i data-feather="x"></i></button>
+            <h2 class="modal-title">Hisobot O'zgarishlar Tarixi</h2>
+            <div id="history-modal-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Kechikish sababi uchun modal oyna -->
+    <div id="late-comment-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <button class="close-modal-btn" data-target="late-comment-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title">Kechikish Sababini Kiriting</h3>
+            <p>Hisobot belgilangan vaqtdan kech topshirilmoqda. Iltimos, sababini izohlang.</p>
+            <form id="late-comment-form">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <textarea id="late-comment-input" class="form-control" rows="4" required placeholder="Sababini shu yerga yozing..."></textarea>
+                </div>
+                <div class="modal-actions" style="display: flex; justify-content: flex-end;">
+                    <button type="submit" class="btn btn-primary">Yuborish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bildirishnoma (Toast) -->
+    <div id="toast-notification" class="toast hidden"></div>
+
+    <!-- JavaScript fayllari -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/uz.js"></script>
+    <script src="https://npmcdn.com/flatpickr/dist/plugins/rangePlugin.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boshqaruv Paneli</title>
+    
+    <!-- WebDataRocks uchun CSS -->
+    <link href="https://cdn.webdatarocks.com/latest/webdatarocks.min.css" rel="stylesheet" />
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+    <link rel="stylesheet" href="admin.css">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Foydalanuvchi tablari uchun stillar */
+        .user-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color   );
+        }
+        .user-tabs button {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: color 0.3s, border-color 0.3s;
+        }
+        .user-tabs button:hover {
+            color: var(--text-primary);
+        }
+        .user-tabs button.active {
+            color: var(--blue-color);
+            border-bottom-color: var(--blue-color);
+        }
+        .user-list-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .status-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 12px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        .status-badge.blocked {
+            background-color: rgba(220, 53, 69, 0.2);
+            color: var(--red-color);
+        }
+        .status-badge.archived {
+            background-color: rgba(108, 117, 125, 0.2);
+            color: #adb5bd;
+        }
+        .status-badge.pending {
+            background-color: rgba(255, 193, 7, 0.2);
+            color: var(--yellow-color);
+        }
+
+        /* Xodimlar statistikasi uchun maxsus stillar */
+        .kpi-table th {
+            cursor: pointer;
+            position: relative;
+            user-select: none;
+        }
+        .kpi-table th .sort-icon {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+        .kpi-table th.sorted .sort-icon {
+            opacity: 1;
+        }
+        .kpi-progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: var(--header-bg);
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+        }
+        .kpi-progress-bar .bar-segment {
+            height: 100%;
+            transition: width 0.5s;
+        }
+        .kpi-progress-bar .on-time { background-color: var(--green-color); }
+        .kpi-progress-bar .late { background-color: var(--yellow-color); }
+
+        .employee-details-view {
+            margin-top: 30px;
+            display: none; /* Boshida yashirin */
+        }
+        .details-calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+            margin-top: 20px;
+        }
+        .calendar-day {
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+            min-height: 60px;
+            border: 1px solid var(--border-color);
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .calendar-day:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .calendar-day .day-number { font-weight: 600; font-size: 18px; }
+        .calendar-day.on_time { background-color: rgba(40, 167, 69, 0.2); border-color: var(--green-color); }
+        .calendar-day.late { background-color: rgba(255, 193, 7, 0.2); border-color: var(--yellow-color); }
+        .calendar-day.not_submitted { background-color: rgba(220, 53, 69, 0.15); border-color: var(--red-color); opacity: 0.7; }
+        .calendar-day.disabled { background-color: var(--header-bg); opacity: 0.5; cursor: default; }
+        .calendar-day .edit-indicator {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            color: var(--cyan-color);
+        }
+        .calendar-header {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+            text-align: center;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body class="admin-page">
+
+    <div class="admin-layout">
+        <!-- 1. YON PANEL (SIDEBAR ) -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-border-effect">
+                    <a href="/" class="brand-logo">MANUS</a>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#dashboard" class="nav-link active" data-page="dashboard" data-permission="dashboard:view">
+                    <i data-feather="home"></i>
+                    <span>Bosh Sahifa</span>
+                </a>
+                <a href="#employee-statistics" class="nav-link" data-page="employee-statistics" data-permission="dashboard:view">
+                    <i data-feather="trending-up"></i>
+                    <span>Xodimlar Statistikasi</span>
+                </a>
+                <a href="#interactive-report" class="nav-link" data-page="interactive-report" data-permission="reports:view_pivot">
+                    <i data-feather="grid"></i>
+                    <span>Interaktiv Hisobot</span>
+                </a>
+                <a href="#requests" class="nav-link" data-page="requests" data-permission="users:edit">
+                    <i data-feather="user-check"></i>
+                    <span>So'rovlar</span>
+                    <span id="requests-count-badge" class="badge-count hidden">0</span>
+                </a>
+                <a href="#users" class="nav-link" data-page="users" data-permission="users:view">
+                    <i data-feather="users"></i>
+                    <span>Foydalanuvchilar</span>
+                </a>
+                <a href="#security" class="nav-link" data-page="security">
+                    <i data-feather="shield"></i>
+                    <span>Xavfsizlik</span>
+                </a>
+                <a href="#roles" class="nav-link" data-page="roles" data-permission="roles:manage">
+                    <i data-feather="sliders"></i>
+                    <span>Rollar va Huquqlar</span>
+                </a>
+                <a href="#audit-log" class="nav-link" data-page="audit-log" data-permission="audit:view">
+                    <i data-feather="database"></i>
+                    <span>Tizim Jurnali</span>
+                </a>
+                <a href="#settings" class="nav-link" data-page="settings" data-permission="settings:view">
+                    <i data-feather="settings"></i>
+                    <span>Sozlamalar</span>
+                </a>
+                <a href="#admin-controls" class="nav-link" data-page="admin-controls" data-permission="roles:manage">
+                    <i data-feather="tool"></i>
+                    <span>Admin Boshqaruvi</span>
+                </a>
+                <a href="#branding" class="nav-link" data-page="branding" data-permission="settings:edit_general">
+                    <i data-feather="pen-tool"></i>
+                    <span>Brending</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <a href="/" class="back-to-main-btn">
+                    <i data-feather="arrow-left-circle"></i>
+                    <span>Asosiy Sahifaga</span>
+                </a>
+                <button id="logout-btn" class="btn btn-danger" style="width: 100%; margin-top: 10px;">
+                    <i data-feather="log-out"></i>
+                    <span>Chiqish</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- 2. ASOSIY KONTENT -->
+        <main class="main-content">
+            <!-- Bosh Sahifa (Dashboard) -->
+            <section id="dashboard" class="page active" data-permission="dashboard:view">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">Boshqaruv Paneli</h1>
+                        <p class="page-description">Tizimning <strong id="dashboard-selected-date">bugungi</strong> umumiy holati va statistik ma'lumotlar.</p>
+                    </div>
+                    <input type="text" id="dashboard-date-picker" class="form-control" style="width: 250px;" placeholder="Sanani tanlang">
+                </div>
+                <div class="stats-grid" id="stats-grid"></div>
+                <div class="card" style="margin-top: 30px;">
+                    <h3 class="card-title">Haftalik Dinamika (Hisobotlar Soni)</h3>
+                    <div style="height: 300px; position: relative;">
+                        <canvas id="weekly-dynamics-chart"></canvas>
+                    </div>
+                </div>
+                <div class="card" style="margin-top: 30px;">
+                    <h3 class="card-title">Filiallar Bo'yicha Holat</h3>
+                    <div class="daily-status-grid" id="daily-status-grid"></div>
+                </div>
+            </section>
+
+            <!-- Xodimlar Statistikasi -->
+            <section id="employee-statistics" class="page" data-permission="dashboard:view">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">Xodimlar Ish Samaradorligi (KPI)</h1>
+                        <p class="page-description">Xodimlarning tanlangan oy bo'yicha hisobot topshirish statistikasi va reytingi.</p>
+                    </div>
+                    <input type="month" id="kpi-month-picker" class="form-control" style="width: 250px;">
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title">Umumiy Reyting Jadvali</h3>
+                    <div class="table-responsive">
+                        <table class="data-table kpi-table">
+                            <thead>
+                                <tr>
+                                    <th data-sort="fullname">Xodim</th>
+                                    <th data-sort="locations">Filiallar</th>
+                                    <th data-sort="kpiScore">Umumiy Ko'rsatkich</th>
+                                    <th data-sort="totalSubmitted">Topshirilgan (dona)</th>
+                                    <th data-sort="onTimeCount">O'z vaqtida (dona)</th>
+                                    <th data-sort="lateCount">Kechikkan (dona)</th>
+                                    <th data-sort="totalEdited">Tahrirlangan (dona)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="kpi-table-body">
+                                <!-- JS orqali to'ldiriladi -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="employee-details-view" class="employee-details-view">
+                    <div class="card">
+                        <div class="page-header">
+                            <h3 class="card-title" id="details-view-title">Xodimning batafsil statistikasi</h3>
+                            <button id="back-to-kpi-list-btn" class="btn btn-secondary"><i data-feather="arrow-left"></i> Ro'yxatga qaytish</button>
+                        </div>
+                        <div class="calendar-header">
+                            <div>Yak</div><div>Du</div><div>Se</div><div>Cho</div><div>Pay</div><div>Ju</div><div>Sha</div>
+                        </div>
+                        <div id="details-calendar-grid" class="details-calendar-grid"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Interaktiv Hisobotlar -->
+            <section id="interactive-report" class="page" data-permission="reports:view_pivot">
+                <!-- Sarlavha va boshqaruv elementlari uchun yangi ixcham header -->
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">Interaktiv Hisobotlar</h1>
+                        <p class="page-description">
+                            Bu yerda barcha hisobotlarni jamlangan holda tahlil qilishingiz, filtrlashingiz va Excel formatida yuklab olishingiz mumkin.
+                        </p>
+                    </div>
+                    <!-- Sana tanlagich o'ng tarafga o'tkazildi -->
+                    <input type="text" id="pivot-date-picker" class="form-control" style="width: 300px;" placeholder="Sana oralig'ini tanlang">
+                </div>
+                
+                <!-- WebDataRocks komponenti endi to'g'ridan-to'g'ri shu yerga joylashadi (card'siz) -->
+                <div id="pivot-container"></div>
+            </section>
+            
+            <!-- Registratsiya so'rovlari -->
+            <section id="requests" class="page" data-permission="users:edit">
+                <div class="page-header">
+                    <h1 class="page-title">Yangi Foydalanuvchi So'rovlari</h1>
+                </div>
+                <p class="page-description">Bu yerda tizimdan ro'yxatdan o'tish uchun yuborilgan so'rovlarni tasdiqlashingiz yoki rad etishingiz mumkin.</p>
+                <div class="card">
+                    <div class="user-list" id="pending-users-list"></div>
+                </div>
+            </section>
+
+            <!-- Foydalanuvchilarni Boshqarish -->
+            <section id="users" class="page" data-permission="users:view">
+                <div class="page-header">
+                    <h1 class="page-title">Foydalanuvchilarni Boshqarish</h1>
+                    <button id="open-add-user-modal-btn" class="btn btn-primary" data-permission="users:create"><i data-feather="user-plus"></i> Yangi Foydalanuvchi</button>
+                </div>
+                <div class="card">
+                    <div id="user-tabs" class="user-tabs">
+                        <button class="active" data-status="active">Aktiv Foydalanuvchilar</button>
+                        <button data-status="pending">Kutmoqda</button>
+                        <button data-status="inactive">Noaktiv Foydalanuvchilar</button>
+                    </div>
+                    <div id="user-list-container" class="user-list-container"></div>
+                </div>
+            </section>
+
+            <!-- Xavfsizlik va Sessiyalar -->
+            <section id="security" class="page">
+                <div class="page-header">
+                    <h1 class="page-title">Xavfsizlik va Sessiyalar</h1>
+                </div>
+                <p class="page-description">
+                    Bu yerda siz tizimga qaysi qurilmalardan va qachon kirganingizni ko'rishingiz mumkin. Agar shubhali aktivlikni sezsangiz, notanish sessiyalarni tugatishingiz mumkin.
+                </p>
+                <div class="card">
+                    <h3 class="card-title">Mening Aktiv Sessiyalarim</h3>
+                    <div id="my-sessions-list" class="sessions-list"></div>
+                </div>
+            </section>
+
+            <!-- Rollar va Huquqlar -->
+            <section id="roles" class="page" data-permission="roles:manage">
+                <h1 class="page-title">Rollar va Huquqlar</h1>
+                <p class="page-description">
+                    Bu yerda har bir rol uchun ruxsat etilgan amallarni belgilashingiz mumkin.
+                    <span class="note">Eslatma: "Admin" rolini huquqlarini o'zgartirish mumkin emas.</span>
+                </p>
+                <div id="roles-management-container" class="roles-management-container">
+                    <div class="roles-list-panel">
+                        <ul id="roles-list" class="roles-list"></ul>
+                    </div>
+                    <div class="permissions-panel card">
+                        <h3 id="current-role-title" class="card-title">Huquqlarni sozlash</h3>
+                        <div id="permissions-grid" class="permissions-grid"></div>
+                        <div class="page-footer">
+                            <button id="save-role-permissions-btn" class="btn btn-primary hidden">
+                                <i data-feather="save"></i> O'zgarishlarni Saqlash
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tizim Jurnali -->
+            <section id="audit-log" class="page" data-permission="audit:view">
+                <div class="page-header">
+                    <h1 class="page-title">Tizim Jurnali (Audit Log)</h1>
+                </div>
+                <p class="page-description">Tizimda sodir bo'lgan barcha muhim harakatlar ro'yxati.</p>
+                
+                <div class="card filter-card">
+                    <div class="filter-controls">
+                        <div class="form-group">
+                            <label for="audit-user-filter">Foydalanuvchi</label>
+                            <select id="audit-user-filter" class="form-control"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="audit-action-filter">Amal Turi</label>
+                            <select id="audit-action-filter" class="form-control"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="audit-date-filter">Sana Oralig'i</label>
+                            <input type="text" id="audit-date-filter" class="form-control" placeholder="Barcha sanalar...">
+                        </div>
+                        <button id="audit-filter-reset-btn" class="btn btn-secondary" title="Filtrlarni tozalash">
+                            <i data-feather="x"></i> Tozalash
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 15%;">Vaqt</th>
+                                    <th style="width: 10%;">Foydalanuvchi</th>
+                                    <th>Tavsif</th>
+                                    <th style="width: 20%;">Qurilma</th>
+                                    <th style="width: 5%;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-log-table-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="audit-log-pagination" class="pagination-controls"></div>
+                </div>
+            </section>
+
+            <!-- Admin Boshqaruvi -->
+            <section id="admin-controls" class="page" data-permission="roles:manage">
+                <div class="page-header"><h1 class="page-title">Admin Boshqaruvi</h1></div>
+                <div class="card">
+                    <h3 class="card-title">Tizim Boshqaruvi</h3>
+                    
+                    <!-- Database Backup (Original) -->
+                    <div class="form-group">
+                        <label>Ma'lumotlar bazasi fayli (tezkor nusxa)</label>
+                        <button id="backup-db-btn" class="btn btn-secondary">
+                            <i data-feather="download"></i> database.db faylini yuklab olish
+                        </button>
+                    </div>
+
+                    <hr style="border-color: var(--border-color); margin: 20px 0;">
+
+                    <!-- Full Data Export Block -->
+                    <div class="form-group">
+                        <label>To'liq Ma'lumotlar Eksporti (JSON)</label>
+                        <p style="font-size: 14px; color: var(--text-secondary); margin-top: 0;">
+                            Tizimdagi barcha ma'lumotlarni (hisobotlar, foydalanuvchilar, sozlamalar va h.k.) bitta JSON faylida saqlab olish. Bu zaxira nusxa yaratish va tizimni ko'chirish uchun tavsiya etiladi.
+                        </p>
+                        <button id="export-full-data-btn" class="btn btn-primary">
+                            <i data-feather="archive"></i> To'liq Eksport Qilish
+                        </button>
+                    </div>
+
+                    <hr style="border-color: var(--border-color); margin: 20px 0;">
+
+                    <!-- Full Data Import Block -->
+                    <div class="form-group">
+                        <label>To'liq Ma'lumotlar Importi (JSON)</label>
+                        <p style="font-size: 14px; color: var(--red-color); margin-top: 0; font-weight: 600;">
+                            DIQQAT! Bu amal joriy ma'lumotlar bazasidagi BARCHA ma'lumotlarni o'chirib, tanlangan fayldagi ma'lumotlar bilan almashtiradi. Bu amalni qaytarib bo'lmaydi.
+                        </p>
+                        <form id="import-form">
+                            <input type="file" id="import-file-input" accept=".json" class="form-control" required>
+                            <button type="submit" id="import-full-data-btn" class="btn btn-danger" style="margin-top: 10px;">
+                                <i data-feather="upload"></i> Import Qilish va Almashtirish
+                            </button>
+                        </form>
+                    </div>
+
+                    <hr style="border-color: var(--border-color); margin: 20px 0;">
+
+                    <!-- Clear Sessions -->
+                    <div class="form-group">
+                        <label>Foydalanuvchi sessiyalari</label>
+                        <button id="clear-sessions-btn" class="btn btn-danger">
+                            <i data-feather="trash-2"></i> Barcha sessiyalarni tozalash
+                        </button>
+                        <small>Bu amal o'zingizdan tashqari barcha foydalanuvchilarni tizimdan chiqarib yuboradi.</small>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Brending -->
+            <section id="branding" class="page" data-permission="settings:edit_general">
+                <h1 class="page-title">Brending va Logotip Sozlamalari</h1>
+                <p class="page-description">Bu yerda tizimning logotipi matni, ranglari, animatsiyalari va effektlarini o'zgartirishingiz mumkin.</p>
+                <div class="card">
+                    <div class="branding-grid">
+                        <div class="branding-controls">
+                            <div class="form-group">
+                                <label for="logo-text-input">Logotip Matni</label>
+                                <input type="text" id="logo-text-input" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label>Logotip Rangi</label>
+                                <div id="logo-color-palette" class="color-palette"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="logo-animation-select">Logotip Animatsiyasi</label>
+                                <select id="logo-animation-select" class="form-control"></select>
+                            </div>
+                             <div class="form-group">
+                                <label for="logo-border-effect-select">Chegara (Border) Effekti</label>
+                                <select id="logo-border-effect-select" class="form-control"></select>
+                            </div>
+                        </div>
+                        <div class="branding-preview">
+                            <label>Ko'rib chiqish (Preview)</label>
+                            <div id="logo-preview-container" class="logo-border-effect">
+                                <div id="logo-preview" class="brand-logo">MANUS</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="page-footer">
+                        <button id="save-branding-settings-btn" class="btn btn-primary"><i data-feather="save"></i> Brending Sozlamalarini Saqlash</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Xodimlar Statistikasi (KPI) -->
+            <section id="employee-statistics" class="page" data-permission="dashboard:view">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">Xodimlar Ish Samaradorligi (KPI)</h1>
+                        <p class="page-description">Xodimlarning tanlangan oy bo'yicha hisobot topshirish statistikasi va reytingi.</p>
+                    </div>
+                    <input type="month" id="kpi-month-picker" class="form-control" style="width: 250px;">
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title">Umumiy Reyting Jadvali</h3>
+                    <div class="table-responsive">
+                        <table class="data-table kpi-table">
+                            <thead>
+                                <tr>
+                                    <th data-sort="fullname">Xodim</th>
+                                    <th data-sort="locations">Filiallar</th>
+                                    <th data-sort="kpiScore">Umumiy Ko'rsatkich</th>
+                                    <th data-sort="totalSubmitted">Topshirilgan (dona)</th>
+                                    <th data-sort="onTimeCount">O'z vaqtida (dona)</th>
+                                    <th data-sort="lateCount">Kechikkan (dona)</th>
+                                    <th data-sort="totalEdited">Tahrirlangan (dona)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="kpi-table-body">
+                                <!-- JS orqali to'ldiriladi -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="employee-details-view" class="employee-details-view">
+                    <div class="card">
+                        <div class="page-header">
+                            <h3 class="card-title" id="details-view-title">Xodimning batafsil statistikasi</h3>
+                            <button id="back-to-kpi-list-btn" class="btn btn-secondary"><i data-feather="arrow-left"></i> Ro'yxatga qaytish</button>
+                        </div>
+                        <div class="calendar-header">
+                            <div>Yak</div><div>Du</div><div>Se</div><div>Cho</div><div>Pay</div><div>Ju</div><div>Sha</div>
+                        </div>
+                        <div id="details-calendar-grid" class="details-calendar-grid"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sozlamalar -->
+            <section id="settings" class="page" data-permission="settings:view">
+                <h1 class="page-title">Sozlamalar</h1>
+                <div class="settings-layout">
+                    <div class="card" data-permission="settings:edit_table">
+                        <h3 class="card-title">Jadval Sozlamalari</h3>
+                        <div class="accordion-container">
+                            <div class="accordion-item">
+                                <div class="accordion-header"><h3 class="card-title">Ustunlar</h3><i data-feather="chevron-down" class="accordion-icon"></i></div>
+                                <div class="accordion-content">
+                                    <div class="settings-list" id="columns-settings"></div>
+                                    <div class="add-item-form"><input type="text" id="new-column-name" class="form-control" placeholder="Yangi ustun..."><button class="btn btn-secondary" id="add-column-btn"><i data-feather="plus"></i></button></div>
+                                </div>
+                            </div>
+                            <div class="accordion-item">
+                                <div class="accordion-header"><h3 class="card-title">Qatorlar</h3><i data-feather="chevron-down" class="accordion-icon"></i></div>
+                                <div class="accordion-content">
+                                    <div class="settings-list" id="rows-settings"></div>
+                                    <div class="add-item-form"><input type="text" id="new-row-name" class="form-control" placeholder="Yangi qator..."><button class="btn btn-secondary" id="add-row-btn"><i data-feather="plus"></i></button></div>
+                                </div>
+                            </div>
+                            <div class="accordion-item">
+                                <div class="accordion-header"><h3 class="card-title">Filiallar</h3><i data-feather="chevron-down" class="accordion-icon"></i></div>
+                                <div class="accordion-content">
+                                    <div class="settings-list" id="locations-settings"></div>
+                                    <div class="add-item-form"><input type="text" id="new-location-name" class="form-control" placeholder="Yangi filial..."><button class="btn btn-secondary" id="add-location-btn"><i data-feather="plus"></i></button></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="page-footer">
+                            <button class="btn btn-primary" id="save-table-settings-btn" data-permission="settings:edit_table"><i data-feather="save"></i> Jadval Sozlamalarini Saqlash</button>
+                        </div>
+                    </div>
+                    <div class="other-settings">
+                        <div class="card" data-permission="settings:edit_telegram">
+                            <h3 class="card-title">Telegram Bot</h3>
+                            <div class="form-group">
+                                <label for="bot-token">Bot Token</label>
+                                <div class="secure-input-wrapper">
+                                    <input type="password" id="bot-token" class="form-control" placeholder="Token yashirilgan" autocomplete="off">
+                                    <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="group-id">Guruh ID</label>
+                                <div class="secure-input-wrapper">
+                                    <input type="password" id="group-id" class="form-control" placeholder="ID yashirilgan" autocomplete="off">
+                                    <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-chat-id">Adminning Telegram Chat ID'si</label>
+                                <div class="secure-input-wrapper">
+                                    <input type="password" id="admin-chat-id" class="form-control" placeholder="ID yashirilgan" autocomplete="off">
+                                    <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                                </div>
+                            </div>
+                             <div class="form-group">
+                                <label for="bot-username">Bot Username (@ belgisisiz)</label>
+                                <input type="text" id="bot-username" class="form-control" placeholder="Botingizning username'i">
+                            </div>
+                            <button class="btn btn-primary" id="save-telegram-btn"><i data-feather="save"></i> Saqlash</button>
+                        </div>
+                        <div class="card" data-permission="settings:edit_general">
+                            <h3 class="card-title">KPI Sozlamalari</h3>
+                            <p class="page-description" style="font-size: 14px; margin-bottom: 15px;">
+                                KPI ballini hisoblash uchun jarima koeffitsientlarini belgilang (0 dan 1 gacha).
+                            </p>
+                            <div class="form-group">
+                                <label for="late-penalty-input">Kechikkan hisobot uchun jarima</label>
+                                <input type="number" id="late-penalty-input" class="form-control" min="0" max="1" step="0.1" placeholder="Masalan, 0.5">
+                                <small>Har bir kechikkan hisobot foizi shu songa ko'paytiriladi va umumiy balldan ayiriladi.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-penalty-input">Tahrirlangan hisobot uchun jarima</label>
+                                <input type="number" id="edit-penalty-input" class="form-control" min="0" max="1" step="0.1" placeholder="Masalan, 0.3">
+                                <small>Har bir tahrirlangan hisobot foizi shu songa ko'paytiriladi va umumiy balldan ayiriladi.</small>
+                            </div>
+                            <button class="btn btn-primary" id="save-kpi-settings-btn"><i data-feather="save"></i> KPI Sozlamalarini Saqlash</button>
+                        </div>
+
+                        <div class="card" data-permission="settings:edit_general">
+                            <h3 class="card-title">Umumiy Sozlamalar</h3>
+                            <div class="form-group">
+                                <label for="pagination-limit">Sahifadagi yozuvlar soni</label>
+                                <input type="number" id="pagination-limit" class="form-control" min="5" max="100" value="20">
+                            </div>
+                            <button id="save-general-settings" class="btn btn-primary">Saqlash</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- MODAL OYNALAR -->
+    <div id="user-form-modal" class="modal hidden">
+        <div class="modal-content">
+            <button class="close-modal-btn" data-target="user-form-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title" id="user-modal-title"></h3>
+            <form id="user-form">
+                <input type="hidden" id="edit-user-id">
+                <div class="form-group">
+                    <label for="user-username">Login (username)</label>
+                    <input type="text" id="user-username" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="user-fullname">To'liq ism (F.I.Sh)</label>
+                    <input type="text" id="user-fullname" class="form-control">
+                </div>
+                <div class="form-group" id="password-group">
+                    <label for="user-password">Yangi Parol</label>
+                    <div class="secure-input-wrapper">
+                        <input type="password" id="user-password" class="form-control" minlength="8" autocomplete="new-password">
+                        <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                    </div>
+                    <small>Yangi foydalanuvchi uchun majburiy. Tahrirlashda bo'sh qoldiring.</small>
+                </div>
+                <div class="form-group">
+                    <label for="user-role">Rol</label>
+                    <select id="user-role" class="form-control"></select>
+                </div>
+                <div class="form-group">
+                    <label for="user-device-limit">Ruxsat etilgan qurilmalar soni</label>
+                    <input type="number" id="user-device-limit" class="form-control" value="1" min="1">
+                </div>
+                <div class="form-group" id="user-locations-group">
+                    <label>Biriktirilgan filiallar:</label>
+                    <div class="checkbox-grid" id="locations-checkbox-list"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="user-form-modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="approval-modal" class="modal hidden">
+        <div class="modal-content">
+            <button class="close-modal-btn" data-target="approval-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title">Foydalanuvchi So'rovini Tasdiqlash</h3>
+            <p>Foydalanuvchi <strong id="approval-username"></strong> uchun rol va filiallarni belgilang.</p>
+            <form id="approval-form">
+                <input type="hidden" id="approval-user-id">
+                <div class="form-group">
+                    <label for="approval-role">Rol</label>
+                    <select id="approval-role" class="form-control" required></select>
+                </div>
+                <div class="form-group" id="approval-locations-group" style="display: none;">
+                    <label>Biriktirilgan filiallar:</label>
+                    <div class="checkbox-grid" id="approval-locations-checkbox-list"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="approval-modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-primary">Tasdiqlash va Aktivlashtirish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="credentials-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <button class="close-modal-btn" data-target="credentials-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title" id="credentials-modal-title"></h3>
+            <form id="credentials-form">
+                <input type="hidden" id="credentials-user-id">
+                <div class="form-group">
+                    <label for="credentials-input" id="credentials-input-label"></label>
+                    <div class="secure-input-wrapper">
+                        <input type="password" id="credentials-input" class="form-control" required minlength="6" autocomplete="new-password">
+                        <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="credentials-modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="telegram-connect-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <button class="close-modal-btn" data-target="telegram-connect-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title">Foydalanuvchini Telegram Botga Ulash</h3>
+            <p>Quyidagi bir martalik havolani nusxalab, foydalanuvchiga yuboring. Foydalanuvchi bu havolani bosib, botda "/start" buyrug'ini yuborishi kerak.</p>
+            <div class="form-group secure-input-wrapper">
+                <input type="text" id="telegram-connect-link" class="form-control" readonly>
+                <button type="button" id="copy-telegram-link-btn" class="btn-icon" title="Nusxalash"><i data-feather="copy"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="sessions-modal" class="modal hidden">
+        <div class="modal-content">
+            <button class="close-modal-btn" data-target="sessions-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title" id="sessions-modal-title"></h3>
+            <div id="sessions-list-container" class="sessions-list"></div>
+        </div>
+    </div>
+
+    <div id="audit-details-modal" class="modal hidden">
+        <div class="modal-content">
+            <button class="close-modal-btn" data-target="audit-details-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title">Amal Tafsilotlari</h3>
+            <div id="audit-details-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="toast-notification" class="toast hidden"></div>
+
+    <!-- Shablonni Saqlash uchun Modal Oyna -->
+    <div id="save-template-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <button class="close-modal-btn" data-target="save-template-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title">Hisobot Shablonini Saqlash</h3>
+            <form id="save-template-form">
+                <div class="form-group">
+                    <label for="template-name-input">Shablon nomini kiriting</label>
+                    <input type="text" id="template-name-input" class="form-control" required placeholder="Masalan, 'Oylik filiallar kesimida'">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="save-template-modal">Bekor qilish</button>
+                    <button type="submit" class="btn btn-primary">Saqlash</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Shablonni Ochish uchun Modal Oyna -->
+    <div id="open-template-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px;">
+            <button class="close-modal-btn" data-target="open-template-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title">Saqlangan Shablonni Tanlang</h3>
+            <div class="templates-panel-header">
+                <p style="margin: 0; color: var(--text-secondary);">Ochish uchun shablon nomini bosing. O'chirish uchun <i data-feather="trash-2" style="width:1em; height:1em;"></i> belgisini bosing.</p>
+            </div>
+            <div id="templates-tag-list" class="templates-tag-list">
+                <!-- Shablonlar bu yerga JS orqali yuklanadi -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- WebDataRocks uchun JS -->
+    <script src="https://cdn.webdatarocks.com/latest/webdatarocks.toolbar.min.js"></script>
+    <script src="https://cdn.webdatarocks.com/latest/webdatarocks.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/uz.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>
+
