@@ -2131,32 +2131,19 @@ function renderModernRequests() {
     const container = document.getElementById('pending-users-list');
     if (!container) return;
 
-    console.log('🔍 [RENDER] renderModernRequests boshlandi...');
-    console.log('🔍 [RENDER] state.pendingUsers:', state.pendingUsers);
-    console.log('🔍 [RENDER] state.pendingUsers length:', state.pendingUsers ? state.pendingUsers.length : 0);
-    console.log('🔍 [RENDER] state.users (pending only):', state.users ? state.users.filter(u => u.status === 'pending' || u.status === 'pending_approval' || u.status === 'pending_telegram_subscription' || u.status === 'status_in_process') : 'state.users is null');
-
     // Get pending users (requests) - use state.pendingUsers if available, otherwise filter state.users
     let requests = [];
     
     if (state.pendingUsers && state.pendingUsers.length > 0) {
         // Use dedicated pending users array
         requests = [...state.pendingUsers];
-        console.log(`✅ [RENDER] state.pendingUsers dan ${requests.length} ta so'rov olingan`);
     } else if (state.users && state.users.length > 0) {
         // Fallback: filter from all users
         requests = state.users.filter(u => u.status === 'pending' || u.status === 'pending_approval' || u.status === 'pending_telegram_subscription' || u.status === 'status_in_process');
-        console.log(`✅ [RENDER] state.users dan ${requests.length} ta so'rov filter qilindi`);
-    } else {
-        console.log('⚠️ [RENDER] Hech qanday so\'rov topilmadi');
     }
-    
-    console.log(`📋 [RENDER] Filter qo'llanilishidan oldin so'rovlar soni: ${requests.length}`);
 
     // Apply status filter
     if (currentRequestsFilter.status) {
-        const beforeFilter = requests.length;
-        console.log(`🔍 [RENDER] Status filter qo'llanilmoqda: ${currentRequestsFilter.status}`);
         if (currentRequestsFilter.status === 'pending_telegram_subscription') {
             // Telegram kutmoqda - null, undefined yoki pending_subscription
             requests = requests.filter(r => !r.telegram_connection_status || r.telegram_connection_status === 'pending_subscription' || r.telegram_connection_status === 'not_connected');
@@ -2167,9 +2154,6 @@ function renderModernRequests() {
             // Jarayonda
             requests = requests.filter(r => r.telegram_connection_status === 'in_process');
         }
-        console.log(`🔍 [RENDER] Filter qo'llanilgandan keyin: ${beforeFilter} → ${requests.length} ta so'rov`);
-    } else {
-        console.log(`🔍 [RENDER] Status filter yo'q, barcha so'rovlar ko'rsatiladi`);
     }
 
     // Apply sorting
@@ -2183,7 +2167,6 @@ function renderModernRequests() {
 
     // Empty state
     if (requests.length === 0) {
-        console.log('⚠️ [RENDER] So\'rovlar yo\'q, empty state ko\'rsatilmoqda');
         container.innerHTML = `
             <div class="requests-empty-state">
                 <i data-feather="inbox"></i>
@@ -2194,11 +2177,6 @@ function renderModernRequests() {
         feather.replace();
         return;
     }
-
-    console.log(`✅ [RENDER] ${requests.length} ta so'rov render qilinmoqda:`);
-    requests.forEach((req, index) => {
-        console.log(`   ${index + 1}. ID: ${req.id}, Username: ${req.username}, Status: ${req.status}, Created: ${req.created_at}`);
-    });
 
     // Render cards
     container.innerHTML = requests.map(request => {

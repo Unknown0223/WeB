@@ -76,8 +76,6 @@ router.get('/', isAuthenticated, hasPermission('users:view'), async (req, res) =
 // Tasdiqlanishini kutayotgan foydalanuvchilarni olish
 router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
     try {
-        console.log('📋 [PENDING] Pending so\'rovlarni olish boshlandi...');
-        
         const pendingUsers = await db('users')
             .whereIn('status', ['pending_approval', 'pending_telegram_subscription', 'status_in_process'])
             .select(
@@ -90,11 +88,6 @@ router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req,
                 'telegram_username'
             )
             .orderBy('created_at', 'desc');
-        
-        console.log(`📋 [PENDING] Topilgan so'rovlar soni: ${pendingUsers.length}`);
-        pendingUsers.forEach((user, index) => {
-            console.log(`   ${index + 1}. ID: ${user.id}, Username: ${user.username}, Status: ${user.status}, Created: ${user.created_at}`);
-        });
         
         // Ma'lumotlarni formatlash
         const formattedUsers = pendingUsers.map(user => ({
@@ -110,10 +103,9 @@ router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req,
             telegram_connection_status: user.telegram_chat_id ? 'subscribed' : null
         }));
         
-        console.log(`✅ [PENDING] ${formattedUsers.length} ta so'rov yuborilmoqda`);
         res.json(formattedUsers);
     } catch (error) {
-        console.error("❌ [PENDING] /api/users/pending GET xatoligi:", error);
+        console.error("/api/users/pending GET xatoligi:", error);
         res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
     }
 });
