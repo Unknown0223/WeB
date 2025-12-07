@@ -47,6 +47,7 @@ import {
     saveTelegramSettings,
     saveGeneralSettings,
     saveKpiSettings,
+    createRoleFromSettings,
     toggleAccordion
 } from './modules/settings.js';
 import { setupAuditLogFilters, setupAuditPagination } from './modules/audit.js';
@@ -261,6 +262,7 @@ function setupEventListeners() {
         addSafeListener(DOM.saveTelegramBtn, 'click', saveTelegramSettings);
         addSafeListener(DOM.saveGeneralSettingsBtn, 'click', saveGeneralSettings);
         addSafeListener(DOM.saveKpiSettingsBtn, 'click', saveKpiSettings);
+        addSafeListener(DOM.createRoleSettingsBtn, 'click', createRoleFromSettings);
         document.querySelectorAll('.accordion-header').forEach(header => 
             addSafeListener(header, 'click', toggleAccordion)
         );

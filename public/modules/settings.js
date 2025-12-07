@@ -246,6 +246,75 @@ export async function saveKpiSettings() {
     }
 }
 
+export async function createRoleFromSettings() {
+    const roleNameInput = document.getElementById('new-role-name-settings');
+    const requiresLocationsCheckbox = document.getElementById('new-role-requires-locations-settings');
+    const requiresBrandsCheckbox = document.getElementById('new-role-requires-brands-settings');
+    const createBtn = document.getElementById('create-role-settings-btn');
+    
+    if (!roleNameInput || !requiresLocationsCheckbox || !requiresBrandsCheckbox || !createBtn) {
+        return;
+    }
+    
+    const roleName = roleNameInput.value.trim().toLowerCase();
+    const requiresLocations = requiresLocationsCheckbox.checked;
+    const requiresBrands = requiresBrandsCheckbox.checked;
+    
+    // Validation
+    if (!roleName) {
+        showToast('Rol nomini kiriting!', 'error');
+        roleNameInput.focus();
+        return;
+    }
+    
+    if (!/^[a-z_]+$/.test(roleName)) {
+        showToast('Rol nomida faqat lotin harflari va pastki chiziq (_) bo\'lishi mumkin!', 'error');
+        roleNameInput.focus();
+        return;
+    }
+    
+    createBtn.disabled = true;
+    createBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Yaratilmoqda...';
+    
+    try {
+        const response = await safeFetch('/api/roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                role_name: roleName,
+                requires_locations: requiresLocations,
+                requires_brands: requiresBrands
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Xatolik yuz berdi' }));
+            throw new Error(errorData.message);
+        }
+        
+        showToast('Yangi rol muvaffaqiyatli yaratildi!', 'success');
+        
+        // Clear form
+        roleNameInput.value = '';
+        requiresLocationsCheckbox.checked = false;
+        requiresBrandsCheckbox.checked = false;
+        
+        // Reload roles if roles module is loaded
+        if (window.loadRoles) {
+            await window.loadRoles();
+        }
+        
+    } catch (error) {
+        showToast(error.message || 'Rol yaratishda xatolik!', 'error');
+    } finally {
+        createBtn.disabled = false;
+        createBtn.innerHTML = '<i data-feather="plus"></i> Rol Qo\'shish';
+        if (window.feather) {
+            feather.replace();
+        }
+    }
+}
+
 export function toggleAccordion(e) {
     const item = e.target.closest('.accordion-item');
     if (!item) return;

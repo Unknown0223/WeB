@@ -28,11 +28,22 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
             const assignedPermissions = rolePermissions
                 .filter(rp => rp.role_name === role.role_name)
                 .map(rp => rp.permission_key);
+            
+            // SQLite'da 0 (false) va null o'rtasidagi farqni to'g'ri aniqlash
+            // Agar qiymat null yoki undefined bo'lsa, null qaytarish
+            // Agar qiymat 0 (false) yoki 1 (true) bo'lsa, boolean qaytarish
+            const requiresBrands = (role.requires_brands === null || role.requires_brands === undefined) 
+                ? null 
+                : Boolean(role.requires_brands);
+            const requiresLocations = (role.requires_locations === null || role.requires_locations === undefined) 
+                ? null 
+                : Boolean(role.requires_locations);
+            
             return {
                 role_name: role.role_name,
                 permissions: assignedPermissions,
-                requires_brands: role.requires_brands || false,
-                requires_locations: role.requires_locations || false
+                requires_brands: requiresBrands,
+                requires_locations: requiresLocations
             };
         });
 
@@ -131,11 +142,11 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
         
         console.log(`📝 [ROLES] Yangi rol yaratilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}, Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
         
-        // Create new role
+        // Create new role - null qiymatni qo'llab-quvvatlash
         await db('roles').insert({ 
             role_name,
-            requires_brands: Boolean(requires_brands),
-            requires_locations: Boolean(requires_locations)
+            requires_brands: requires_brands === null || requires_brands === undefined ? null : Boolean(requires_brands),
+            requires_locations: requires_locations === null || requires_locations === undefined ? null : Boolean(requires_locations)
         });
         
         console.log(`✅ [ROLES] Rol muvaffaqiyatli yaratildi: ${role_name}`);
@@ -181,9 +192,10 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
             return res.status(404).json({ message: 'Rol topilmadi' });
         }
         
+        // null qiymatni qo'llab-quvvatlash
         await db('roles').where('role_name', role_name).update({
-            requires_brands: Boolean(requires_brands),
-            requires_locations: Boolean(requires_locations)
+            requires_brands: requires_brands === null || requires_brands === undefined ? null : Boolean(requires_brands),
+            requires_locations: requires_locations === null || requires_locations === undefined ? null : Boolean(requires_locations)
         });
         
         console.log(`✅ [ROLES] Rol talablari yangilandi: ${role_name}`);

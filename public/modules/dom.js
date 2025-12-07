@@ -36,6 +36,10 @@ export const DOM = {
     deviceLimitInput: null,
     userLocationsGroup: null,
     locationsCheckboxList: null,
+    userSettingsGroup: null,
+    userRequiresLocations: null,
+    userRequiresBrands: null,
+    userBrandsGroup: null,
     // Xodimlar Statistikasi (KPI)
     employeeStatisticsPage: null,
     kpiMonthPicker: null,
@@ -193,6 +197,10 @@ function initDOM() {
     DOM.deviceLimitInput = document.getElementById('user-device-limit');
     DOM.userLocationsGroup = document.getElementById('user-locations-group');
     DOM.locationsCheckboxList = document.getElementById('locations-checkbox-list');
+    DOM.userSettingsGroup = document.getElementById('user-settings-group');
+    DOM.userRequiresLocations = document.getElementById('user-requires-locations');
+    DOM.userRequiresBrands = document.getElementById('user-requires-brands');
+    DOM.userBrandsGroup = document.getElementById('user-brands-group');
 
     // KPI
     DOM.employeeStatisticsPage = document.getElementById('employee-statistics');
@@ -242,6 +250,7 @@ function initDOM() {
     DOM.saveKpiSettingsBtn = document.getElementById('save-kpi-settings-btn');
     DOM.latePenaltyInput = document.getElementById('late-penalty-input');
     DOM.editPenaltyInput = document.getElementById('edit-penalty-input');
+    DOM.createRoleSettingsBtn = document.getElementById('create-role-settings-btn');
 
     // Branding
     DOM.logoTextInput = document.getElementById('logo-text-input');

@@ -6,42 +6,13 @@ const { sendToTelegram } = require('../utils/bot.js');
 
 const router = express.Router();
 
-// POST /api/telegram/register-chat - Mavjud foydalanuvchini botga ulash
-router.post('/register-chat', async (req, res) => {
-    const { chat_id, username, code } = req.body;
-    if (!chat_id || !code || !code.startsWith('connect_')) {
-        return res.status(400).json({ message: "Ma'lumotlar to'liq emas." });
-    }
-
-    try {
-        const parts = code.split('_');
-        if (parts.length < 3) return res.status(400).json({ message: "Kod formati noto'g'ri." });
-        
-        const userId = parts[1];
-        
-        // Avval bu chat_id ga ulangan boshqa foydalanuvchini tozalash
-        await db('users').where({ telegram_chat_id: chat_id }).update({ telegram_chat_id: null, telegram_username: null });
-        
-        // Yangi foydalanuvchini ulash
-        const result = await db('users').where({ id: userId }).update({
-            telegram_chat_id: chat_id,
-            telegram_username: username
-        });
-
-        if (result === 0) {
-            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
-        }
-
-        res.json({ status: 'success', message: 'Muvaffaqiyatli ulandi.' });
-    } catch (error) {
-        console.error("/api/telegram/register-chat xatoligi:", error);
-        res.status(500).json({ message: "Serverda kutilmagan xatolik." });
-    }
-});
+// Ro'yxatdan o'tish bilan bog'liq endpoint'lar olib tashlandi
+// Barcha tasdiqlashlar web'dan (admin panel) amalga oshiriladi
 
 // ===================================================================
 // === FOYDALANUVCHINI TASDIQLASHNI YAKUNLASH (YANGILANGAN MANTIQ) ===
 // ===================================================================
+// Bu endpoint endi faqat web'dan chaqiriladi
 router.post('/finalize-approval', async (req, res) => {
     const { user_id, role, locations = [], brands = [] } = req.body;
     
@@ -75,38 +46,8 @@ router.post('/finalize-approval', async (req, res) => {
         return res.status(400).json({ message: "Tanlangan rol mavjud emas." });
     }
     
-    // Rol talablarini aniqlash (null = belgilanmagan, true/false = belgilangan)
-    const isLocationsRequired = roleData.requires_locations !== undefined && roleData.requires_locations !== null 
-        ? roleData.requires_locations 
-        : null;
-    const isBrandsRequired = roleData.requires_brands !== undefined && roleData.requires_brands !== null 
-        ? roleData.requires_brands 
-        : null;
-    
-    console.log(`🔍 [TELEGRAM API] Rol talablari tekshirilmoqda.`);
-    console.log(`   - requires_locations: ${isLocationsRequired} (${typeof isLocationsRequired}), locations.length: ${locations.length}`);
-    console.log(`   - requires_brands: ${isBrandsRequired} (${typeof isBrandsRequired}), brands.length: ${brands.length}`);
-    
-    // Rol talablariga ko'ra validatsiya
-    // Faqat belgilangan (true) bo'lsa va locations bo'sh bo'lsa, xatolik
-    if (isLocationsRequired === true && locations.length === 0) {
-        console.log(`❌ [TELEGRAM API] Validatsiya xatosi: Filiallar majburiy, lekin tanlanmagan. Role: ${role}`);
-        return res.status(400).json({ message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.` });
-    }
-    
-    // Faqat belgilangan (true) bo'lsa va brands bo'sh bo'lsa, xatolik
-    if (isBrandsRequired === true && brands.length === 0) {
-        console.log(`❌ [TELEGRAM API] Validatsiya xatosi: Brendlar majburiy, lekin tanlanmagan. Role: ${role}`);
-        return res.status(400).json({ message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.` });
-    }
-    
-    // Agar null (belgilanmagan) bo'lsa, validatsiya o'tkazilmaydi (skip qilish mumkin)
-    if (isLocationsRequired === null) {
-        console.log(`✅ [TELEGRAM API] Filiallar belgilanmagan (null) - skip qilish mumkin. Locations: ${locations.length} ta`);
-    }
-    if (isBrandsRequired === null) {
-        console.log(`✅ [TELEGRAM API] Brendlar belgilanmagan (null) - skip qilish mumkin. Brands: ${brands.length} ta`);
-    }
+    // TODO: Bu yerda user-specific sozlamalarni tekshirish qo'shiladi
+    // Hozircha validatsiya o'tkazilmaydi
 
     try {
         // Foydalanuvchi allaqachon tasdiqlanmaganligini tekshirish
@@ -114,7 +55,8 @@ router.post('/finalize-approval', async (req, res) => {
         if (existingUser && existingUser.status === 'active') {
             return res.status(409).json({ message: "Bu foydalanuvchi allaqachon tasdiqlangan (ehtimol admin panel orqali)." });
         }
-        if (!existingUser || existingUser.status !== 'status_in_process') {
+        // Bot orqali yoki web'dan tasdiqlash uchun status_in_process yoki pending_approval bo'lishi mumkin
+        if (!existingUser || !['status_in_process', 'pending_approval'].includes(existingUser.status)) {
              return res.status(404).json({ message: "So'rov topilmadi yoki eskirgan. Ehtimol, jarayon bekor qilingan." });
         }
 

@@ -98,27 +98,30 @@ router.post('/register', async (req, res) => {
 
         if (!botUsername) {
             console.log(`⚠️ [REGISTER] Bot username topilmadi. Status: pending_approval ga o'zgartirildi`);
-            await db('users').where({ id: userId }).update({ status: 'pending_approval' });
-            
+        await db('users').where({ id: userId }).update({ status: 'pending_approval' });
+        
             console.log(`📤 [REGISTER] Admin'ga yangi foydalanuvchi so'rovi yuborilmoqda...`);
-            await sendToTelegram({
-                type: 'new_user_request',
-                user_id: userId,
-                username: username,
-                fullname: fullname
-            });
+        await sendToTelegram({
+            type: 'new_user_request',
+            user_id: userId,
+            username: username,
+            fullname: fullname
+        });
             console.log(`✅ [REGISTER] Admin'ga so'rov yuborildi. User ID: ${userId}`);
-            
+        
             return res.status(201).json({ 
-                status: 'pending_approval',
-                message: "So'rovingiz qabul qilindi. Administrator tasdiqlashini kuting." 
+            status: 'pending_approval',
+            message: "So'rovingiz qabul qilindi. Administrator tasdiqlashini kuting." 
             });
         }
+
+        // Foydalanuvchi statusini pending_telegram_subscription ga o'zgartirish
+        await db('users').where({ id: userId }).update({ status: 'pending_telegram_subscription' });
 
         const connectLink = `https://t.me/${botUsername}?start=subscribe_${userId}`;
         console.log(`🔗 [REGISTER] Bot obuna havolasi yaratildi. Link: ${connectLink}, User ID: ${userId}`);
 
-        res.status(201   ).json({
+        res.status(201).json({
             status: 'subscription_required',
             message: "Ro'yxatdan o'tish deyarli yakunlandi! So'rovingiz adminga yuborilishi uchun, iltimos, Telegram botimizga obuna bo'ling.",
             subscription_link: connectLink

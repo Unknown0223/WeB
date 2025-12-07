@@ -2760,6 +2760,43 @@
                             </div>
                             <button class="btn btn-primary" id="save-kpi-settings-btn"><i data-feather="save"></i> KPI Sozlamalarini Saqlash</button>
                         </div>
+                        
+                        <!-- Rol Qo'shish -->
+                        <div class="card settings-card" data-permission="roles:manage">
+                            <div class="settings-card-header">
+                                <div class="settings-card-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                    <i data-feather="user-plus"></i>
+                                </div>
+                                <div>
+                                    <h3 class="card-title">👤 Yangi Rol Qo'shish</h3>
+                                    <p class="card-subtitle">Tizimga yangi rol yaratish</p>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="new-role-name-settings">Rol Nomi</label>
+                                <input type="text" id="new-role-name-settings" class="form-control" placeholder="masalan: viewer, editor">
+                                <small class="form-text text-muted">Faqat lotin harflari va pastki chiziq (_) ishlatiladi</small>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="new-role-requires-locations-settings" style="margin-right: 8px;">
+                                    Filiallar belgilanishi shart
+                                </label>
+                                <small class="form-text text-muted" style="display: block; margin-top: 5px;">
+                                    Bu rol uchun foydalanuvchi tasdiqlanganda filiallar tanlanishi majburiy bo'ladi
+                                </small>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="new-role-requires-brands-settings" style="margin-right: 8px;">
+                                    Brendlar belgilanishi shart
+                                </label>
+                                <small class="form-text text-muted" style="display: block; margin-top: 5px;">
+                                    Bu rol uchun foydalanuvchi tasdiqlanganda brendlar tanlanishi majburiy bo'ladi
+                                </small>
+                            </div>
+                            <button class="btn btn-primary" id="create-role-settings-btn"><i data-feather="plus"></i> Rol Qo'shish</button>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -2803,6 +2840,36 @@
                     <label for="user-role">Rol</label>
                     <select id="user-role" class="form-control"></select>
                 </div>
+                
+                <!-- User-specific sozlamalar -->
+                <div class="form-group" id="user-settings-group" style="display: none;">
+                    <label style="font-weight: 600; margin-bottom: 10px; display: block;">Foydalanuvchi uchun sozlamalar:</label>
+                    <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 15px;">
+                        Bu sozlamalar faqat shu foydalanuvchi uchun ishlaydi. Rol sozlamalaridan ustun keladi.
+                    </p>
+                    
+                    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 200px;">
+                            <label style="display: block; margin-bottom: 8px; font-size: 14px;">Filiallar:</label>
+                            <select id="user-requires-locations" class="form-control" style="margin-bottom: 10px;">
+                                <option value="">Rol sozlamasiga qarab</option>
+                                <option value="true">Majburiy (kamida 1 ta tanlash kerak)</option>
+                                <option value="false">Ko'rsatilmaydi</option>
+                                <option value="null">Ixtiyoriy (skip qilish mumkin)</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1; min-width: 200px;">
+                            <label style="display: block; margin-bottom: 8px; font-size: 14px;">Brendlar:</label>
+                            <select id="user-requires-brands" class="form-control" style="margin-bottom: 10px;">
+                                <option value="">Rol sozlamasiga qarab</option>
+                                <option value="true">Majburiy (kamida 1 ta tanlash kerak)</option>
+                                <option value="false">Ko'rsatilmaydi</option>
+                                <option value="null">Ixtiyoriy (skip qilish mumkin)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="form-group">
                     <label for="user-device-limit">Ruxsat etilgan qurilmalar soni</label>
                     <input type="number" id="user-device-limit" class="form-control" value="1" min="1">
@@ -2854,6 +2921,21 @@
                         <div class="form-group">
                             <label for="approval-role">Rol</label>
                             <select id="approval-role" class="form-control" required></select>
+                        </div>
+                        <div class="form-group" id="approval-role-requirements-group" style="display: none;">
+                            <div style="padding: 20px; text-align: center; background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 10px; margin-bottom: 15px;">
+                                <i data-feather="alert-circle" style="width: 48px; height: 48px; color: #ffc107; margin-bottom: 10px;"></i>
+                                <p style="color: rgba(255,255,255,0.9); font-size: 14px; margin-bottom: 10px; font-weight: 600;">
+                                    Bu rol uchun shartlar belgilanmagan!
+                                </p>
+                                <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 15px;">
+                                    Shartlar belgilanmasa, foydalanuvchiga bu rolni berib bo'lmaydi. Iltimos, avval rol shartlarini belgilang.
+                                </p>
+                                <button type="button" id="set-role-requirements-btn" class="btn btn-warning">
+                                    <i data-feather="settings"></i>
+                                    Rol Shartini Kiritish
+                                </button>
+                            </div>
                         </div>
                         <div class="form-group" id="approval-locations-group" style="display: none;">
                             <label>Biriktirilgan filiallar:</label>

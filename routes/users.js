@@ -77,9 +77,33 @@ router.get('/', isAuthenticated, hasPermission('users:view'), async (req, res) =
 router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
     try {
         const pendingUsers = await db('users')
-            .whereIn('status', ['pending_approval', 'pending_telegram_subscription', 'status_in_process']) // status_in_process qo'shildi
-            .select('id', 'username', 'fullname', 'created_at', 'status');
-        res.json(pendingUsers);
+            .whereIn('status', ['pending_approval', 'pending_telegram_subscription', 'status_in_process'])
+            .select(
+                'id', 
+                'username', 
+                'fullname', 
+                'created_at', 
+                'status',
+                'telegram_chat_id',
+                'telegram_username'
+            )
+            .orderBy('created_at', 'desc');
+        
+        // Ma'lumotlarni formatlash
+        const formattedUsers = pendingUsers.map(user => ({
+            id: user.id,
+            username: user.username,
+            full_name: user.fullname, // frontend'da full_name ishlatiladi
+            fullname: user.fullname, // eski format uchun
+            created_at: user.created_at,
+            status: user.status,
+            telegram_id: user.telegram_chat_id, // frontend'da telegram_id ishlatiladi
+            telegram_chat_id: user.telegram_chat_id,
+            telegram_username: user.telegram_username,
+            telegram_connection_status: user.telegram_chat_id ? 'subscribed' : null
+        }));
+        
+        res.json(formattedUsers);
     } catch (error) {
         console.error("/api/users/pending GET xatoligi:", error);
         res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
@@ -119,6 +143,28 @@ router.get('/me/sessions', isAuthenticated, async (req, res) => {
     }
 });
 
+// User-specific sozlamalarni olish
+router.get('/:id/settings', isAuthenticated, hasPermission('users:view'), async (req, res) => {
+    const userId = req.params.id;
+    try {
+        const settings = await db('user_specific_settings')
+            .where({ user_id: userId })
+            .first();
+        
+        if (!settings) {
+            return res.json({ requires_locations: null, requires_brands: null });
+        }
+        
+        res.json({
+            requires_locations: settings.requires_locations,
+            requires_brands: settings.requires_brands
+        });
+    } catch (error) {
+        console.error(`/api/users/${userId}/settings GET xatoligi:`, error);
+        res.status(500).json({ message: "Sozlamalarni olishda xatolik." });
+    }
+});
+
 // Foydalanuvchining aktiv sessiyalarini olish (Admin uchun)
 router.get('/:id/sessions', isAuthenticated, hasPermission('users:manage_sessions'), async (req, res) => {
     const userId = req.params.id;
@@ -150,7 +196,7 @@ router.get('/:id/sessions', isAuthenticated, hasPermission('users:manage_session
 
 // Yangi foydalanuvchi yaratish (Admin tomonidan)
 router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res) => {
-    const { username, password, role, locations = [], device_limit = 1, fullname, brands = [] } = req.body;
+    const { username, password, role, locations = [], device_limit = 1, fullname, brands = [], user_settings } = req.body;
     const adminId = req.session.user.id;
     const currentUserRole = req.session.user.role;
     const ipAddress = req.session.ip_address;
@@ -191,6 +237,23 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
             await db('user_brands').insert(brandRecords);
         }
         
+        // User-specific sozlamalarni saqlash
+        if (user_settings) {
+            await db('user_specific_settings')
+                .insert({
+                    user_id: userId,
+                    role: role,
+                    requires_locations: user_settings.requires_locations,
+                    requires_brands: user_settings.requires_brands
+                })
+                .onConflict(['user_id', 'role'])
+                .merge({
+                    requires_locations: user_settings.requires_locations,
+                    requires_brands: user_settings.requires_brands,
+                    updated_at: db.fn.now()
+                });
+        }
+        
         // Super admin yaratilganda avtomatik login qilish imkoniyati
         // Super admin yaratilganda, login ma'lumotlarini qaytarish (faqat bir marta)
         if (role === 'super_admin') {
@@ -220,7 +283,7 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
 // Foydalanuvchini tahrirlash
 router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
     const userId = req.params.id;
-    const { role, locations = [], device_limit, fullname, brands = [] } = req.body;
+    const { role, locations = [], device_limit, fullname, brands = [], user_settings } = req.body;
     const adminId = req.session.user.id;
     const currentUserRole = req.session.user.role;
     const ipAddress = req.session.ip_address;
@@ -262,6 +325,23 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
             }));
             await db('user_brands').insert(brandRecords);
         }
+        
+        // User-specific sozlamalarni yangilash
+        if (user_settings) {
+            await db('user_specific_settings')
+                .insert({
+                    user_id: userId,
+                    role: role,
+                    requires_locations: user_settings.requires_locations,
+                    requires_brands: user_settings.requires_brands
+                })
+                .onConflict(['user_id', 'role'])
+                .merge({
+                    requires_locations: user_settings.requires_locations,
+                    requires_brands: user_settings.requires_brands,
+                    updated_at: db.fn.now()
+                });
+        }
 
         await refreshUserSessions(parseInt(userId, 10));
 
@@ -301,7 +381,22 @@ router.put('/:id/status', isAuthenticated, hasPermission('users:change_status'),
 // ===================================================================
 // === FOYDALANUVCHI SO'ROVINI TASDIQLASH (YANGILANGAN TO'LIQ MANTIQ) ===
 // ===================================================================
-router.put('/:id/approve', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+// Middleware'lardan oldin log qo'shish
+router.put('/:id/approve', (req, res, next) => {
+    console.log('🔍 [BACKEND] PUT /:id/approve endpoint\'ga so\'rov kelindi');
+    console.log(`   - Method: ${req.method}`);
+    console.log(`   - Path: ${req.path}`);
+    console.log(`   - Original URL: ${req.originalUrl}`);
+    console.log(`   - User ID param: ${req.params.id}`);
+    console.log(`   - Body:`, JSON.stringify(req.body, null, 2));
+    console.log(`   - Session ID: ${req.sessionID}`);
+    console.log(`   - Session user: ${req.session?.user ? 'MAVJUD' : 'YO\'Q'}`);
+    next();
+}, isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    console.log('🚀 ========================================');
+    console.log('🚀 [BACKEND] Foydalanuvchi tasdiqlash so\'rovi kelindi');
+    console.log('🚀 ========================================');
+    
     const userId = req.params.id;
     const { role, locations = [], brands = [] } = req.body;
     const adminId = req.session.user.id;
@@ -309,124 +404,275 @@ router.put('/:id/approve', isAuthenticated, hasPermission('users:edit'), async (
     const ipAddress = req.session.ip_address;
     const userAgent = req.session.user_agent;
 
+    console.log(`📝 [BACKEND] 1. So'rov ma'lumotlari:`);
+    console.log(`   - User ID: ${userId}`);
+    console.log(`   - Role: ${role}`);
+    console.log(`   - Locations: ${JSON.stringify(locations)}`);
+    console.log(`   - Brands: ${JSON.stringify(brands)}`);
+    console.log(`   - Admin ID: ${adminId}`);
+    console.log(`   - Admin Role: ${currentUserRole}`);
+    console.log(`   - IP Address: ${ipAddress}`);
+
     if (!role) {
+        console.error(`❌ [BACKEND] 2. XATOLIK: Rol tanlanmagan!`);
         return res.status(400).json({ message: "Rol tanlanishi shart." });
     }
     
     // Super admin yaratish faqat super admin tomonidan mumkin
     if (role === 'super_admin' && currentUserRole !== 'super_admin') {
+        console.error(`❌ [BACKEND] 2. XATOLIK: Super admin yaratishga urinish!`);
+        console.error(`   - Requested role: ${role}`);
+        console.error(`   - Current user role: ${currentUserRole}`);
         return res.status(403).json({ message: "Super admin yaratish faqat super admin tomonidan mumkin." });
     }
     
     // Rol bazada mavjudligini tekshirish va talablarini olish
+    console.log(`🔍 [BACKEND] 3. Rol ma'lumotlarini bazadan olish...`);
     const roleData = await db('roles').where({ role_name: role }).first();
     if (!roleData) {
-        console.log(`❌ [BACKEND] Rol topilmadi. Role: ${role}`);
+        console.error(`❌ [BACKEND] 3. XATOLIK: Rol topilmadi!`);
+        console.error(`   - Requested role: ${role}`);
         return res.status(400).json({ message: "Tanlangan rol mavjud emas." });
     }
     
-    // Rol talablarini aniqlash (null = belgilanmagan, true/false = belgilangan)
-    const isLocationsRequired = roleData.requires_locations !== undefined && roleData.requires_locations !== null 
-        ? roleData.requires_locations 
-        : null;
-    const isBrandsRequired = roleData.requires_brands !== undefined && roleData.requires_brands !== null 
-        ? roleData.requires_brands 
-        : null;
+    console.log(`✅ [BACKEND] 3. Rol topildi:`);
+    console.log(`   - Role Name: ${roleData.role_name}`);
+    console.log(`   - Requires Locations: ${roleData.requires_locations} (type: ${typeof roleData.requires_locations})`);
+    console.log(`   - Requires Brands: ${roleData.requires_brands} (type: ${typeof roleData.requires_brands})`);
+    console.log(`   - Requires Locations === null: ${roleData.requires_locations === null}`);
+    console.log(`   - Requires Brands === null: ${roleData.requires_brands === null}`);
+    console.log(`   - Requires Locations === undefined: ${roleData.requires_locations === undefined}`);
+    console.log(`   - Requires Brands === undefined: ${roleData.requires_brands === undefined}`);
+    console.log(`   - Full Role Data:`, JSON.stringify(roleData, null, 2));
     
-    console.log(`🔍 [BACKEND] Rol talablari tekshirilmoqda. User ID: ${userId}, Role: ${role}`);
-    console.log(`   - requires_locations: ${isLocationsRequired} (${typeof isLocationsRequired}), locations.length: ${locations.length}`);
-    console.log(`   - requires_brands: ${isBrandsRequired} (${typeof isBrandsRequired}), brands.length: ${brands.length}`);
+    // Rol shartlarini tekshirish
+    // SQLite'da 0 (false) va null o'rtasidagi farqni to'g'ri aniqlash
+    // Agar qiymat null yoki undefined bo'lsa, bu "belgilanmagan" degan ma'noni anglatadi
+    console.log(`🔍 [BACKEND] 4. Rol shartlarini tekshirish...`);
     
-    // Rol talablariga ko'ra validatsiya
-    // Faqat belgilangan (true) bo'lsa va locations bo'sh bo'lsa, xatolik
-    if (isLocationsRequired === true && locations.length === 0) {
-        console.log(`❌ [BACKEND] Validatsiya xatosi: Filiallar majburiy, lekin tanlanmagan. Role: ${role}`);
-        return res.status(400).json({ message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.` });
+    // SQLite'da null tekshiruvi: agar qiymat null yoki undefined bo'lsa
+    const isLocationsNull = (roleData.requires_locations === null || roleData.requires_locations === undefined);
+    const isBrandsNull = (roleData.requires_brands === null || roleData.requires_brands === undefined);
+    
+    console.log(`   - isLocationsNull: ${isLocationsNull}`);
+    console.log(`   - isBrandsNull: ${isBrandsNull}`);
+    
+    // Agar null bo'lsa, null qaytarish, aks holda boolean qiymatni qaytarish
+    const isLocationsRequired = isLocationsNull 
+        ? null 
+        : Boolean(roleData.requires_locations);
+    const isBrandsRequired = isBrandsNull 
+        ? null 
+        : Boolean(roleData.requires_brands);
+    
+    console.log(`   - isLocationsRequired: ${isLocationsRequired} (type: ${typeof isLocationsRequired})`);
+    console.log(`   - isBrandsRequired: ${isBrandsRequired} (type: ${typeof isBrandsRequired})`);
+    console.log(`   - isLocationsRequired === null: ${isLocationsRequired === null}`);
+    console.log(`   - isBrandsRequired === null: ${isBrandsRequired === null}`);
+    
+    // Agar shartlar belgilanmagan bo'lsa, tasdiqlashni to'xtatish
+    const isLocationsUndefined = (isLocationsRequired === null || isLocationsRequired === undefined);
+    const isBrandsUndefined = (isBrandsRequired === null || isBrandsRequired === undefined);
+    const isRequirementsUndefined = isLocationsUndefined || isBrandsUndefined;
+    
+    console.log(`   - isLocationsUndefined: ${isLocationsUndefined}`);
+    console.log(`   - isBrandsUndefined: ${isBrandsUndefined}`);
+    console.log(`   - isRequirementsUndefined: ${isRequirementsUndefined}`);
+    
+    if (isRequirementsUndefined) {
+        console.error(`❌ [BACKEND] 4. XATOLIK: Rol shartlari belgilanmagan!`);
+        console.error(`   - Role: ${role}`);
+        console.error(`   - requires_locations: ${roleData.requires_locations} (${typeof roleData.requires_locations})`);
+        console.error(`   - requires_brands: ${roleData.requires_brands} (${typeof roleData.requires_brands})`);
+        console.error(`   - Tasdiqlash to'xtatilmoqda...`);
+        return res.status(400).json({ 
+            message: `"${role}" roli uchun shartlar belgilanmagan. Avval rol shartlarini belgilang.`,
+            requires_locations: roleData.requires_locations,
+            requires_brands: roleData.requires_brands
+        });
     }
     
-    // Faqat belgilangan (true) bo'lsa va brands bo'sh bo'lsa, xatolik
-    if (isBrandsRequired === true && brands.length === 0) {
-        console.log(`❌ [BACKEND] Validatsiya xatosi: Brendlar majburiy, lekin tanlanmagan. Role: ${role}`);
-        return res.status(400).json({ message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.` });
+    console.log(`✅ [BACKEND] 4. Rol shartlari belgilangan. Validatsiyaga o'tilmoqda...`);
+    
+    // Validatsiya: Agar shartlar majburiy bo'lsa, tanlanganlar bo'lishi kerak
+    console.log(`🔍 [BACKEND] 5. Validatsiya tekshiruvi...`);
+    
+    if (isLocationsRequired === true) {
+        console.log(`   - Filiallar majburiy (true)`);
+        console.log(`   - Tanlangan filiallar soni: ${locations.length}`);
+        if (locations.length === 0) {
+            console.error(`   ❌ XATOLIK: Filiallar majburiy, lekin tanlanmagan!`);
+            return res.status(400).json({ 
+                message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.`,
+                requires_locations: true,
+                locations_provided: locations.length
+            });
+        }
+        console.log(`   ✅ Filiallar validatsiyasi o'tdi`);
+    } else if (isLocationsRequired === false) {
+        console.log(`   - Filiallar kerak emas (false)`);
+    } else {
+        console.log(`   - Filiallar ixtiyoriy (null)`);
     }
     
-    // Agar null (belgilanmagan) bo'lsa, validatsiya o'tkazilmaydi (skip qilish mumkin)
-    if (isLocationsRequired === null) {
-        console.log(`✅ [BACKEND] Filiallar belgilanmagan (null) - skip qilish mumkin. Locations: ${locations.length} ta`);
+    if (isBrandsRequired === true) {
+        console.log(`   - Brendlar majburiy (true)`);
+        console.log(`   - Tanlangan brendlar soni: ${brands.length}`);
+        if (brands.length === 0) {
+            console.error(`   ❌ XATOLIK: Brendlar majburiy, lekin tanlanmagan!`);
+            return res.status(400).json({ 
+                message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.`,
+                requires_brands: true,
+                brands_provided: brands.length
+            });
+        }
+        console.log(`   ✅ Brendlar validatsiyasi o'tdi`);
+    } else if (isBrandsRequired === false) {
+        console.log(`   - Brendlar kerak emas (false)`);
+    } else {
+        console.log(`   - Brendlar ixtiyoriy (null)`);
     }
-    if (isBrandsRequired === null) {
-        console.log(`✅ [BACKEND] Brendlar belgilanmagan (null) - skip qilish mumkin. Brands: ${brands.length} ta`);
-    }
+    
+    console.log(`✅ [BACKEND] 5. Barcha validatsiyalar o'tdi.`);
 
     try {
         // 1. Foydalanuvchi va uning vaqtinchalik ma'lumotlarini tekshirish
+        console.log(`🔍 [BACKEND] 6. Foydalanuvchi ma'lumotlarini bazadan olish...`);
         const user = await db('users').where({ id: userId }).first();
         if (!user || !['pending_approval', 'pending_telegram_subscription'].includes(user.status)) {
+            console.error(`❌ [BACKEND] 6. XATOLIK: Foydalanuvchi topilmadi yoki allaqachon tasdiqlangan!`);
+            console.error(`   - User ID: ${userId}`);
+            console.error(`   - User found: ${user ? 'HA' : 'YO\'Q'}`);
+            if (user) {
+                console.error(`   - User status: ${user.status}`);
+            }
             return res.status(404).json({ message: "Foydalanuvchi topilmadi yoki allaqachon tasdiqlangan." });
         }
+        
+        console.log(`✅ [BACKEND] 6. Foydalanuvchi topildi:`);
+        console.log(`   - Username: ${user.username}`);
+        console.log(`   - Fullname: ${user.fullname}`);
+        console.log(`   - Status: ${user.status}`);
+        console.log(`   - Telegram Chat ID: ${user.telegram_chat_id || 'YO\'Q'}`);
 
         const tempReg = await db('pending_registrations').where({ user_id: userId }).first();
         if (!tempReg) {
-             return res.status(404).json({ message: "Ro'yxatdan o'tish so'rovi topilmadi yoki eskirgan." });
+            console.error(`❌ [BACKEND] 6. XATOLIK: Ro'yxatdan o'tish so'rovi topilmadi!`);
+            console.error(`   - User ID: ${userId}`);
+            return res.status(404).json({ message: "Ro'yxatdan o'tish so'rovi topilmadi yoki eskirgan." });
         }
+        
+        console.log(`✅ [BACKEND] 6. Ro'yxatdan o'tish so'rovi topildi`);
         const userData = JSON.parse(tempReg.user_data);
         const { password, secret_word } = userData;
 
         // 2. Foydalanuvchini aktivlashtirish (bitta tranzaksiya ichida)
+        console.log(`💾 [BACKEND] 7. Ma'lumotlarni bazaga saqlash...`);
         await db.transaction(async trx => {
+            console.log(`   - Foydalanuvchi statusini yangilash: active, role: ${role}`);
             await trx('users').where({ id: userId }).update({
                 status: 'active',
                 role: role,
                 must_delete_creds: true // Kirish ma'lumotlari yuborilgach, xabarni o'chirish uchun belgi
             });
 
+            console.log(`   - Eski filiallarni o'chirish...`);
             await trx('user_locations').where({ user_id: userId }).del();
             if (locations && locations.length > 0) {
+                console.log(`   - Yangi filiallarni qo'shish: ${locations.length} ta`);
                 const locationsToInsert = locations.map(loc => ({ user_id: userId, location_name: loc }));
                 await trx('user_locations').insert(locationsToInsert);
+                console.log(`   ✅ Filiallar saqlandi:`, locations);
+            } else {
+                console.log(`   - Filiallar qo'shilmadi (bo'sh)`);
             }
             
             // Manager va Admin uchun brendlarni saqlash
+            console.log(`   - Eski brendlarni o'chirish...`);
             await trx('user_brands').where({ user_id: userId }).del();
             if ((role === 'manager' || role === 'admin') && brands && brands.length > 0) {
+                console.log(`   - Yangi brendlarni qo'shish: ${brands.length} ta`);
                 const brandRecords = brands.map(brandId => ({
                     user_id: userId,
                     brand_id: brandId
                 }));
                 await trx('user_brands').insert(brandRecords);
+                console.log(`   ✅ Brendlar saqlandi:`, brands);
+            } else {
+                console.log(`   - Brendlar qo'shilmadi (bo'sh yoki rol mos emas)`);
             }
         });
+        console.log(`✅ [BACKEND] 7. Ma'lumotlar muvaffaqiyatli saqlandi`);
 
         // 3. Foydalanuvchiga kirish ma'lumotlarini Telegram orqali yuborish
+        console.log(`📨 [BACKEND] 8. Telegram orqali kirish ma'lumotlarini yuborish...`);
         let credentialsSent = false;
         if (user.telegram_chat_id) {
-            await sendToTelegram({
-                type: 'user_approved_credentials',
-                chat_id: user.telegram_chat_id,
-                user_id: userId,
-                fullname: user.fullname,
-                username: user.username,
-                password: password,
-                secret_word: secret_word
-            });
-            credentialsSent = true;
+            console.log(`   - Telegram Chat ID: ${user.telegram_chat_id}`);
+            try {
+                await sendToTelegram({
+                    type: 'user_approved_credentials',
+                    chat_id: user.telegram_chat_id,
+                    user_id: userId,
+                    fullname: user.fullname,
+                    username: user.username,
+                    password: password,
+                    secret_word: secret_word
+                });
+                credentialsSent = true;
+                console.log(`   ✅ Kirish ma'lumotlari Telegramga yuborildi`);
+            } catch (telegramError) {
+                console.error(`   ❌ Telegram yuborishda xatolik:`, telegramError);
+            }
+        } else {
+            console.log(`   - Telegram Chat ID yo'q, kirish ma'lumotlari yuborilmaydi`);
         }
 
         // 4. Vaqtinchalik ma'lumotlarni tozalash
+        console.log(`🗑️ [BACKEND] 9. Vaqtinchalik ma'lumotlarni tozalash...`);
         await db('pending_registrations').where({ user_id: userId }).del();
+        console.log(`   ✅ Vaqtinchalik ma'lumotlar tozalandi`);
 
         // 5. Audit jurnaliga yozish
-        await userRepository.logAction(adminId, 'approve_user', 'user', userId, { approved_role: role, locations, ip: ipAddress, userAgent });
+        console.log(`📝 [BACKEND] 10. Audit jurnaliga yozish...`);
+        await userRepository.logAction(adminId, 'approve_user', 'user', userId, { 
+            approved_role: role, 
+            locations, 
+            brands,
+            requires_locations: roleData.requires_locations,
+            requires_brands: roleData.requires_brands,
+            ip: ipAddress, 
+            userAgent 
+        });
+        console.log(`   ✅ Audit jurnaliga yozildi`);
         
         // 6. Adminga yakuniy javobni qaytarish
         const message = `Foydalanuvchi muvaffaqiyatli tasdiqlandi. ${credentialsSent ? "Kirish ma'lumotlari uning Telegramiga yuborildi." : "Foydalanuvchi botga ulanmaganligi sababli kirish ma'lumotlari yuborilmadi."}`;
+        
+        console.log(`✅ [BACKEND] 11. Muvaffaqiyatli yakunlandi!`);
+        console.log(`   - User ID: ${userId}`);
+        console.log(`   - Role: ${role}`);
+        console.log(`   - Locations: ${locations.length} ta`);
+        console.log(`   - Brands: ${brands.length} ta`);
+        console.log(`   - Credentials Sent: ${credentialsSent}`);
+        console.log('✅ ========================================');
+        console.log('✅ [BACKEND] Tasdiqlash jarayoni muvaffaqiyatli yakunlandi!');
+        console.log('✅ ========================================');
+        
         res.json({ 
             message: message,
             credentials_sent: credentialsSent
         });
 
     } catch (error) {
-        console.error(`/api/users/${userId}/approve PUT xatoligi:`, error);
+        console.error('❌ ========================================');
+        console.error(`❌ [BACKEND] XATOLIK YUZ BERDI!`);
+        console.error(`❌ [BACKEND] Endpoint: /api/users/${userId}/approve`);
+        console.error(`❌ [BACKEND] Method: PUT`);
+        console.error(`❌ [BACKEND] Error:`, error);
+        console.error(`❌ [BACKEND] Error Stack:`, error.stack);
+        console.error(`❌ [BACKEND] Request Body:`, JSON.stringify(req.body, null, 2));
+        console.error('❌ ========================================');
         res.status(500).json({ message: "Foydalanuvchini tasdiqlashda kutilmagan xatolik." });
     }
 });

@@ -317,9 +317,13 @@ body.admin-page {
 }
 
 /* YANGI STIL: So'rovlar soni uchun badge - interaktiv animatsiya */
+.nav-link {
+    position: relative;
+}
+
 .badge-count {
     position: absolute;
-    right: 15px;
+    right: 12px;
     top: 50%;
     transform: translateY(-50%);
     background: linear-gradient(135deg, var(--red-color) 0%, #c82333 100%);
@@ -3697,11 +3701,17 @@ input.form-control.comparison-input {
     transition: all 0.3s ease;
 }
 
+.modal-body .form-control option {
+    background: #1a1a2e;
+    color: #fff;
+}
+
 .modal-body .form-control:focus {
     outline: none;
     border-color: #667eea;
     background: rgba(255, 255, 255, 0.08);
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    color: var(--text-primary, #fff);
 }
 
 .modal-body .form-text {
