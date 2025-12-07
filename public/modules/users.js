@@ -1361,29 +1361,22 @@ export async function submitUserApproval(e) {
     
     console.log(`   - requires_locations: ${isLocationsRequired} (type: ${typeof isLocationsRequired})`);
     console.log(`   - requires_brands: ${isBrandsRequired} (type: ${typeof isBrandsRequired})`);
-    console.log(`   - requires_locations === null: ${isLocationsRequired === null}`);
-    console.log(`   - requires_locations === undefined: ${isLocationsRequired === undefined}`);
-    console.log(`   - requires_brands === null: ${isBrandsRequired === null}`);
-    console.log(`   - requires_brands === undefined: ${isBrandsRequired === undefined}`);
     
     // Agar shartlar belgilanmagan bo'lsa, tasdiqlashni to'xtatish
-    // Agar kamida bitta shart null yoki undefined bo'lsa, tasdiqlash bloklanishi kerak
     const isLocationsUndefined = (isLocationsRequired === null || isLocationsRequired === undefined);
     const isBrandsUndefined = (isBrandsRequired === null || isBrandsRequired === undefined);
     const isRequirementsUndefined = isLocationsUndefined || isBrandsUndefined;
     
     console.log(`🔍 [TASDIQLASH] 4. Shartlar belgilanmaganligini tekshirish:`);
-    console.log(`   - isLocationsUndefined: ${isLocationsUndefined}`);
-    console.log(`   - isBrandsUndefined: ${isBrandsUndefined}`);
     console.log(`   - isRequirementsUndefined: ${isRequirementsUndefined}`);
-    console.log(`   - Tekshiruv: Agar kamida bitta shart null/undefined bo'lsa, tasdiqlash bloklanadi`);
     
+    // Agar shartlar belgilanmagan bo'lsa, tasdiqlashni to'xtatish
     if (isRequirementsUndefined) {
         console.log(`❌ [TASDIQLASH] 5. XATOLIK: Rol shartlari belgilanmagan!`);
-        console.log(`   - isLocationsRequired: ${isLocationsRequired} (${typeof isLocationsRequired})`);
-        console.log(`   - isBrandsRequired: ${isBrandsRequired} (${typeof isBrandsRequired})`);
-        console.log(`   - Tasdiqlash to'xtatilmoqda...`);
-        showToast(`"${role}" roli uchun shartlar belgilanmagan. Avval rol shartlarini belgilang.`, true);
+        console.log(`   - Role: ${role}`);
+        console.log(`   - requires_locations: ${roleData?.requires_locations}`);
+        console.log(`   - requires_brands: ${roleData?.requires_brands}`);
+        showToast(`"${role}" roli uchun shartlar belgilanmagan. Avval shart belgilanishi kerak.`, true);
         return;
     }
     
@@ -1400,30 +1393,15 @@ export async function submitUserApproval(e) {
     // FILIALLAR VALIDATSIYASI
     console.log(`📍 [TASDIQLASH] 7. Filiallar validatsiyasi...`);
     console.log(`   - isLocationsRequired: ${isLocationsRequired} (type: ${typeof isLocationsRequired})`);
-    console.log(`   - isLocationsRequired === null: ${isLocationsRequired === null}`);
-    console.log(`   - isLocationsRequired === undefined: ${isLocationsRequired === undefined}`);
-    console.log(`   - isLocationsRequired === true: ${isLocationsRequired === true}`);
-    console.log(`   - isLocationsRequired === false: ${isLocationsRequired === false}`);
-    console.log(`   - roleData.requires_locations: ${roleData?.requires_locations} (type: ${typeof roleData?.requires_locations})`);
     
-    // Filiallar checkboxlarini topish
-    const locationCheckboxes = document.querySelectorAll('#approval-locations-checkbox-list input:checked');
-    const selectedLocations = Array.from(locationCheckboxes).map(cb => cb.value);
-    console.log(`   - Tanlangan filiallar soni: ${selectedLocations.length}`);
-    console.log(`   - Tanlangan filiallar:`, selectedLocations);
-    
-    // Eslatma: Agar isLocationsRequired === null bo'lsa, bu kodga yetib bormaydi, chunki yuqorida bloklangan
-    if (isLocationsRequired === null || isLocationsRequired === undefined) {
-        // Bu kodga yetib bormaydi, chunki yuqorida bloklangan
-        console.error(`   ❌ XATOLIK: Filiallar shartlari belgilanmagan, lekin kodga yetib keldi!`);
-        showToast(`"${role}" roli uchun filiallar shartlari belgilanmagan. Avval rol shartlarini belgilang.`, true);
-        return;
-    } else if (isLocationsRequired === true) {
-        // Belgilangan va majburiy
+    if (isLocationsRequired === true) {
+        // Majburiy - filiallar tanlash kerak
+        const locationCheckboxes = document.querySelectorAll('#approval-locations-checkbox-list input:checked');
+        const selectedLocations = Array.from(locationCheckboxes).map(cb => cb.value);
         data.locations = selectedLocations;
-        console.log(`   ✅ Filiallar majburiy (true) - tanlanganlar yuborilmoqda: ${data.locations.length} ta`);
         
-        // Validatsiya: agar majburiy bo'lsa va tanlanmagan bo'lsa, xatolik
+        console.log(`   - Tanlangan filiallar soni: ${selectedLocations.length}`);
+        
         if (data.locations.length === 0) {
             console.log(`   ❌ XATOLIK: Filiallar majburiy, lekin tanlanmagan!`);
             showToast(`"${role}" roli uchun kamida bitta filial tanlanishi shart.`, true);
@@ -1432,36 +1410,21 @@ export async function submitUserApproval(e) {
         console.log(`   ✅ Filiallar validatsiyasi o'tdi`);
     } else {
         // false - filiallar kerak emas
-        console.log(`   ✅ Filiallar kerak emas (false) - yuborilmaydi`);
+        console.log(`   ✅ Filiallar kerak emas (false)`);
     }
     
     // BRENDLAR VALIDATSIYASI
     console.log(`🏷️ [TASDIQLASH] 8. Brendlar validatsiyasi...`);
     console.log(`   - isBrandsRequired: ${isBrandsRequired} (type: ${typeof isBrandsRequired})`);
-    console.log(`   - isBrandsRequired === null: ${isBrandsRequired === null}`);
-    console.log(`   - isBrandsRequired === undefined: ${isBrandsRequired === undefined}`);
-    console.log(`   - isBrandsRequired === true: ${isBrandsRequired === true}`);
-    console.log(`   - isBrandsRequired === false: ${isBrandsRequired === false}`);
-    console.log(`   - roleData.requires_brands: ${roleData?.requires_brands} (type: ${typeof roleData?.requires_brands})`);
     
-    // Brendlar checkboxlarini topish
-    const brandCheckboxes = document.querySelectorAll('#approval-brands-list input:checked');
-    const selectedBrands = Array.from(brandCheckboxes).map(cb => parseInt(cb.value));
-    console.log(`   - Tanlangan brendlar soni: ${selectedBrands.length}`);
-    console.log(`   - Tanlangan brendlar:`, selectedBrands);
-    
-    // Eslatma: Agar isBrandsRequired === null bo'lsa, bu kodga yetib bormaydi, chunki yuqorida bloklangan
-    if (isBrandsRequired === null || isBrandsRequired === undefined) {
-        // Bu kodga yetib bormaydi, chunki yuqorida bloklangan
-        console.error(`   ❌ XATOLIK: Brendlar shartlari belgilanmagan, lekin kodga yetib keldi!`);
-        showToast(`"${role}" roli uchun brendlar shartlari belgilanmagan. Avval rol shartlarini belgilang.`, true);
-        return;
-    } else if (isBrandsRequired === true) {
-        // Belgilangan va majburiy
+    if (isBrandsRequired === true) {
+        // Majburiy - brendlar tanlash kerak
+        const brandCheckboxes = document.querySelectorAll('#approval-brands-list input:checked');
+        const selectedBrands = Array.from(brandCheckboxes).map(cb => parseInt(cb.value));
         data.brands = selectedBrands;
-        console.log(`   ✅ Brendlar majburiy (true) - tanlanganlar yuborilmoqda: ${data.brands.length} ta`);
         
-        // Validatsiya: agar majburiy bo'lsa va tanlanmagan bo'lsa, xatolik
+        console.log(`   - Tanlangan brendlar soni: ${selectedBrands.length}`);
+        
         if (data.brands.length === 0) {
             console.log(`   ❌ XATOLIK: Brendlar majburiy, lekin tanlanmagan!`);
             showToast(`"${role}" roli uchun kamida bitta brend tanlanishi shart.`, true);
@@ -1470,7 +1433,7 @@ export async function submitUserApproval(e) {
         console.log(`   ✅ Brendlar validatsiyasi o'tdi`);
     } else {
         // false - brendlar kerak emas
-        console.log(`   ✅ Brendlar kerak emas (false) - yuborilmaydi`);
+        console.log(`   ✅ Brendlar kerak emas (false)`);
     }
     
     console.log(`📤 [TASDIQLASH] 9. Barcha validatsiyalar o'tdi. API'ga yuborilmoqda...`);
@@ -2168,8 +2131,10 @@ function renderModernRequests() {
     const container = document.getElementById('pending-users-list');
     if (!container) return;
 
-    // console.log('🔍 state.pendingUsers:', state.pendingUsers);
-    // console.log('🔍 state.users (pending only):', state.users ? state.users.filter(u => u.status === 'pending') : 'state.users is null');
+    console.log('🔍 [RENDER] renderModernRequests boshlandi...');
+    console.log('🔍 [RENDER] state.pendingUsers:', state.pendingUsers);
+    console.log('🔍 [RENDER] state.pendingUsers length:', state.pendingUsers ? state.pendingUsers.length : 0);
+    console.log('🔍 [RENDER] state.users (pending only):', state.users ? state.users.filter(u => u.status === 'pending' || u.status === 'pending_approval' || u.status === 'pending_telegram_subscription' || u.status === 'status_in_process') : 'state.users is null');
 
     // Get pending users (requests) - use state.pendingUsers if available, otherwise filter state.users
     let requests = [];
@@ -2177,13 +2142,21 @@ function renderModernRequests() {
     if (state.pendingUsers && state.pendingUsers.length > 0) {
         // Use dedicated pending users array
         requests = [...state.pendingUsers];
+        console.log(`✅ [RENDER] state.pendingUsers dan ${requests.length} ta so'rov olingan`);
     } else if (state.users && state.users.length > 0) {
         // Fallback: filter from all users
-        requests = state.users.filter(u => u.status === 'pending');
+        requests = state.users.filter(u => u.status === 'pending' || u.status === 'pending_approval' || u.status === 'pending_telegram_subscription' || u.status === 'status_in_process');
+        console.log(`✅ [RENDER] state.users dan ${requests.length} ta so'rov filter qilindi`);
+    } else {
+        console.log('⚠️ [RENDER] Hech qanday so\'rov topilmadi');
     }
+    
+    console.log(`📋 [RENDER] Filter qo'llanilishidan oldin so'rovlar soni: ${requests.length}`);
 
     // Apply status filter
     if (currentRequestsFilter.status) {
+        const beforeFilter = requests.length;
+        console.log(`🔍 [RENDER] Status filter qo'llanilmoqda: ${currentRequestsFilter.status}`);
         if (currentRequestsFilter.status === 'pending_telegram_subscription') {
             // Telegram kutmoqda - null, undefined yoki pending_subscription
             requests = requests.filter(r => !r.telegram_connection_status || r.telegram_connection_status === 'pending_subscription' || r.telegram_connection_status === 'not_connected');
@@ -2194,6 +2167,9 @@ function renderModernRequests() {
             // Jarayonda
             requests = requests.filter(r => r.telegram_connection_status === 'in_process');
         }
+        console.log(`🔍 [RENDER] Filter qo'llanilgandan keyin: ${beforeFilter} → ${requests.length} ta so'rov`);
+    } else {
+        console.log(`🔍 [RENDER] Status filter yo'q, barcha so'rovlar ko'rsatiladi`);
     }
 
     // Apply sorting
@@ -2207,6 +2183,7 @@ function renderModernRequests() {
 
     // Empty state
     if (requests.length === 0) {
+        console.log('⚠️ [RENDER] So\'rovlar yo\'q, empty state ko\'rsatilmoqda');
         container.innerHTML = `
             <div class="requests-empty-state">
                 <i data-feather="inbox"></i>
@@ -2217,6 +2194,11 @@ function renderModernRequests() {
         feather.replace();
         return;
     }
+
+    console.log(`✅ [RENDER] ${requests.length} ta so'rov render qilinmoqda:`);
+    requests.forEach((req, index) => {
+        console.log(`   ${index + 1}. ID: ${req.id}, Username: ${req.username}, Status: ${req.status}, Created: ${req.created_at}`);
+    });
 
     // Render cards
     container.innerHTML = requests.map(request => {

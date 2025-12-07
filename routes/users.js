@@ -76,6 +76,8 @@ router.get('/', isAuthenticated, hasPermission('users:view'), async (req, res) =
 // Tasdiqlanishini kutayotgan foydalanuvchilarni olish
 router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
     try {
+        console.log('📋 [PENDING] Pending so\'rovlarni olish boshlandi...');
+        
         const pendingUsers = await db('users')
             .whereIn('status', ['pending_approval', 'pending_telegram_subscription', 'status_in_process'])
             .select(
@@ -88,6 +90,11 @@ router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req,
                 'telegram_username'
             )
             .orderBy('created_at', 'desc');
+        
+        console.log(`📋 [PENDING] Topilgan so'rovlar soni: ${pendingUsers.length}`);
+        pendingUsers.forEach((user, index) => {
+            console.log(`   ${index + 1}. ID: ${user.id}, Username: ${user.username}, Status: ${user.status}, Created: ${user.created_at}`);
+        });
         
         // Ma'lumotlarni formatlash
         const formattedUsers = pendingUsers.map(user => ({
@@ -103,9 +110,10 @@ router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req,
             telegram_connection_status: user.telegram_chat_id ? 'subscribed' : null
         }));
         
+        console.log(`✅ [PENDING] ${formattedUsers.length} ta so'rov yuborilmoqda`);
         res.json(formattedUsers);
     } catch (error) {
-        console.error("/api/users/pending GET xatoligi:", error);
+        console.error("❌ [PENDING] /api/users/pending GET xatoligi:", error);
         res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
     }
 });
@@ -484,9 +492,8 @@ router.put('/:id/approve', (req, res, next) => {
         console.error(`   - Role: ${role}`);
         console.error(`   - requires_locations: ${roleData.requires_locations} (${typeof roleData.requires_locations})`);
         console.error(`   - requires_brands: ${roleData.requires_brands} (${typeof roleData.requires_brands})`);
-        console.error(`   - Tasdiqlash to'xtatilmoqda...`);
         return res.status(400).json({ 
-            message: `"${role}" roli uchun shartlar belgilanmagan. Avval rol shartlarini belgilang.`,
+            message: `"${role}" roli uchun shartlar belgilanmagan. Avval shart belgilanishi kerak.`,
             requires_locations: roleData.requires_locations,
             requires_brands: roleData.requires_brands
         });
@@ -509,10 +516,9 @@ router.put('/:id/approve', (req, res, next) => {
             });
         }
         console.log(`   ✅ Filiallar validatsiyasi o'tdi`);
-    } else if (isLocationsRequired === false) {
-        console.log(`   - Filiallar kerak emas (false)`);
     } else {
-        console.log(`   - Filiallar ixtiyoriy (null)`);
+        // false - filiallar kerak emas
+        console.log(`   - Filiallar kerak emas (false)`);
     }
     
     if (isBrandsRequired === true) {
@@ -527,10 +533,9 @@ router.put('/:id/approve', (req, res, next) => {
             });
         }
         console.log(`   ✅ Brendlar validatsiyasi o'tdi`);
-    } else if (isBrandsRequired === false) {
-        console.log(`   - Brendlar kerak emas (false)`);
     } else {
-        console.log(`   - Brendlar ixtiyoriy (null)`);
+        // false - brendlar kerak emas
+        console.log(`   - Brendlar kerak emas (false)`);
     }
     
     console.log(`✅ [BACKEND] 5. Barcha validatsiyalar o'tdi.`);
