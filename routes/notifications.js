@@ -4,6 +4,30 @@ const { isAuthenticated } = require('../middleware/auth.js');
 
 const router = express.Router();
 
+// Bir kun oldingi notification'larni o'chirish funksiyasi
+async function cleanupOldNotifications() {
+    try {
+        const oneDayAgo = new Date();
+        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+        
+        const deleted = await db('notifications')
+            .where('created_at', '<', oneDayAgo.toISOString())
+            .del();
+        
+        if (deleted > 0) {
+            console.log(`✅ [NOTIFICATIONS] ${deleted} ta eski bildirishnoma o'chirildi`);
+        }
+    } catch (error) {
+        console.error('❌ [NOTIFICATIONS] Eski bildirishnomalarni o\'chirishda xatolik:', error);
+    }
+}
+
+// Har 1 soatda bir marta eski notification'larni tozalash
+setInterval(cleanupOldNotifications, 60 * 60 * 1000); // 1 soat
+
+// Server ishga tushganda bir marta tozalash
+cleanupOldNotifications();
+
 /**
  * GET /api/notifications
  * Foydalanuvchining bildirishnomalarini olish

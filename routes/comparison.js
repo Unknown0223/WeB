@@ -342,36 +342,107 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             }
         }
 
-        // Agar farqlar bo'lsa, barcha operatorlarga notification yaratish
+        // Agar farqlar bo'lsa, faqat tegishli operatorlarga notification yaratish
         if (differences.length > 0) {
             try {
+                // Farqlar bo'lgan filiallar ro'yxatini olish
+                const locationsWithDifferences = differences.map(d => d.location);
+                
                 // Barcha operatorlarni olish
                 const operators = await db('users')
                     .where('role', 'operator')
                     .where('status', 'active')
-                    .select('id');
+                    .select('id', 'username');
 
-                // Har bir operator uchun notification yaratish
-                const notificationData = operators.map(operator => ({
-                    user_id: operator.id,
-                    type: 'comparison_difference',
-                    title: `Solishtirishda farqlar aniqlandi`,
-                    message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
-                    details: JSON.stringify({
-                        date,
-                        brand_id: brandId,
-                        brand_name: brandName,
-                        differences: differences,
-                        total_differences: differences.length
-                    }),
-                    is_read: false,
-                    created_at: db.fn.now()
-                }));
+                // Har bir operator uchun uning filiallariga tegishli farqlarni topish
+                const notificationData = [];
+                
+                for (const operator of operators) {
+                    // Operatorning filiallarini olish
+                    const operatorLocations = await db('user_locations')
+                        .where('user_id', operator.id)
+                        .select('location_name');
+                    
+                    const operatorLocationNames = operatorLocations.map(ul => ul.location_name);
+                    
+                    // Operatorning filiallariga tegishli farqlarni topish
+                    const operatorDifferences = differences.filter(diff => 
+                        operatorLocationNames.includes(diff.location)
+                    );
+                    
+                    // Agar operatorning filiallarida farqlar bo'lsa, notification yaratish
+                    if (operatorDifferences.length > 0) {
+                        console.log(`📨 [COMPARISON] Operator ${operator.username} (ID: ${operator.id}) uchun bildirishnoma yaratilmoqda`);
+                        console.log(`   - Filiallar soni: ${operatorDifferences.length}`);
+                        console.log(`   - Filiallar: ${operatorDifferences.map(d => d.location).join(', ')}`);
+                        console.log(`   - Brend: ${brandName}`);
+                        console.log(`   - Sana: ${date}`);
+                        
+                        notificationData.push({
+                            user_id: operator.id,
+                            type: 'comparison_difference',
+                            title: `Solishtirishda farqlar aniqlandi`,
+                            message: `${brandName} brendi uchun ${date} sanasida ${operatorDifferences.length} ta filialda farqlar topildi.`,
+                            details: JSON.stringify({
+                                date,
+                                brand_id: brandId,
+                                brand_name: brandName,
+                                differences: operatorDifferences,
+                                total_differences: operatorDifferences.length
+                            }),
+                            is_read: false,
+                            created_at: db.fn.now()
+                        });
+                        
+                        console.log(`✅ [COMPARISON] Operator ${operator.username} uchun bildirishnoma yaratildi`);
+                    } else {
+                        console.log(`ℹ️ [COMPARISON] Operator ${operator.username} (ID: ${operator.id}) uchun bildirishnoma kerak emas (filiallar mos kelmaydi)`);
+                    }
+                }
 
                 if (notificationData.length > 0) {
+                    console.log(`📦 [COMPARISON] Jami ${notificationData.length} ta operatorga bildirishnoma yuborilmoqda`);
+                    
+                    // Notification'larni insert qilish
                     await db('notifications').insert(notificationData);
+                    console.log(`✅ [COMPARISON] ${notificationData.length} ta operatorga notification database'ga saqlandi`);
+                    
+                    // Real-time WebSocket orqali har bir operatorga xabar yuborish
+                    for (const notification of notificationData) {
+                        if (global.broadcastWebSocket) {
+                            try {
+                                console.log(`📡 [COMPARISON] WebSocket orqali operator ID: ${notification.user_id} ga xabar yuborilmoqda`);
+                                
+                                // Faqat serializable ma'lumotlarni yuborish
+                                const wsPayload = {
+                                    user_id: notification.user_id,
+                                    notification: {
+                                        type: notification.type,
+                                        title: notification.title,
+                                        message: notification.message,
+                                        details: typeof notification.details === 'string' 
+                                            ? JSON.parse(notification.details) 
+                                            : notification.details,
+                                        created_at: new Date().toISOString() // Hozirgi vaqtni string formatida
+                                    }
+                                };
+                                
+                                global.broadcastWebSocket('new_notification', wsPayload);
+                                console.log(`✅ [COMPARISON] Operator ID: ${notification.user_id} ga WebSocket xabari yuborildi`);
+                            } catch (error) {
+                                console.error(`❌ [COMPARISON] Operator ID: ${notification.user_id} ga WebSocket yuborishda xatolik:`, error.message);
+                            }
+                        } else {
+                            console.warn(`⚠️ [COMPARISON] WebSocket broadcast funksiyasi mavjud emas`);
+                        }
+                    }
+                    
+                    console.log(`🎉 [COMPARISON] Barcha bildirishnomalar yuborildi. Jami: ${notificationData.length} ta`);
+                } else {
+                    console.log(`ℹ️ [COMPARISON] Hech qanday operatorga bildirishnoma yuborilmadi (farqlar topilmadi yoki operatorlar topilmadi)`);
                 }
             } catch (error) {
+                console.error('❌ [COMPARISON] Notification yaratishda xatolik:', error);
                 // Notification yaratishda xatolik bo'lsa ham, asosiy javob qaytariladi
             }
         }

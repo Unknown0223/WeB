@@ -59,6 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
             pages: 1
         }
     };
+    
+    // Global o'zgaruvchilar
+    let datePickerFP = null;
+    let dateFilterFP = null;
 // --- KPI Cards Render ---
 const renderKpiCards = (stats) => {
     let kpiCardsHtml = '';
@@ -174,6 +178,19 @@ const renderKpiCards = (stats) => {
             }
             state.currentUser = await userRes.json();
             
+            // State modulidagi currentUser'ni ham yangilash
+            try {
+                const { state: globalState } = await import('./modules/state.js');
+                globalState.currentUser = state.currentUser;
+                console.log('✅ [INIT] Global state.currentUser o\'rnatildi:', state.currentUser.username);
+            } catch (error) {
+                console.warn('⚠️ [INIT] Global state modulini yuklashda xatolik:', error);
+            }
+            
+            // Window obyektiga ham qo'shish (realtime modul uchun)
+            window.currentUserId = state.currentUser.id;
+            window.currentUsername = state.currentUser.username;
+            
             updateUserInfo();
             applyRolePermissions();
             
@@ -223,6 +240,15 @@ const renderKpiCards = (stats) => {
             await fetchAndRenderReports();
             setupEventListeners();
             feather.replace();
+            
+            // Real-time modulini ishga tushirish (state.currentUser o'rnatilgandan keyin)
+            try {
+                const { initRealTime } = await import('./modules/realtime.js');
+                initRealTime();
+                console.log('✅ [INIT] Real-time modul ishga tushirildi');
+            } catch (error) {
+                console.error('❌ [INIT] Real-time modulni yuklashda xatolik:', error);
+            }
             
             // KPI va sessiya statistikasini yuklash
             if (typeof loadKPIStats === 'function') {
@@ -1621,11 +1647,32 @@ const renderKpiCards = (stats) => {
         const modal = document.getElementById('notifications-modal');
         modal.classList.remove('hidden');
         
+        // Sahifani yoritishni olib tashlash (agar mavjud bo'lsa)
+        document.body.classList.remove('notification-highlight');
+        
         // Notification'larni yuklash
         await loadNotifications();
         
+        // "Barchasini o'qilgan deb belgilash" tugmasi event listener
+        const markAllReadBtn = document.getElementById('mark-all-read-btn');
+        if (markAllReadBtn) {
+            markAllReadBtn.onclick = async () => {
+                try {
+                    await fetch('/api/notifications/read-all', { method: 'PUT' });
+                    await loadNotifications();
+                    await checkUnreadNotifications();
+                } catch (error) {
+                    console.error('Mark all as read error:', error);
+                }
+            };
+        }
+        
         feather.replace();
     }
+    
+    // Global funksiya qilish
+    window.openNotificationsModal = openNotificationsModal;
+    window.loadNotifications = loadNotifications;
 
     // Notification'larni yuklash
     async function loadNotifications() {
@@ -1670,30 +1717,58 @@ const renderKpiCards = (stats) => {
                     const timeAgo = getTimeAgo(createdDate);
                     const details = notif.details || {};
 
-                    let messageHtml = '';
+                    let detailsHtml = '';
                     if (notif.type === 'comparison_difference' && details.differences) {
-                        messageHtml = `
-                            <div style="margin-top: 8px; padding: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 6px;">
-                                <strong style="display: block; margin-bottom: 6px; font-size: 12px;">Batafsil ma'lumot:</strong>
-                                <div style="font-size: 11px; line-height: 1.6;">
-                                    <div><strong>Sana:</strong> ${details.date || 'Noma\'lum'}</div>
-                                    <div><strong>Brend:</strong> ${details.brand_name || 'Noma\'lum'}</div>
-                                    <div><strong>Farqlar soni:</strong> ${details.total_differences || 0} ta filial</div>
+                        const diffCount = details.differences.length;
+                        const hasMultiple = diffCount > 1;
+                        
+                        detailsHtml = `
+                            <div class="notification-details">
+                                <div class="notification-details-header">
+                                    <i data-feather="info"></i>
+                                    <span>Batafsil ma'lumot</span>
+                                </div>
+                                <div class="notification-details-body">
+                                    <div class="notification-detail-row">
+                                        <span class="detail-label">Sana:</span>
+                                        <span class="detail-value">${details.date || 'Noma\'lum'}</span>
+                                    </div>
+                                    <div class="notification-detail-row">
+                                        <span class="detail-label">Brend:</span>
+                                        <span class="detail-value">${details.brand_name || 'Noma\'lum'}</span>
+                                    </div>
+                                    <div class="notification-detail-row">
+                                        <span class="detail-label">Farqlar soni:</span>
+                                        <span class="detail-value highlight">${diffCount} ta filial</span>
+                                    </div>
                                     ${details.differences && details.differences.length > 0 ? `
-                                        <div style="margin-top: 8px;">
-                                            <strong>Filiallar:</strong>
-                                            <ul style="margin: 4px 0 0 16px; padding: 0;">
-                                                ${details.differences.slice(0, 5).map(diff => `
-                                                    <li style="margin: 2px 0;">
-                                                        ${diff.location}: 
-                                                        <span style="color: ${diff.difference > 0 ? 'var(--green-color)' : 'var(--red-color)'};">
-                                                            ${diff.difference > 0 ? '+' : ''}${formatNumber(Math.abs(diff.difference))} so'm
-                                                        </span>
-                                                        ${diff.percentage !== null ? ` (${diff.percentage > 100 ? '+' : ''}${(diff.percentage - 100).toFixed(2)}%)` : ''}
-                                                    </li>
-                                                `).join('')}
-                                                ${details.differences.length > 5 ? `<li style="color: var(--text-secondary);">... va yana ${details.differences.length - 5} ta</li>` : ''}
-                                            </ul>
+                                        <div class="notification-differences-list">
+                                            <div class="differences-header">
+                                                <i data-feather="map-pin"></i>
+                                                <span>Filiallar:</span>
+                                            </div>
+                                            <div class="differences-items">
+                                                ${details.differences.map(diff => {
+                                                    const diffValue = diff.difference || 0;
+                                                    const diffColor = diffValue > 0 ? 'var(--green-color)' : 'var(--red-color)';
+                                                    const diffSign = diffValue > 0 ? '+' : '';
+                                                    const diffPercent = diff.percentage !== null 
+                                                        ? ` (${diff.percentage > 100 ? '+' : ''}${(diff.percentage - 100).toFixed(2)}%)` 
+                                                        : '';
+                                                    
+                                                    return `
+                                                        <div class="difference-item">
+                                                            <div class="difference-location">
+                                                                <i data-feather="map-pin"></i>
+                                                                <span>${diff.location}</span>
+                                                            </div>
+                                                            <div class="difference-amount" style="color: ${diffColor};">
+                                                                ${diffSign}${formatNumber(Math.abs(diffValue))} so'm${diffPercent}
+                                                            </div>
+                                                        </div>
+                                                    `;
+                                                }).join('')}
+                                            </div>
                                         </div>
                                     ` : ''}
                                 </div>
@@ -1702,16 +1777,20 @@ const renderKpiCards = (stats) => {
                     }
 
                     return `
-                        <div class="notification-item ${!isRead ? 'unread' : ''}" data-id="${notif.id}">
-                            <div class="notification-icon" style="background-color: ${notif.type === 'comparison_difference' ? 'var(--red-color)' : 'var(--blue-color)'};">
+                        <div class="notification-card ${!isRead ? 'unread' : 'read'}" data-id="${notif.id}">
+                            <div class="notification-card-indicator ${!isRead ? 'unread-indicator' : ''}"></div>
+                            <div class="notification-card-icon" style="background: linear-gradient(135deg, ${notif.type === 'comparison_difference' ? '#dc3545' : '#007bff'} 0%, ${notif.type === 'comparison_difference' ? '#c82333' : '#0056b3'} 100%);">
                                 <i data-feather="${notif.type === 'comparison_difference' ? 'alert-triangle' : 'bell'}"></i>
                             </div>
-                            <div class="notification-content">
-                                <strong>${notif.title}</strong>
-                                <p>${notif.message}</p>
-                                ${messageHtml}
-                                <div class="notification-time">${timeAgo}</div>
+                            <div class="notification-card-content">
+                                <div class="notification-card-header">
+                                    <h3 class="notification-title">${notif.title}</h3>
+                                    <span class="notification-time">${timeAgo}</span>
+                                </div>
+                                <p class="notification-message">${notif.message}</p>
+                                ${detailsHtml}
                             </div>
+                            ${!isRead ? '<div class="notification-unread-badge"></div>' : ''}
                         </div>
                     `;
                 }).join('');

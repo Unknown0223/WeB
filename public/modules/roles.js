@@ -125,7 +125,7 @@ export function handleRoleSelection(e) {
         DOM.permissionsPanel.appendChild(warningMsg);
     } else {
         // Admin va boshqa barcha rollar uchun huquqlarni o'zgartirish mumkin
-        DOM.permissionsPanel.classList.remove('disabled');
+    DOM.permissionsPanel.classList.remove('disabled');
         DOM.saveRolePermissionsBtn.classList.remove('hidden');
         // Xabarni olib tashlash
         const warningMsg = DOM.permissionsPanel.querySelector('.alert-warning');

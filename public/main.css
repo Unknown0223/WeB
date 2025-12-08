@@ -1952,54 +1952,729 @@ body.login-page {
 }
 
 /* Notification item stillar */
-.notification-item {
-    padding: 12px;
-    background-color: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+/* ===================================== */
+/* NOTIFICATIONS MODAL - ZAMONAVIY DIZAYN */
+/* ===================================== */
+
+.notifications-modal-content {
+    max-width: 600px;
+    background: linear-gradient(145deg, #1e1e2e 0%, #1a1a2a 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.notifications-modal-header {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 25px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.notifications-header-title {
+    display: flex;
+    align-items: center;
     gap: 12px;
-    cursor: pointer;
-    transition: all var(--transition-speed);
 }
-.notification-item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+
+.notifications-header-title i {
+    width: 24px;
+    height: 24px;
+    color: var(--blue-color);
 }
-.notification-item.unread {
-    border-left: 3px solid var(--blue-color);
+
+.notifications-header-title h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
 }
-.notification-icon {
+
+.notifications-header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.btn-icon {
     width: 36px;
     height: 36px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-icon:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: scale(1.05);
+}
+
+.btn-icon i {
+    width: 18px;
+    height: 18px;
+}
+
+.notifications-modal-body {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.notifications-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Zamonaviy Notification Card */
+.notification-card {
+    position: relative;
+    padding: 18px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    display: flex;
+    gap: 16px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+
+.notification-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--blue-color);
+    transform: scaleY(0);
+    transition: transform 0.3s;
+}
+
+.notification-card.unread::before {
+    transform: scaleY(1);
+}
+
+.notification-card:hover {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.04) 100%);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.notification-card-indicator {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background-color: var(--blue-color);
+    background: var(--blue-color);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.notification-card.unread .notification-card-indicator {
+    opacity: 1;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+.notification-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
-.notification-icon i {
+
+.notification-card-icon i {
     color: white;
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
 }
-.notification-content {
+
+.notification-card-content {
     flex: 1;
     min-width: 0;
 }
-.notification-content strong {
-    display: block;
-    margin-bottom: 4px;
-    font-size: 13px;
+
+.notification-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
 }
-.notification-content p {
-    margin: 0 0 4px 0;
-    font-size: 12px;
-    color: var(--text-secondary);
+
+.notification-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    line-height: 1.4;
 }
+
 .notification-time {
     font-size: 11px;
     color: var(--text-secondary);
+    white-space: nowrap;
+    margin-left: 12px;
+}
+
+.notification-message {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 12px 0;
+    line-height: 1.5;
+}
+
+.notification-details {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.notification-details-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.notification-details-header i {
+    width: 16px;
+    height: 16px;
+}
+
+.notification-details-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.notification-detail-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+}
+
+.detail-label {
+    color: var(--text-secondary);
+}
+
+.detail-value {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.detail-value.highlight {
+    color: var(--blue-color);
+    font-weight: 600;
+}
+
+.notification-differences-list {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.differences-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.differences-header i {
+    width: 14px;
+    height: 14px;
+}
+
+.differences-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.difference-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    border-left: 3px solid transparent;
+    transition: all 0.2s;
+}
+
+.difference-item:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.difference-location {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.difference-location i {
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary);
+}
+
+.difference-amount {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.notification-unread-badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--red-color);
+    box-shadow: 0 0 8px var(--red-color);
+}
+
+.notification-acknowledge-btn {
+    margin-top: 20px;
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    border: none;
+    color: white;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3);
+}
+
+.notification-acknowledge-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
+}
+
+.notification-acknowledge-btn i {
+    width: 18px;
+    height: 18px;
+}
+
+/* Avatar pulsatsiya effekti */
+.notification-pulse {
+    animation: notificationPulse 1s ease-in-out infinite;
+}
+
+@keyframes notificationPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(79, 172, 254, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(79, 172, 254, 0);
+    }
+}
+
+/* Sahifani yoritish effekti */
+.notification-highlight {
+    position: relative;
+}
+
+.notification-highlight::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(79, 172, 254, 0.1);
+    z-index: 9998;
+    pointer-events: none;
+    animation: highlightFade 0.5s ease-in-out;
+}
+
+@keyframes highlightFade {
+    0% { opacity: 0; }
+    50% { opacity: 1; }
+    100% { opacity: 0.3; }
+}
+
+/* Notification badge pulsatsiya */
+.notification-badge.pulse {
+    animation: badgePulse 1s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+    }
+}
+
+/* Empty state */
+.notifications-list .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+}
+
+.notifications-list .empty-state i {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.notifications-list .empty-state p {
+    margin: 0;
+    font-size: 14px;
+}
+
+/* ===================================== */
+/* COMPARISON ALERT MODAL - MARKAZDA KO'RSATILADIGAN */
+/* ===================================== */
+
+.comparison-alert-modal {
+    z-index: 10000;
+}
+
+.comparison-alert-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 10001;
+    animation: fadeIn 0.3s ease-in-out;
+    pointer-events: none;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.comparison-alert-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(145deg, #1e1e2e 0%, #1a1a2a 100%);
+    border: 2px solid rgba(220, 53, 69, 0.5);
+    border-radius: 24px;
+    padding: 40px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(220, 53, 69, 0.3);
+    z-index: 10002;
+    animation: slideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -40%);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
+    }
+}
+
+.comparison-alert-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 24px;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 24px rgba(220, 53, 69, 0.4);
+    animation: iconPulse 2s ease-in-out infinite;
+}
+
+@keyframes iconPulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 8px 24px rgba(220, 53, 69, 0.4);
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 12px 32px rgba(220, 53, 69, 0.6);
+    }
+}
+
+.comparison-alert-icon i {
+    width: 40px;
+    height: 40px;
+    color: white;
+}
+
+.comparison-alert-title {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 16px 0;
+}
+
+.comparison-alert-message {
+    text-align: center;
+    font-size: 16px;
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+    line-height: 1.6;
+}
+
+.comparison-alert-details {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 24px;
+}
+
+.alert-detail-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.alert-detail-item:last-child {
+    border-bottom: none;
+}
+
+.alert-detail-item .detail-label {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.alert-detail-item .detail-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.alert-detail-item .detail-value.highlight {
+    color: var(--red-color);
+}
+
+.alert-differences-list {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.alert-differences-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.alert-differences-header i {
+    width: 16px;
+    height: 16px;
+}
+
+.alert-differences-items {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.alert-difference-item {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 10px;
+    border-left: 3px solid transparent;
+    transition: all 0.2s;
+}
+
+.alert-difference-item:hover {
+    background: rgba(0, 0, 0, 0.4);
+    transform: translateX(2px);
+}
+
+.alert-difference-location {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.alert-difference-location i {
+    width: 16px;
+    height: 16px;
+    color: var(--blue-color);
+}
+
+.alert-difference-details {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-left: 24px;
+}
+
+.difference-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.difference-row:last-child {
+    border-bottom: none;
+    padding-top: 12px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.difference-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.difference-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.difference-value.operator-amount {
+    color: var(--blue-color);
+}
+
+.difference-value.comparison-amount {
+    color: var(--yellow-color);
+}
+
+.difference-value.difference-amount {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.comparison-alert-acknowledge-btn {
+    width: 100%;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    border: none;
+    color: white;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3);
+}
+
+.comparison-alert-acknowledge-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
+}
+
+.comparison-alert-acknowledge-btn:active {
+    transform: translateY(0);
+}
+
+.comparison-alert-acknowledge-btn i {
+    width: 20px;
+    height: 20px;
+}
+
+/* Sahifani qorong'ilashtirish */
+.comparison-alert-active {
+    overflow: hidden;
+    position: relative;
+}
+
+.comparison-alert-active::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    pointer-events: none;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.comparison-alert-active .main-wrapper {
+    filter: blur(2px);
+    pointer-events: none;
+    transition: filter 0.3s;
+    position: relative;
+    z-index: 1;
+}
+
+.comparison-alert-active .top-header {
+    filter: blur(2px);
+    pointer-events: none;
+    transition: filter 0.3s;
+    position: relative;
+    z-index: 1;
 }
 
 /* --- Toast (Bildirishnoma) --- */

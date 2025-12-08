@@ -361,14 +361,50 @@
 
     <!-- Bildirishnomalar Modal -->
     <div id="notifications-modal" class="modal hidden">
-        <div class="modal-content" style="max-width: 500px;">
-            <button class="close-modal-btn" data-target="notifications-modal"><i data-feather="x"></i></button>
-            <h2 class="modal-title">Bildirishnomalar</h2>
-            <div class="modal-body">
-                <div id="notifications-list" style="display: flex; flex-direction: column; gap: 10px;">
-                    <div class="empty-state">Hozircha bildirishnomalar yo'q</div>
+        <div class="modal-overlay" onclick="document.getElementById('notifications-modal').classList.add('hidden')"></div>
+        <div class="modal-content notifications-modal-content">
+            <div class="notifications-modal-header">
+                <div class="notifications-header-title">
+                    <i data-feather="bell"></i>
+                    <h2>Bildirishnomalar</h2>
+                </div>
+                <div class="notifications-header-actions">
+                    <button class="btn-icon" id="mark-all-read-btn" title="Barchasini o'qilgan deb belgilash">
+                        <i data-feather="check-circle"></i>
+                    </button>
+                    <button class="btn-icon close-modal-btn" data-target="notifications-modal" title="Yopish">
+                        <i data-feather="x"></i>
+                    </button>
                 </div>
             </div>
+            <div class="notifications-modal-body">
+                <div id="notifications-list" class="notifications-list">
+                    <div class="empty-state">
+                        <i data-feather="bell-off"></i>
+                        <p>Hozircha bildirishnomalar yo'q</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Comparison Difference Alert Modal (Markazda ko'rsatiladigan) -->
+    <div id="comparison-alert-modal" class="modal comparison-alert-modal hidden">
+        <div class="comparison-alert-content">
+            <div class="comparison-alert-icon">
+                <i data-feather="alert-triangle"></i>
+            </div>
+            <h2 class="comparison-alert-title">Solishtirishda farqlar aniqlandi</h2>
+            <div class="comparison-alert-message" id="comparison-alert-message">
+                <!-- Xabar bu yerda ko'rsatiladi -->
+            </div>
+            <div class="comparison-alert-details" id="comparison-alert-details">
+                <!-- Batafsil ma'lumotlar bu yerda ko'rsatiladi -->
+            </div>
+            <button class="btn btn-primary comparison-alert-acknowledge-btn" id="comparison-alert-acknowledge-btn">
+                <i data-feather="check"></i>
+                <span>Tushundim</span>
+            </button>
         </div>
     </div>
 
@@ -560,6 +596,6 @@
     <script src="https://npmcdn.com/flatpickr/dist/plugins/rangePlugin.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
     <script type="module" src="modules/dom.js"></script>
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
 </body>
 </html>

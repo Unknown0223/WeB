@@ -623,7 +623,9 @@ async function saveComparisonData() {
     for (const input of inputs) {
         const location = input.getAttribute('data-location');
         const value = input.value.trim();
-        const comparisonAmount = value ? parseFloat(value) : null;
+        // Formatlangan qiymatni parse qilish (bo'sh joylarni olib tashlash)
+        const cleanedValue = value.replace(/\s/g, '');
+        const comparisonAmount = cleanedValue ? parseComparisonNumber(cleanedValue) : null;
         
         comparisons.push({
             location: location,
@@ -668,8 +670,19 @@ async function saveComparisonData() {
         const data = await res.json();
         if (data.success) {
             showToast(`✅ ${data.saved_count + data.updated_count} ta ma'lumot saqlandi`, false);
-            // Ma'lumotlarni qayta yuklash
+            // Ma'lumotlarni qayta yuklash - bu input maydonlarini yangilaydi
             await loadComparisonData();
+            
+            // Input maydonlarini saqlangan qiymatlar bilan yangilash
+            const inputs = document.querySelectorAll('.comparison-input');
+            inputs.forEach((input) => {
+                const location = input.getAttribute('data-location');
+                const savedItem = comparisonData.find(item => item.location === location);
+                if (savedItem && savedItem.comparison_amount !== null) {
+                    const formattedValue = formatComparisonNumber(savedItem.comparison_amount);
+                    input.value = formattedValue;
+                }
+            });
         } else {
             throw new Error(data.error || 'Xatolik yuz berdi');
         }
