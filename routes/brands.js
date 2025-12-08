@@ -83,7 +83,25 @@ router.get('/for-user', isAuthenticated, async (req, res) => {
                 .select('brands.*')
                 .orderBy('brands.name');
         } else if (user.role === 'admin') {
-            // Admin uchun: barcha brendlar
+            // Admin uchun: agar brendlar belgilangan bo'lsa, faqat shu brendlar
+            const userBrands = await db('user_brands')
+                .where('user_id', user.id)
+                .pluck('brand_id');
+
+            if (userBrands.length > 0) {
+                // Admin uchun belgilangan brendlar mavjud - faqat shu brendlar
+                brands = await db('brands')
+                    .whereIn('id', userBrands)
+                    .select('*')
+                    .orderBy('name');
+            } else {
+                // Admin uchun brendlar belgilanmagan - barcha brendlar
+                brands = await db('brands')
+                    .select('*')
+                    .orderBy('name');
+            }
+        } else if (user.role === 'super_admin') {
+            // Super admin uchun: barcha brendlar (cheklov yo'q)
             brands = await db('brands')
                 .select('*')
                 .orderBy('name');
