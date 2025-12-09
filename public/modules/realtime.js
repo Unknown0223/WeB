@@ -74,6 +74,117 @@ function connectWebSocket() {
     }
 }
 
+/**
+ * Comparison alert modal'ni ko'rsatish
+ */
+function showComparisonAlertModal(notification) {
+    console.log('🔔 [REALTIME] Comparison alert modal ochilmoqda...');
+    
+    const modal = document.getElementById('comparison-alert-modal');
+    const messageEl = document.getElementById('comparison-alert-message');
+    const detailsEl = document.getElementById('comparison-alert-details');
+    const acknowledgeBtn = document.getElementById('comparison-alert-acknowledge-btn');
+    
+    if (!modal || !messageEl || !detailsEl || !acknowledgeBtn) {
+        console.error('❌ [REALTIME] Comparison alert modal elementlari topilmadi');
+        return;
+    }
+    
+    // Xabarni ko'rsatish
+    const message = notification?.message || 'Solishtirishda farqlar aniqlandi';
+    messageEl.textContent = message;
+    
+    // Batafsil ma'lumotlarni ko'rsatish
+    const details = notification?.details || {};
+    let detailsHtml = '';
+    
+    if (details.brand_name || details.date) {
+        detailsHtml = `
+            <div class="alert-detail-item">
+                <span class="detail-label">Brend:</span>
+                <span class="detail-value">${details.brand_name || 'Noma\'lum'}</span>
+            </div>
+            <div class="alert-detail-item">
+                <span class="detail-label">Sana:</span>
+                <span class="detail-value">${details.date || 'Noma\'lum'}</span>
+            </div>
+            <div class="alert-detail-item">
+                <span class="detail-label">Farqlar soni:</span>
+                <span class="detail-value highlight">${details.total_differences || 0} ta filial</span>
+            </div>
+        `;
+        
+        // Farqlar ro'yxatini ko'rsatish
+        if (details.differences && details.differences.length > 0) {
+            detailsHtml += `
+                <div class="alert-differences-list">
+                    <div class="alert-differences-header">
+                        <i data-feather="map-pin"></i>
+                        <span>Filiallar:</span>
+                    </div>
+                    <div class="alert-differences-items">
+                        ${details.differences.map(diff => {
+                            const diffValue = diff.difference || 0;
+                            const diffColor = diffValue > 0 ? 'var(--green-color)' : 'var(--red-color)';
+                            const diffSign = diffValue > 0 ? '+' : '';
+                            
+                            return `
+                                <div class="alert-difference-item">
+                                    <div class="alert-difference-location">
+                                        <i data-feather="map-pin"></i>
+                                        <span>${diff.location || 'Noma\'lum'}</span>
+                                    </div>
+                                    <div class="alert-difference-details">
+                                        <div class="difference-row">
+                                            <span class="difference-label">Operator summa:</span>
+                                            <span class="difference-value operator-amount">${(diff.operator_amount || 0).toLocaleString('ru-RU')} so'm</span>
+                                        </div>
+                                        <div class="difference-row">
+                                            <span class="difference-label">Solishtirish summa:</span>
+                                            <span class="difference-value comparison-amount">${(diff.comparison_amount || 0).toLocaleString('ru-RU')} so'm</span>
+                                        </div>
+                                        <div class="difference-row">
+                                            <span class="difference-label">Farq:</span>
+                                            <span class="difference-value difference-amount" style="color: ${diffColor};">${diffSign}${Math.abs(diffValue).toLocaleString('ru-RU')} so'm</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    } else {
+        detailsHtml = '<div class="empty-state">Batafsil ma\'lumotlar mavjud emas</div>';
+    }
+    
+    detailsEl.innerHTML = detailsHtml;
+    
+    // "Tushundim" tugmasi event listener
+    acknowledgeBtn.onclick = () => {
+        console.log('✅ [REALTIME] Comparison alert modal yopilmoqda...');
+        modal.classList.add('hidden');
+        document.body.classList.remove('comparison-alert-active');
+        
+        // Feather iconlarni yangilash
+        if (window.feather) {
+            window.feather.replace();
+        }
+    };
+    
+    // Modal'ni ochish
+    modal.classList.remove('hidden');
+    document.body.classList.add('comparison-alert-active');
+    
+    // Feather iconlarni yangilash
+    if (window.feather) {
+        window.feather.replace();
+    }
+    
+    console.log('✅ [REALTIME] Comparison alert modal ochildi');
+}
+
 function handleWebSocketMessage(data) {
     const { type, payload } = data;
     
@@ -134,20 +245,46 @@ function handleWebSocketMessage(data) {
             if (payload.user_id && payload.user_id === currentUserId) {
                 console.log('🔔 [REALTIME] Notification joriy foydalanuvchiga tegishli');
                 
-                // Toast ko'rsatish
-                const message = payload.notification?.message || 'Solishtirishda farqlar aniqlandi';
-                showToast(`⚠️ ${message}`, false);
+                // Modal oynada bildirishnoma ko'rsatish
+                showComparisonAlertModal(payload.notification);
                 
-                // Notification'larni yangilash (agar modal ochiq bo'lsa)
-                if (typeof window.checkUnreadNotifications === 'function') {
-                    console.log('🔔 [REALTIME] Notification ro\'yxatini yangilash...');
-                    window.checkUnreadNotifications();
-                } else {
-                    console.log('⚠️ [REALTIME] checkUnreadNotifications funksiyasi topilmadi');
-                }
-                
-                // Avatar'ni yangilash - checkUnreadNotifications ichida updateAvatarNotificationState chaqiriladi
-                // Shuning uchun faqat checkUnreadNotifications ni chaqirish kifoya
+                // Notification'larni yangilash
+                setTimeout(() => {
+                    console.log('🔔 [REALTIME] Notification yangilash boshlandi...');
+                    
+                    // Unread count'ni yangilash va avatar'ni yangilash
+                    if (typeof window.checkUnreadNotifications === 'function') {
+                        console.log('🔔 [REALTIME] checkUnreadNotifications chaqirilmoqda...');
+                        window.checkUnreadNotifications()
+                            .then(() => {
+                                console.log('✅ [REALTIME] checkUnreadNotifications muvaffaqiyatli bajarildi');
+                            })
+                            .catch(err => {
+                                console.error('❌ [REALTIME] checkUnreadNotifications xatolik:', err);
+                            });
+                    } else {
+                        console.warn('⚠️ [REALTIME] window.checkUnreadNotifications funksiyasi topilmadi');
+                    }
+                    
+                    // Agar notification modal ochiq bo'lsa, ro'yxatni yangilash
+                    const modal = document.getElementById('notifications-modal');
+                    if (modal && !modal.classList.contains('hidden')) {
+                        console.log('🔔 [REALTIME] Notification modal ochiq, ro\'yxat yangilanmoqda...');
+                        if (typeof window.loadNotifications === 'function') {
+                            window.loadNotifications()
+                                .then(() => {
+                                    console.log('✅ [REALTIME] Notification ro\'yxati yangilandi');
+                                })
+                                .catch(err => {
+                                    console.error('❌ [REALTIME] loadNotifications xatolik:', err);
+                                });
+                        } else {
+                            console.warn('⚠️ [REALTIME] window.loadNotifications funksiyasi topilmadi');
+                        }
+                    } else {
+                        console.log('ℹ️ [REALTIME] Notification modal yopiq, ro\'yxat yangilanmaydi');
+                    }
+                }, 200); // DOM tayyor bo'lishi uchun kichik kechikish
             } else {
                 console.log(`ℹ️ [REALTIME] Notification boshqa foydalanuvchiga tegishli (user_id: ${payload.user_id}, current: ${currentUserId})`);
             }
