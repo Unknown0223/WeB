@@ -120,6 +120,17 @@ const initializeDB = async () => {
                 await trx('role_permissions').insert(permsToInsert);
             }
         }
+        
+        // Rollar uchun shartlarni o'rnatish
+        // Super admin: hech qanday shartlar yo'q (to'liq dotup) - null
+        await trx('roles')
+            .where('role_name', 'super_admin')
+            .update({ requires_locations: null, requires_brands: null });
+        
+        // Admin: shartlar ixtiyoriy (null) - istalgan dotup yoki chegaralangan
+        await trx('roles')
+            .where('role_name', 'admin')
+            .update({ requires_locations: null, requires_brands: null });
     });
 
     // Seeds faylini ishga tushirish (kengaytirilgan permission'lar)

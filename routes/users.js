@@ -214,21 +214,36 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
         return res.status(403).json({ message: "Super admin yaratish faqat super admin tomonidan mumkin." });
     }
     
+    // Super admin faqat bitta bo'lishi kerak
+    if (role === 'super_admin') {
+        const existingSuperAdmin = await db('users').where({ role: 'super_admin' }).first();
+        if (existingSuperAdmin) {
+            return res.status(403).json({ message: "Super admin faqat bitta bo'lishi mumkin. Mavjud super admin: " + existingSuperAdmin.username });
+        }
+    }
+    
+    // Admin roli uchun shartlar ixtiyoriy (istalgan dotup yoki chegaralangan)
+    // Super admin uchun hech qanday shartlar yo'q (to'liq dotup)
+    if (role === 'super_admin' || role === 'admin') {
+        // Super admin va Admin uchun filiallar va brendlar shart emas (ixtiyoriy)
+    }
+    
+    // Operator yoki Manager uchun filiallar majburiy
     if ((role === 'operator' || role === 'manager') && locations.length === 0) {
         return res.status(400).json({ message: "Operator yoki Menejer uchun kamida bitta filial tanlanishi shart." });
     }
     
-    // Admin yoki Manager uchun brend belgilash majburiy
-    if ((role === 'admin' || role === 'manager') && brands.length === 0) {
-        return res.status(400).json({ message: "Admin yoki Manager uchun kamida bitta brend tanlanishi shart." });
+    // Manager uchun brend belgilash majburiy
+    if (role === 'manager' && brands.length === 0) {
+        return res.status(400).json({ message: "Manager uchun kamida bitta brend tanlanishi shart." });
     }
 
     try {
         const userId = await userRepository.createUser(adminId, username, password, role, device_limit, fullname, 'active', ipAddress, userAgent);
         await userRepository.updateUserLocations(adminId, userId, locations, ipAddress, userAgent);
         
-        // Manager uchun brendlarni saqlash
-        if (role === 'manager' && brands.length > 0) {
+        // Admin va Manager uchun brendlarni saqlash (agar tanlangan bo'lsa)
+        if ((role === 'admin' || role === 'manager') && brands.length > 0) {
             await db('user_brands').where('user_id', userId).del();
             const brandRecords = brands.map(brandId => ({
                 user_id: userId,
@@ -236,6 +251,9 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
             }));
             await db('user_brands').insert(brandRecords);
         }
+        
+        // Admin uchun ham filiallarni saqlash (agar tanlangan bo'lsa)
+        // updateUserLocations allaqachon chaqirilgan, lekin agar locations bo'sh bo'lsa ham ishlaydi
         
         // User-specific sozlamalarni saqlash
         if (user_settings) {

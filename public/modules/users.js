@@ -1344,6 +1344,110 @@ export async function submitUserApproval(e) {
         console.log(`   - RoleData to'liq ma'lumot:`, JSON.stringify(roleData, null, 2));
     }
     
+    // Super admin uchun hech qanday shartlar yo'q (to'liq dotup)
+    if (role === 'super_admin') {
+        console.log(`✅ [TASDIQLASH] Super admin uchun shartlar tekshirilmaydi (to'liq dotup)`);
+        // Super admin uchun hech qanday validatsiya yo'q
+        const data = {
+            role: role,
+            locations: [],
+            brands: []
+        };
+        
+        console.log(`📤 [TASDIQLASH] Super admin uchun API'ga yuborilmoqda...`);
+        console.log(`   - Data:`, JSON.stringify(data, null, 2));
+
+        try {
+            console.log(`🌐 [TASDIQLASH] API so'rovini yuborish...`);
+            const res = await safeFetch(`/api/users/${userId}/approve`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            if (!res || !res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.message);
+            }
+            
+            const result = await res.json();
+            showToast(result.message);
+            
+            const [pendingRes, usersRes] = await Promise.all([
+                fetchPendingUsers(),
+                fetchUsers()
+            ]);
+
+            if (pendingRes) {
+                state.pendingUsers = pendingRes;
+                renderPendingUsers();
+            }
+            if (usersRes) {
+                state.users = usersRes;
+                const activeTab = DOM.userTabs.querySelector('.active')?.dataset.status || 'active';
+                renderUsersByStatus(activeTab);
+            }
+            
+            DOM.approvalModal.classList.add('hidden');
+        } catch (error) {
+            console.error('❌ [TASDIQLASH] Xatolik:', error);
+            showToast(error.message, true);
+        }
+        return;
+    }
+    
+    // Admin roli uchun ham shartlar ixtiyoriy (istalgan dotup yoki chegaralangan)
+    if (role === 'admin') {
+        console.log(`✅ [TASDIQLASH] Admin roli uchun shartlar ixtiyoriy (istalgan dotup yoki chegaralangan)`);
+        // Admin roli uchun shartlar ixtiyoriy - tanlangan filiallar va brendlar bilan chegaralanadi
+        const data = {
+            role: role,
+            locations: Array.from(document.querySelectorAll('#approval-locations-checkbox-list input:checked')).map(cb => cb.value),
+            brands: Array.from(document.querySelectorAll('#approval-brands-list input:checked')).map(cb => parseInt(cb.value))
+        };
+        
+        console.log(`📤 [TASDIQLASH] Admin roli uchun API'ga yuborilmoqda...`);
+        console.log(`   - Data:`, JSON.stringify(data, null, 2));
+
+        try {
+            console.log(`🌐 [TASDIQLASH] API so'rovini yuborish...`);
+            const res = await safeFetch(`/api/users/${userId}/approve`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            if (!res || !res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.message);
+            }
+            
+            const result = await res.json();
+            showToast(result.message);
+            
+            const [pendingRes, usersRes] = await Promise.all([
+                fetchPendingUsers(),
+                fetchUsers()
+            ]);
+
+            if (pendingRes) {
+                state.pendingUsers = pendingRes;
+                renderPendingUsers();
+            }
+            if (usersRes) {
+                state.users = usersRes;
+                const activeTab = DOM.userTabs.querySelector('.active')?.dataset.status || 'active';
+                renderUsersByStatus(activeTab);
+            }
+            
+            DOM.approvalModal.classList.add('hidden');
+        } catch (error) {
+            console.error('❌ [TASDIQLASH] Xatolik:', error);
+            showToast(error.message, true);
+        }
+        return;
+    }
+    
     // Belgilanmagan yoki belgilangan holatni aniqlash
     console.log(`🔍 [TASDIQLASH] 3. Rol shartlarini tekshirish...`);
     
@@ -2777,6 +2881,14 @@ function formatDateTime(timestamp) {
 // Rol shartlarini belgilash modalini ochish
 function openRoleRequirementsModal(roleName, roleData) {
     console.log(`🔧 [WEB] Rol shartlarini belgilash modal'i ochilmoqda. Role: ${roleName}`);
+    
+    // Super admin uchun modal ochmaslik (to'liq dotup)
+    if (roleName === 'super_admin') {
+        console.log(`✅ [WEB] Super admin uchun shartlar belgilanmaydi (to'liq dotup)`);
+        return;
+    }
+    
+    // Admin roli uchun modal ochiladi (ixtiyoriy shartlar)
     
     // Modal yaratish
     const modal = document.createElement('div');

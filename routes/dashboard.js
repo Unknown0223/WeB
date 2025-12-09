@@ -20,6 +20,13 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
 
         const allLocations = settingsRow ? (JSON.parse(settingsRow.value).locations || []) : [];
         const totalUsers = usersCountResult.count;
+        
+        // Admin uchun filiallar cheklovi
+        const user = req.session.user;
+        let locationsToShow = allLocations;
+        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
+            locationsToShow = user.locations;
+        }
 
         if (allLocations.length === 0) {
             return res.json({
@@ -30,9 +37,16 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         }
         
         // 2. Tanlangan sana uchun topshirilgan hisobotlarni olish (QO'SHIMCHA MA'LUMOTLAR BILAN)
-        const submittedReports = await db('reports as r')
+        const submittedReportsQuery = db('reports as r')
             .leftJoin('users as u_creator', 'r.created_by', 'u_creator.id')
-            .where('r.report_date', date)
+            .where('r.report_date', date);
+        
+        // Admin uchun filiallar cheklovi
+        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
+            submittedReportsQuery.whereIn('r.location', user.locations);
+        }
+        
+        const submittedReports = await submittedReportsQuery
             .select(
                 'r.id',
                 'r.location',
@@ -65,7 +79,7 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         
         const submittedLocations = new Set(submittedReports.map(r => r.location));
 
-        const statusData = allLocations.map(location => {
+        const statusData = locationsToShow.map(location => {
             const reportForLocation = submittedReports.find(r => r.location === location);
             const isSubmitted = !!reportForLocation;
             
@@ -93,11 +107,18 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
         const startDate = sevenDaysAgo.toISOString().split('T')[0];
 
-        const weeklyDynamics = await db('reports')
+        const weeklyDynamicsQuery = db('reports')
             .select('report_date')
             .count('* as count')
             .where('report_date', '>=', startDate)
-            .andWhere('report_date', '<=', date)
+            .andWhere('report_date', '<=', date);
+        
+        // Admin uchun filiallar cheklovi
+        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
+            weeklyDynamicsQuery.whereIn('location', user.locations);
+        }
+        
+        const weeklyDynamics = await weeklyDynamicsQuery
             .groupBy('report_date')
             .orderBy('report_date', 'asc');
             
@@ -118,19 +139,28 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         }
 
         // 4. Qo'shimcha statistikalar
-        const totalReportsCount = await db('reports').count('* as count').first();
-        const editedReportsCount = await db('reports')
+        const totalReportsCountQuery = db('reports');
+        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
+            totalReportsCountQuery.whereIn('location', user.locations);
+        }
+        const totalReportsCount = await totalReportsCountQuery.count('* as count').first();
+        
+        const editedReportsCountQuery = db('reports')
             .whereExists(function() {
                 this.select('*').from('report_history').whereRaw('report_history.report_id = reports.id');
-            })
-            .count('* as count')
-            .first();
+            });
+        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
+            editedReportsCountQuery.whereIn('location', user.locations);
+        }
+        const editedReportsCount = await editedReportsCountQuery.count('* as count').first();
         
-        const lateReportsCount = await db('reports')
+        const lateReportsCountQuery = db('reports')
             .where('report_date', date)
-            .whereNotNull('late_comment')
-            .count('* as count')
-            .first();
+            .whereNotNull('late_comment');
+        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
+            lateReportsCountQuery.whereIn('location', user.locations);
+        }
+        const lateReportsCount = await lateReportsCountQuery.count('* as count').first();
             
         const onTimeReportsCount = submittedReports.length - (lateReportsCount?.count || 0);
         
@@ -146,7 +176,7 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         res.json({
             generalStats: {
                 totalUsers: totalUsers,
-                totalLocations: allLocations.length,
+                totalLocations: locationsToShow.length,
                 dailyTotalReports: submittedReports.length
             },
             dailyStatus: {

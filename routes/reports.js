@@ -23,7 +23,12 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
 
         // Foydalanuvchining huquqlariga qarab so'rovni filtrlash
         if (user.permissions.includes('reports:view_all')) {
-            // Admin/Menejer barcha hisobotlarni ko'radi, hech narsa qilmaymiz.
+            // Admin/Menejer barcha hisobotlarni ko'radi
+            // Lekin agar admin uchun filiallar belgilangan bo'lsa, faqat shu filiallar bo'yicha cheklanadi
+            if (user.role === 'admin' && user.locations && user.locations.length > 0) {
+                query.whereIn('r.location', user.locations);
+            }
+            // Super admin uchun hech qanday cheklov yo'q
         } else if (user.permissions.includes('reports:view_assigned')) {
             // Menejer o'ziga biriktirilgan filiallar hisobotlarini ko'radi.
             if (user.locations.length === 0) {

@@ -262,17 +262,43 @@ router.post('/import-full-db', async (req, res) => {
                                         continue;
                                     }
                                     
+                                    // ID'ni o'chirib, update qilish (avtomatik generatsiya uchun)
+                                    const recordToUpdate = { ...record };
+                                    if (options.upsert.key === 'id' && tableName !== 'users') {
+                                        delete recordToUpdate.id;
+                                    }
+                                    
                                     await trx(tableName)
                                         .where(options.upsert.where, record[options.upsert.key])
-                                        .update(record);
+                                        .update(recordToUpdate);
                                 } else {
-                                    await trx(tableName).insert(record);
+                                    // ID'ni o'chirib, insert qilish (avtomatik generatsiya uchun)
+                                    const recordToInsert = { ...record };
+                                    if (options.upsert.key === 'id' && tableName !== 'users') {
+                                        delete recordToInsert.id;
+                                    }
+                                    await trx(tableName).insert(recordToInsert);
                                 }
+                                imported++;
                             } else {
-                                await trx(tableName).insert(record);
+                                // ID'ni tekshirish va agar mavjud bo'lsa, skip qilish
+                                if (record.id) {
+                                    const existing = await trx(tableName)
+                                        .where('id', record.id)
+                                        .first();
+                                    if (existing) {
+                                        skipped++;
+                                        continue;
+                                    }
+                                }
+                                // ID'ni o'chirib, insert qilish (avtomatik generatsiya uchun)
+                                const recordToInsert = { ...record };
+                                if (recordToInsert.id && tableName !== 'users') {
+                                    delete recordToInsert.id;
+                                }
+                                await trx(tableName).insert(recordToInsert);
+                                imported++;
                             }
-                            
-                            imported++;
                         } catch (err) {
                             console.error(`  ❌ ${tableName} yozuv import xatolik:`, err.message);
                             errors++;
@@ -369,6 +395,7 @@ router.post('/import-full-db', async (req, res) => {
             
             // Audit va xavfsizlik
             await importTable('audit_logs', data.audit_logs, {
+                upsert: { where: 'id', key: 'id' },
                 foreignKeys: [
                     { table: 'users', column: 'id', reference: 'user_id' }
                 ]
@@ -395,7 +422,9 @@ router.post('/import-full-db', async (req, res) => {
             });
             
             // Valyuta kurslari
-            await importTable('exchange_rates', data.exchange_rates);
+            await importTable('exchange_rates', data.exchange_rates, {
+                upsert: { where: 'id', key: 'id' }
+            });
             
             // Solishtirish
             await importTable('comparisons', data.comparisons);

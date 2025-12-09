@@ -110,12 +110,43 @@ export function handleRoleSelection(e) {
     // Rol talablarini ko'rsatish va tahrirlash imkoniyatini qo'shish
     showRoleRequirements(roleData);
     
-    // Admin uchun ham o'zgartirish imkoniyati qo'shildi
+    // Faqat super_admin roli uchun huquqlarni o'zgartirish mumkin emas
+    if (roleName === 'super_admin') {
+        DOM.permissionsPanel.classList.add('disabled');
+        DOM.saveRolePermissionsBtn.classList.add('hidden');
+        // Xabar ko'rsatish
+        const warningMsg = document.createElement('div');
+        warningMsg.className = 'alert alert-warning';
+        warningMsg.style.marginTop = '10px';
+        warningMsg.textContent = 'Super admin rolining huquqlarini o\'zgartirish mumkin emas.';
+        // Eski xabarni olib tashlash
+        const oldWarning = DOM.permissionsPanel.querySelector('.alert-warning');
+        if (oldWarning) oldWarning.remove();
+        DOM.permissionsPanel.appendChild(warningMsg);
+    } else {
+        // Admin va boshqa barcha rollar uchun huquqlarni o'zgartirish mumkin
     DOM.permissionsPanel.classList.remove('disabled');
+        DOM.saveRolePermissionsBtn.classList.remove('hidden');
+        // Xabarni olib tashlash
+        const warningMsg = DOM.permissionsPanel.querySelector('.alert-warning');
+        if (warningMsg) warningMsg.remove();
+    }
     // console.log('🎯 Role selection completed');
 }
 
 function showRoleRequirements(roleData) {
+    // Super admin uchun shartlarni ko'rsatmaslik (to'liq dotup)
+    if (!roleData || roleData.role_name === 'super_admin') {
+        const existingPanel = document.getElementById('role-requirements-panel');
+        if (existingPanel) {
+            existingPanel.remove();
+        }
+        return;
+    }
+    
+    // Admin roli uchun shartlarni ko'rsatish (ixtiyoriy)
+    // Admin roli uchun huquqlarni o'zgartirish mumkin emas, lekin shartlarni o'zgartirish mumkin
+    
     // Rol talablarini ko'rsatish uchun panel yaratish yoki yangilash
     let requirementsPanel = document.getElementById('role-requirements-panel');
     
@@ -228,6 +259,12 @@ async function saveRoleRequirements() {
 
 export async function saveRolePermissions() {
     if (!state.currentEditingRole) return;
+    
+    // Faqat super_admin roli uchun huquqlarni o'zgartirish mumkin emas
+    if (state.currentEditingRole === 'super_admin') {
+        showToast('Super admin rolining huquqlarini o\'zgartirish mumkin emas.', true);
+        return;
+    }
     
     const checkedPermissions = Array.from(DOM.permissionsGrid.querySelectorAll('input:checked'))
         .map(cb => cb.value);

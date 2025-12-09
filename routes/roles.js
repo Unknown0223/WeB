@@ -55,6 +55,45 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
     }
 });
 
+// Admin rolining ma'lumotlarini olish (404 xatosini oldini olish uchun)
+router.get('/admin', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        console.log('📋 [ROLES] /api/roles/admin endpointiga so\'rov keldi');
+        console.log('📋 [ROLES] User:', req.session.user?.username, 'Role:', req.session.user?.role);
+        
+        const [adminRole, rolePermissions] = await Promise.all([
+            db('roles').where('role_name', 'admin').first(),
+            db('role_permissions').where('role_name', 'admin').select('permission_key')
+        ]);
+
+        if (!adminRole) {
+            console.log('⚠️ [ROLES] Admin roli topilmadi');
+            return res.status(404).json({ message: "Admin roli topilmadi." });
+        }
+
+        const assignedPermissions = rolePermissions.map(rp => rp.permission_key);
+        
+        const requiresBrands = (adminRole.requires_brands === null || adminRole.requires_brands === undefined) 
+            ? null 
+            : Boolean(adminRole.requires_brands);
+        const requiresLocations = (adminRole.requires_locations === null || adminRole.requires_locations === undefined) 
+            ? null 
+            : Boolean(adminRole.requires_locations);
+
+        console.log('✅ [ROLES] Admin roli ma\'lumotlari yuklandi');
+        res.json({
+            role_name: adminRole.role_name,
+            permissions: assignedPermissions,
+            requires_brands: requiresBrands,
+            requires_locations: requiresLocations
+        });
+
+    } catch (error) {
+        console.error("❌ [ROLES] /api/roles/admin GET xatoligi:", error);
+        res.status(500).json({ message: "Admin roli ma'lumotlarini yuklashda xatolik." });
+    }
+});
+
 // Rolning huquqlarini yangilash
 router.put('/:role_name', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     const { role_name } = req.params;
@@ -64,8 +103,9 @@ router.put('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
         return res.status(400).json({ message: "Huquqlar massiv formatida yuborilishi kerak." });
     }
     
-    if (role_name === 'admin') {
-        return res.status(403).json({ message: "Admin rolini huquqlarini o'zgartirish mumkin emas." });
+    // Faqat super_admin roli uchun huquqlarni o'zgartirish mumkin emas
+    if (role_name === 'super_admin') {
+        return res.status(403).json({ message: "Super admin rolini huquqlarini o'zgartirish mumkin emas." });
     }
 
     try {
