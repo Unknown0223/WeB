@@ -174,6 +174,21 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
             currency: currency || null
         });
         
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [REPORTS] Yangi hisobot yaratildi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('new_report', {
+                reportId: reportId,
+                date: date,
+                location: location,
+                brand_id: brand_id,
+                brand_name: brandName,
+                created_by: user.id,
+                created_by_username: user.username
+            });
+            console.log(`✅ [REPORTS] WebSocket yuborildi: new_report`);
+        }
+        
         res.status(201).json({ message: "Hisobot muvaffaqiyatli saqlandi.", reportId: reportId });
     } catch (error) {
         if (error.code === 'SQLITE_CONSTRAINT' || (error.message && error.message.includes('UNIQUE constraint failed'))) {
@@ -277,6 +292,23 @@ router.put('/:id', isAuthenticated, async (req, res) => {
                 currency: currency || oldReport.currency || null,
                 old_brand_name: oldBrandName
             });
+            
+            // WebSocket orqali realtime yuborish
+            if (global.broadcastWebSocket) {
+                console.log(`📡 [REPORTS] Hisobot tahrirlandi, WebSocket orqali yuborilmoqda...`);
+                global.broadcastWebSocket('report_edited', {
+                    reportId: reportId,
+                    date: date,
+                    location: location,
+                    brand_id: brand_id,
+                    brand_name: brandName,
+                    updated_by: user.id,
+                    updated_by_username: user.username,
+                    old_date: oldReport.report_date,
+                    old_location: oldReport.location
+                });
+                console.log(`✅ [REPORTS] WebSocket yuborildi: report_edited`);
+            }
         }
         
         res.json({ message: "Hisobot muvaffaqiyatli yangilandi." });

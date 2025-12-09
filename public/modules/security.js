@@ -807,6 +807,12 @@ async function terminateAllSessions() {
     }
 }
 
+// Realtime yangilanish uchun funksiya
+export function loadSecurityData() {
+    console.log('🔄 [SECURITY] Security ma\'lumotlari yangilanmoqda...');
+    refreshSecurityData();
+}
+
 // Refresh Security Data
 function refreshSecurityData() {
     // console.log('🔄 Refreshing security data...');

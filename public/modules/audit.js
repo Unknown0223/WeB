@@ -97,6 +97,13 @@ export function setupAuditLogFilters() {
     });
 }
 
+// Realtime yangilanish uchun funksiya
+export function loadAuditLogs() {
+    console.log('🔄 [AUDIT] Audit log ma\'lumotlari yangilanmoqda...');
+    fetchAndRenderAuditLogs(state.auditLog.pagination?.currentPage || 1);
+    updateAuditStats();
+}
+
 export async function fetchAndRenderAuditLogs(page = 1) {
     state.auditLog.initialLoad = false;
     if (DOM.auditLogTableBody) {

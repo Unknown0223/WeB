@@ -147,6 +147,22 @@ router.post('/', isAuthenticated, hasPermission('settings:edit_table'), async (r
             await db('brand_locations').insert(locationRecords);
         }
 
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [BRANDS] Yangi brend yaratildi, WebSocket orqali yuborilmoqda...`);
+            const newBrand = await db('brands').where('id', brandId).first();
+            global.broadcastWebSocket('brand_updated', {
+                action: 'created',
+                brand: {
+                    id: brandId,
+                    name: newBrand.name,
+                    color: newBrand.color,
+                    emoji: newBrand.emoji
+                }
+            });
+            console.log(`✅ [BRANDS] WebSocket yuborildi: brand_updated (created)`);
+        }
+        
         res.json({ 
             message: "Brend muvaffaqiyatli yaratildi",
             id: brandId
@@ -196,6 +212,22 @@ router.put('/:id', isAuthenticated, hasPermission('settings:edit_table'), async 
             await db('brand_locations').insert(locationRecords);
         }
 
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [BRANDS] Brend yangilandi, WebSocket orqali yuborilmoqda...`);
+            const updatedBrand = await db('brands').where('id', id).first();
+            global.broadcastWebSocket('brand_updated', {
+                action: 'updated',
+                brand: {
+                    id: parseInt(id),
+                    name: updatedBrand.name,
+                    color: updatedBrand.color,
+                    emoji: updatedBrand.emoji
+                }
+            });
+            console.log(`✅ [BRANDS] WebSocket yuborildi: brand_updated (updated)`);
+        }
+        
         res.json({ message: "Brend muvaffaqiyatli yangilandi" });
     } catch (error) {
         console.error(`/api/brands/${req.params.id} PUT xatoligi:`, error);
@@ -208,8 +240,24 @@ router.delete('/:id', isAuthenticated, hasPermission('settings:edit_table'), asy
     try {
         const { id } = req.params;
 
+        // Brendni o'chirishdan oldin ma'lumotlarni olish
+        const deletedBrand = await db('brands').where('id', id).first();
+        
         // Brendni o'chirish (CASCADE orqali bog'lanishlar ham o'chadi)
         await db('brands').where('id', id).del();
+
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket && deletedBrand) {
+            console.log(`📡 [BRANDS] Brend o'chirildi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('brand_updated', {
+                action: 'deleted',
+                brand: {
+                    id: parseInt(id),
+                    name: deletedBrand.name
+                }
+            });
+            console.log(`✅ [BRANDS] WebSocket yuborildi: brand_updated (deleted)`);
+        }
 
         res.json({ message: "Brend muvaffaqiyatli o'chirildi" });
     } catch (error) {

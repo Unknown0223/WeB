@@ -19,7 +19,7 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
         if (details.ip) delete details.ip;
         if (details.userAgent) delete details.userAgent;
         
-        await db('audit_logs').insert({
+        const logEntry = {
             user_id: userId,
             action: action,
             target_type: targetType,
@@ -27,7 +27,32 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
             details: JSON.stringify(details),
             ip_address: ipAddress,
             user_agent: userAgent,
-        });
+        };
+        
+        const [logId] = await db('audit_logs').insert(logEntry);
+        
+        // Muhim event'lar uchun WebSocket orqali realtime yuborish
+        const importantActions = [
+            'create_report', 'edit_report', 'delete_report',
+            'create_user', 'edit_user', 'delete_user', 'approve_user', 'reject_user',
+            'create_role', 'update_role', 'delete_role',
+            'login_success', 'login_fail', 'logout', 'account_lock',
+            'change_password', 'change_secret_word'
+        ];
+        
+        if (global.broadcastWebSocket && importantActions.includes(action)) {
+            console.log(`📡 [AUDIT] Muhim action yozildi, WebSocket orqali yuborilmoqda... Action: ${action}`);
+            global.broadcastWebSocket('audit_log_added', {
+                logId: logId,
+                userId: userId,
+                action: action,
+                targetType: targetType,
+                targetId: targetId,
+                details: details,
+                timestamp: new Date().toISOString()
+            });
+            console.log(`✅ [AUDIT] WebSocket yuborildi: audit_log_added`);
+        }
     } catch (error) {
         console.error("Audit log yozishda xatolik:", error);
     }

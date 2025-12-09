@@ -134,6 +134,18 @@ router.post('/', isAuthenticated, async (req, res, next) => {
             await setWebhook(value);
         }
         
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [SETTINGS] Sozlama yangilandi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('settings_updated', {
+                key: key,
+                value: value,
+                updated_by: req.session.user.id,
+                updated_by_username: req.session.user.username
+            });
+            console.log(`✅ [SETTINGS] WebSocket yuborildi: settings_updated`);
+        }
+        
         res.json({ message: `"${key}" sozlamasi muvaffaqiyatli saqlandi.` });
     } catch (error) {
         console.error("/api/settings POST xatoligi:", error);

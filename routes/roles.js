@@ -126,6 +126,17 @@ router.put('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
         await refreshSessionsByRole(role_name);
         // =======================
 
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [ROLES] Rol huquqlari yangilandi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('role_updated', {
+                role_name: role_name,
+                permissions: permissions,
+                action: 'updated'
+            });
+            console.log(`✅ [ROLES] WebSocket yuborildi: role_updated`);
+        }
+
         res.json({ message: `"${role_name}" roli uchun huquqlar muvaffaqiyatli yangilandi.` });
 
     } catch (error) {
@@ -207,6 +218,18 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
         });
         
         console.log(`📋 [ROLES] Audit log yozildi. Action: create_role, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
+        
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [ROLES] Yangi rol yaratildi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('role_updated', {
+                role_name: role_name,
+                requires_brands: requires_brands,
+                requires_locations: requires_locations,
+                action: 'created'
+            });
+            console.log(`✅ [ROLES] WebSocket yuborildi: role_updated (created)`);
+        }
         
         res.json({ message: 'Yangi rol muvaffaqiyatli yaratildi', role_name });
     } catch (error) {

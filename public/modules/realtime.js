@@ -5,6 +5,7 @@ import { state } from './state.js';
 import { updateDashboard } from './dashboard.js';
 import { renderUsersByStatus } from './users.js';
 import { showToast } from './utils.js';
+import { fetchUsers } from './api.js';
 
 let ws = null;
 let reconnectInterval = null;
@@ -197,42 +198,387 @@ function handleWebSocketMessage(data) {
             break;
             
         case 'user_status_changed':
-            // Foydalanuvchi statusi o'zgardi
-            const user = state.users.find(u => u.id === payload.userId);
+            // Foydalanuvchi statusi o'zgardi (online/offline)
+            console.log('🔔 [REALTIME] User status o\'zgardi:', payload);
+            
+            const user = state.users?.find(u => u.id === payload.userId);
             if (user) {
                 user.is_online = payload.isOnline;
-                if (document.getElementById('users').classList.contains('active')) {
-                    const activeTab = document.querySelector('#user-tabs .active').dataset.status;
-                    renderUsersByStatus(activeTab);
+                
+                // Admin panelda yangilash
+                const usersPage = document.getElementById('users');
+                if (usersPage && usersPage.classList.contains('active')) {
+                    console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
+                    
+                    // Modern render funksiyasini chaqirish
+                    if (typeof renderUsersByStatus === 'function') {
+                        const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                        renderUsersByStatus(activeTab);
+                    } else {
+                        // Agar renderModernUsers mavjud bo'lsa
+                        import('./users.js').then(module => {
+                            if (module.renderModernUsers) {
+                                module.renderModernUsers();
+                            }
+                        });
+                    }
+                }
+                
+                // Statistikalarni yangilash
+                if (typeof updateUsersStatistics === 'function') {
+                    updateUsersStatistics();
+                } else {
+                    import('./users.js').then(module => {
+                        // updateUsersStatistics funksiyasi users.js ichida bo'lishi mumkin
+                        // Lekin u export qilinmagan bo'lishi mumkin
+                    });
+                }
+            } else {
+                console.log('⚠️ [REALTIME] User topilmadi, yangi ma\'lumotlar yuklash kerak');
+                // Agar user topilmasa, ma'lumotlarni qayta yuklash
+                if (typeof fetchUsers === 'function') {
+                    fetchUsers().then(users => {
+                        if (users) {
+                            state.users = users;
+                            const usersPage = document.getElementById('users');
+                            if (usersPage && usersPage.classList.contains('active')) {
+                                const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                                renderUsersByStatus(activeTab);
+                            }
+                        }
+                    });
                 }
             }
-            showToast(`${payload.username} ${payload.isOnline ? 'online' : 'offline'}`);
+            
+            // Toast ko'rsatish
+            const onlineStatusText = payload.isOnline ? '🟢 online' : '🔴 offline';
+            showToast(`${payload.username} ${onlineStatusText} bo'ldi`);
             break;
             
         case 'new_report':
             // Yangi hisobot qo'shildi
-            showToast('Yangi hisobot qo\'shildi!');
-            if (document.getElementById('dashboard').classList.contains('active')) {
+            console.log('🔔 [REALTIME] Yangi hisobot qo\'shildi:', payload);
+            showToast(`📊 Yangi hisobot: ${payload.location} - ${payload.date}`);
+            
+            // Dashboard yangilash
+            const dashboardPage = document.getElementById('dashboard');
+            if (dashboardPage && dashboardPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Dashboard aktiv, yangilanmoqda...');
                 refreshCurrentDashboard();
+            }
+            
+            // KPI sahifasini yangilash
+            const kpiPage = document.getElementById('employee-statistics');
+            if (kpiPage && kpiPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] KPI sahifasi aktiv, yangilanmoqda...');
+                import('./kpi.js').then(module => {
+                    if (module.refreshKpiData) {
+                        module.refreshKpiData();
+                    }
+                });
+            }
+            
+            // Pivot sahifasini yangilash
+            const pivotPage = document.getElementById('pivot-reports');
+            if (pivotPage && pivotPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Pivot sahifasi aktiv, yangilanmoqda...');
+                // Pivot jadvalini yangilash
+                if (state.pivotGrid && typeof state.pivotGrid.refresh === 'function') {
+                    state.pivotGrid.refresh();
+                }
             }
             break;
             
         case 'report_edited':
             // Hisobot tahrirlandi
-            showToast('Hisobot yangilandi');
-            if (document.getElementById('dashboard').classList.contains('active')) {
+            console.log('🔔 [REALTIME] Hisobot tahrirlandi:', payload);
+            showToast(`✏️ Hisobot yangilandi: ${payload.location} - ${payload.date}`);
+            
+            // Dashboard yangilash
+            const dashboardPageEdit = document.getElementById('dashboard');
+            if (dashboardPageEdit && dashboardPageEdit.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Dashboard aktiv, yangilanmoqda...');
                 refreshCurrentDashboard();
+            }
+            
+            // KPI sahifasini yangilash
+            const kpiPageEdit = document.getElementById('employee-statistics');
+            if (kpiPageEdit && kpiPageEdit.classList.contains('active')) {
+                console.log('🔄 [REALTIME] KPI sahifasi aktiv, yangilanmoqda...');
+                import('./kpi.js').then(module => {
+                    if (module.refreshKpiData) {
+                        module.refreshKpiData();
+                    }
+                });
+            }
+            
+            // Pivot sahifasini yangilash
+            const pivotPageEdit = document.getElementById('pivot-reports');
+            if (pivotPageEdit && pivotPageEdit.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Pivot sahifasi aktiv, yangilanmoqda...');
+                if (state.pivotGrid && typeof state.pivotGrid.refresh === 'function') {
+                    state.pivotGrid.refresh();
+                }
             }
             break;
             
         case 'user_registered':
             // Yangi foydalanuvchi ro'yxatdan o'tdi
-            showToast('Yangi registratsiya so\'rovi!');
-            state.pendingUsers.push(payload.user);
-            if (document.getElementById('requests').classList.contains('active')) {
+            console.log('🔔 [REALTIME] Yangi foydalanuvchi ro\'yxatdan o\'tdi:', payload);
+            
+            // Pending users ro'yxatiga qo'shish
+            if (!state.pendingUsers) {
+                state.pendingUsers = [];
+            }
+            
+            // Agar allaqachon mavjud bo'lmasa, qo'shish
+            const existingPending = state.pendingUsers.find(u => u.id === payload.user?.id);
+            if (!existingPending && payload.user) {
+                state.pendingUsers.push(payload.user);
+            }
+            
+            // Admin panelda yangilash
+            const requestsPage = document.getElementById('requests');
+            if (requestsPage && requestsPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Requests sahifasi aktiv, yangilanmoqda...');
                 import('./users.js').then(module => {
-                    module.renderPendingUsers();
+                    if (module.renderPendingUsers) {
+                        module.renderPendingUsers();
+                    }
                 });
+            }
+            
+            // Users sahifasida ham statistikalarni yangilash
+            const usersPage = document.getElementById('users');
+            if (usersPage && usersPage.classList.contains('active')) {
+                // Statistikalarni yangilash
+                import('./users.js').then(module => {
+                    if (module.renderModernUsers) {
+                        // Avval users ro'yxatini yangilash
+                        if (typeof fetchUsers === 'function') {
+                            fetchUsers().then(users => {
+                                if (users) {
+                                    state.users = users;
+                                    module.renderModernUsers();
+                                }
+                            });
+                        } else {
+                            module.renderModernUsers();
+                        }
+                    }
+                });
+            }
+            
+            // Toast ko'rsatish
+            const registeredUsername = payload.user?.username || payload.username || 'Yangi foydalanuvchi';
+            showToast(`🆕 Yangi registratsiya so'rovi: ${registeredUsername}`, false);
+            break;
+            
+        case 'account_status_changed':
+            // Akkaunt statusi o'zgardi (active/blocked/archived)
+            console.log('🔔 [REALTIME] Account status o\'zgardi:', payload);
+            
+            // Users ro'yxatini yangilash
+            if (state.users) {
+                const user = state.users.find(u => u.id === payload.userId);
+                if (user) {
+                    user.status = payload.status;
+                    
+                    // Admin panelda yangilash
+                    const usersPage = document.getElementById('users');
+                    if (usersPage && usersPage.classList.contains('active')) {
+                        console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
+                        
+                        // Modern render funksiyasini chaqirish
+                        if (typeof renderUsersByStatus === 'function') {
+                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                            renderUsersByStatus(activeTab);
+                        } else {
+                            import('./users.js').then(module => {
+                                if (module.renderModernUsers) {
+                                    module.renderModernUsers();
+                                }
+                            });
+                        }
+                    }
+                    
+                    // Statistikalarni yangilash
+                    import('./users.js').then(module => {
+                        // updateUsersStatistics funksiyasi users.js ichida bo'lishi mumkin
+                    });
+                } else {
+                    // Agar user topilmasa, ma'lumotlarni qayta yuklash
+                    console.log('⚠️ [REALTIME] User topilmadi, yangi ma\'lumotlar yuklash kerak');
+                    if (typeof fetchUsers === 'function') {
+                        fetchUsers().then(users => {
+                            if (users) {
+                                state.users = users;
+                                const usersPage = document.getElementById('users');
+                                if (usersPage && usersPage.classList.contains('active')) {
+                                    const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                                    renderUsersByStatus(activeTab);
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            
+            // Pending users ro'yxatini yangilash (agar status pending bo'lmasa)
+            if (payload.status !== 'pending_approval' && payload.status !== 'pending_telegram_subscription') {
+                if (state.pendingUsers) {
+                    state.pendingUsers = state.pendingUsers.filter(u => u.id !== payload.userId);
+                }
+                
+                const requestsPage = document.getElementById('requests');
+                if (requestsPage && requestsPage.classList.contains('active')) {
+                    import('./users.js').then(module => {
+                        if (module.renderPendingUsers) {
+                            module.renderPendingUsers();
+                        }
+                    });
+                }
+            }
+            
+            // Toast ko'rsatish
+            const accountStatusText = payload.status === 'active' ? '✅ aktiv' : 
+                              payload.status === 'blocked' ? '🚫 bloklangan' : 
+                              payload.status === 'archived' ? '📦 arxivlangan' : payload.status;
+            const accountUsername = payload.fullname || payload.username || 'Foydalanuvchi';
+            showToast(`${accountUsername} ${accountStatusText} bo'ldi`);
+            break;
+            
+        case 'brand_updated':
+            // Brend yangilandi (yaratildi/yangilandi/o'chirildi)
+            console.log('🔔 [REALTIME] Brend yangilandi:', payload);
+            
+            // Settings sahifasini yangilash
+            const settingsPage = document.getElementById('settings');
+            if (settingsPage && settingsPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Settings sahifasi aktiv, brendlar yangilanmoqda...');
+                import('./brands.js').then(module => {
+                    if (module.loadBrands) {
+                        module.loadBrands();
+                    }
+                });
+            }
+            
+            // Toast ko'rsatish
+            const brandActionText = payload.action === 'created' ? 'yaratildi' : 
+                                   payload.action === 'updated' ? 'yangilandi' : 'o\'chirildi';
+            const brandName = payload.brand?.name || 'Brend';
+            showToast(`🏢 ${brandName} ${brandActionText}`);
+            break;
+            
+        case 'role_updated':
+            // Rol yangilandi
+            console.log('🔔 [REALTIME] Rol yangilandi:', payload);
+            
+            // Roles sahifasini yangilash
+            const rolesPage = document.getElementById('roles');
+            if (rolesPage && rolesPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Roles sahifasi aktiv, yangilanmoqda...');
+                import('./roles.js').then(module => {
+                    if (module.renderRoles) {
+                        module.renderRoles();
+                    }
+                });
+            }
+            
+            // Users sahifasini ham yangilash (chunki rol o'zgarganda user ma'lumotlari ham o'zgarishi mumkin)
+            const usersPageRole = document.getElementById('users');
+            if (usersPageRole && usersPageRole.classList.contains('active')) {
+                import('./users.js').then(module => {
+                    if (module.renderModernUsers) {
+                        module.renderModernUsers();
+                    }
+                });
+            }
+            
+            // Toast ko'rsatish
+            const roleActionText = payload.action === 'created' ? 'yaratildi' : 'yangilandi';
+            showToast(`👤 Rol "${payload.role_name}" ${roleActionText}`);
+            break;
+            
+        case 'settings_updated':
+            // Sozlama yangilandi
+            console.log('🔔 [REALTIME] Sozlama yangilandi:', payload);
+            
+            // Settings sahifasini yangilash
+            const settingsPageUpdate = document.getElementById('settings');
+            if (settingsPageUpdate && settingsPageUpdate.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Settings sahifasi aktiv, yangilanmoqda...');
+                
+                // Sozlamalarni qayta yuklash
+                import('./api.js').then(module => {
+                    if (module.fetchSettings) {
+                        module.fetchSettings().then(settings => {
+                            if (settings) {
+                                state.settings = { ...state.settings, ...settings };
+                                
+                                // Sozlamalar modulini yangilash
+                                import('./settings.js').then(settingsModule => {
+                                    if (payload.key === 'app_settings' && settingsModule.renderTableSettings) {
+                                        settingsModule.renderTableSettings();
+                                    } else if (payload.key === 'telegram_bot_token' || payload.key === 'telegram_bot_username' || payload.key === 'telegram_admin_chat_id' || payload.key === 'telegram_group_id') {
+                                        if (settingsModule.renderTelegramSettings) {
+                                            settingsModule.renderTelegramSettings();
+                                        }
+                                    } else if (payload.key === 'pagination_limit' || payload.key === 'branding_settings' || payload.key === 'kpi_settings') {
+                                        if (payload.key === 'branding_settings' && settingsModule.renderGeneralSettings) {
+                                            settingsModule.renderGeneralSettings();
+                                        }
+                                        if (payload.key === 'kpi_settings' && settingsModule.renderKpiSettings) {
+                                            settingsModule.renderKpiSettings();
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+            
+            // Dashboard yangilash (agar sozlamalar dashboard'ga ta'sir qilsa)
+            if (payload.key === 'app_settings' || payload.key === 'pagination_limit') {
+                const dashboardPageSettings = document.getElementById('dashboard');
+                if (dashboardPageSettings && dashboardPageSettings.classList.contains('active')) {
+                    refreshCurrentDashboard();
+                }
+            }
+            
+            // Toast ko'rsatish
+            showToast(`⚙️ Sozlama "${payload.key}" yangilandi`);
+            break;
+            
+        case 'audit_log_added':
+            // Audit log qo'shildi
+            console.log('🔔 [REALTIME] Audit log qo\'shildi:', payload);
+            
+            // Audit log sahifasini yangilash
+            const auditPage = document.getElementById('audit');
+            if (auditPage && auditPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Audit log sahifasi aktiv, yangilanmoqda...');
+                import('./audit.js').then(module => {
+                    if (module.loadAuditLogs) {
+                        module.loadAuditLogs();
+                    } else if (module.refreshAuditLogs) {
+                        module.refreshAuditLogs();
+                    }
+                });
+            }
+            
+            // Security sahifasini yangilash (agar login/logout event bo'lsa)
+            if (payload.action === 'login_success' || payload.action === 'login_fail' || payload.action === 'logout' || payload.action === 'account_lock') {
+                const securityPage = document.getElementById('security');
+                if (securityPage && securityPage.classList.contains('active')) {
+                    console.log('🔄 [REALTIME] Security sahifasi aktiv, yangilanmoqda...');
+                    import('./security.js').then(module => {
+                        if (module.loadSecurityData) {
+                            module.loadSecurityData();
+                        }
+                    });
+                }
             }
             break;
             

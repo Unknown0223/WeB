@@ -33,6 +33,12 @@ export function setupKpiPage() {
     loadSimpleKpiData();
 }
 
+// Realtime yangilanish uchun funksiya
+export function refreshKpiData() {
+    console.log('🔄 [KPI] KPI ma\'lumotlari yangilanmoqda...');
+    loadSimpleKpiData();
+}
+
 // Zamonaviy oy tanlash funksiyalari
 function setupModernMonthSelector() {
     const monthDisplayBtn = document.getElementById('month-display-btn');

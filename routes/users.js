@@ -388,6 +388,23 @@ router.put('/:id/status', isAuthenticated, hasPermission('users:change_status'),
     try {
         await userRepository.updateUserStatus(adminId, userId, status, ipAddress, userAgent);
         
+        // Foydalanuvchi ma'lumotlarini olish
+        const user = await db('users').where('id', userId).first();
+        
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket && user) {
+            console.log(`📡 [USERS] Account status o'zgardi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('account_status_changed', {
+                userId: parseInt(userId),
+                username: user.username,
+                fullname: user.fullname,
+                status: status,
+                previousStatus: user.status,
+                changedBy: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: account_status_changed`);
+        }
+        
         const message = status === 'active' ? "Foydalanuvchi muvaffaqiyatli aktivlashtirildi." : "Foydalanuvchi muvaffaqiyatli bloklandi va barcha sessiyalari tugatildi.";
         res.json({ message });
     } catch (error) {
@@ -619,6 +636,21 @@ router.put('/:id/approve', (req, res, next) => {
         });
         console.log(`✅ [BACKEND] 7. Ma'lumotlar muvaffaqiyatli saqlandi`);
 
+        // WebSocket orqali realtime yuborish - foydalanuvchi tasdiqlandi
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Foydalanuvchi tasdiqlandi, WebSocket orqali yuborilmoqda...`);
+            const updatedUser = await db('users').where('id', userId).first();
+            global.broadcastWebSocket('account_status_changed', {
+                userId: parseInt(userId),
+                username: updatedUser?.username,
+                fullname: updatedUser?.fullname,
+                status: 'active',
+                previousStatus: 'pending_approval',
+                changedBy: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: account_status_changed (approved)`);
+        }
+
         // 3. Foydalanuvchiga kirish ma'lumotlarini Telegram orqali yuborish
         console.log(`📨 [BACKEND] 8. Telegram orqali kirish ma'lumotlarini yuborish...`);
         let credentialsSent = false;
@@ -713,6 +745,21 @@ router.put('/:id/reject', isAuthenticated, hasPermission('users:edit'), async (r
         await db('pending_registrations').where({ user_id: userId }).del();
 
         await userRepository.logAction(adminId, 'reject_user', 'user', userId, { ip: ipAddress, userAgent });
+
+        // WebSocket orqali realtime yuborish - foydalanuvchi rad etildi
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Foydalanuvchi rad etildi, WebSocket orqali yuborilmoqda...`);
+            const rejectedUser = await db('users').where('id', userId).first();
+            global.broadcastWebSocket('account_status_changed', {
+                userId: parseInt(userId),
+                username: rejectedUser?.username,
+                fullname: rejectedUser?.fullname,
+                status: 'archived',
+                previousStatus: rejectedUser?.status || 'pending_approval',
+                changedBy: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: account_status_changed (rejected)`);
+        }
 
         res.json({ message: "Foydalanuvchi so'rovi muvaffaqiyatli rad etildi va arxivlandi." });
     } catch (error) {

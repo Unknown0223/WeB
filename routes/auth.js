@@ -109,6 +109,22 @@ router.post('/register', async (req, res) => {
         });
             console.log(`✅ [REGISTER] Admin'ga so'rov yuborildi. User ID: ${userId}`);
         
+            // WebSocket orqali realtime yuborish - yangi foydalanuvchi ro'yxatdan o'tdi
+            if (global.broadcastWebSocket) {
+                console.log(`📡 [REGISTER] Yangi foydalanuvchi ro'yxatdan o'tdi, WebSocket orqali yuborilmoqda...`);
+                global.broadcastWebSocket('user_registered', {
+                    user: {
+                        id: userId,
+                        username: username,
+                        fullname: fullname,
+                        status: 'pending_approval',
+                        role: null
+                    },
+                    username: username
+                });
+                console.log(`✅ [REGISTER] WebSocket yuborildi: user_registered`);
+            }
+        
             return res.status(201).json({ 
             status: 'pending_approval',
             message: "So'rovingiz qabul qilindi. Administrator tasdiqlashini kuting." 
@@ -117,6 +133,22 @@ router.post('/register', async (req, res) => {
 
         // Foydalanuvchi statusini pending_telegram_subscription ga o'zgartirish
         await db('users').where({ id: userId }).update({ status: 'pending_telegram_subscription' });
+
+        // WebSocket orqali realtime yuborish - yangi foydalanuvchi ro'yxatdan o'tdi
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [REGISTER] Yangi foydalanuvchi ro'yxatdan o'tdi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('user_registered', {
+                user: {
+                    id: userId,
+                    username: username,
+                    fullname: fullname,
+                    status: 'pending_telegram_subscription',
+                    role: null
+                },
+                username: username
+            });
+            console.log(`✅ [REGISTER] WebSocket yuborildi: user_registered`);
+        }
 
         const connectLink = `https://t.me/${botUsername}?start=subscribe_${userId}`;
         console.log(`🔗 [REGISTER] Bot obuna havolasi yaratildi. Link: ${connectLink}, User ID: ${userId}`);
