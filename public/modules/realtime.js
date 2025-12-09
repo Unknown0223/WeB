@@ -125,8 +125,36 @@ function handleWebSocketMessage(data) {
             }
             break;
             
+        case 'comparison_difference':
+            // Solishtirishda farqlar aniqlandi
+            console.log('🔔 [REALTIME] Comparison difference notification qabul qilindi:', payload);
+            
+            // Faqat operatorlar uchun ko'rsatish
+            const currentUserId = state.currentUser?.id;
+            if (payload.user_id && payload.user_id === currentUserId) {
+                console.log('🔔 [REALTIME] Notification joriy foydalanuvchiga tegishli');
+                
+                // Toast ko'rsatish
+                const message = payload.notification?.message || 'Solishtirishda farqlar aniqlandi';
+                showToast(`⚠️ ${message}`, false);
+                
+                // Notification'larni yangilash (agar modal ochiq bo'lsa)
+                if (typeof window.checkUnreadNotifications === 'function') {
+                    console.log('🔔 [REALTIME] Notification ro\'yxatini yangilash...');
+                    window.checkUnreadNotifications();
+                } else {
+                    console.log('⚠️ [REALTIME] checkUnreadNotifications funksiyasi topilmadi');
+                }
+                
+                // Avatar'ni yangilash - checkUnreadNotifications ichida updateAvatarNotificationState chaqiriladi
+                // Shuning uchun faqat checkUnreadNotifications ni chaqirish kifoya
+            } else {
+                console.log(`ℹ️ [REALTIME] Notification boshqa foydalanuvchiga tegishli (user_id: ${payload.user_id}, current: ${currentUserId})`);
+            }
+            break;
+            
         default:
-            // console.log('Unknown message type:', type);
+            console.log('ℹ️ [REALTIME] Noma\'lum xabar turi:', type, payload);
     }
 }
 

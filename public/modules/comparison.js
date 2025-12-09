@@ -571,12 +571,30 @@ function renderTable(data) {
             
             // Agar format o'zgarganda, yangilash
             if (formattedValue !== newValue) {
+                const oldValue = this.value;
                 this.value = formattedValue;
+                
                 // Cursor pozitsiyasini saqlash
-                const lengthDiff = formattedValue.length - newValue.length;
-                const newCursorPosition = Math.max(0, Math.min(cursorPosition + lengthDiff, formattedValue.length));
+                // Format qilish jarayonida cursor pozitsiyasini to'g'ri hisoblash
+                const oldLength = oldValue.length;
+                const newLength = formattedValue.length;
+                const lengthDiff = newLength - oldLength;
+                
+                // Cursor pozitsiyasini hisoblash
+                let newCursorPosition = cursorPosition;
+                if (lengthDiff !== 0) {
+                    // Agar uzunlik o'zgarganda, cursor pozitsiyasini moslashtirish
+                    newCursorPosition = Math.max(0, Math.min(cursorPosition + lengthDiff, formattedValue.length));
+                } else {
+                    // Agar uzunlik o'zgarmagan bo'lsa, cursor pozitsiyasini saqlash
+                    newCursorPosition = Math.max(0, Math.min(cursorPosition, formattedValue.length));
+                }
+                
+                // Cursor pozitsiyasini o'rnatish
                 setTimeout(() => {
-                    this.setSelectionRange(newCursorPosition, newCursorPosition);
+                    if (this.setSelectionRange) {
+                        this.setSelectionRange(newCursorPosition, newCursorPosition);
+                    }
                 }, 0);
             }
             
@@ -595,6 +613,16 @@ function renderTable(data) {
         input.addEventListener('blur', function() {
             if (!this.disabled) {
                 this.parentElement.parentElement.style.background = '';
+                
+                // Blur bo'lganda qiymatni formatlash va saqlash
+                const currentValue = this.value.trim();
+                if (currentValue) {
+                    const parsedValue = parseComparisonNumber(currentValue);
+                    const formattedValue = formatComparisonNumber(parsedValue);
+                    if (formattedValue !== currentValue) {
+                        this.value = formattedValue;
+                    }
+                }
             }
         });
     });
@@ -623,7 +651,8 @@ async function saveComparisonData() {
     for (const input of inputs) {
         const location = input.getAttribute('data-location');
         const value = input.value.trim();
-        const comparisonAmount = value ? parseFloat(value) : null;
+        // Formatlangan qiymatni to'g'ri parse qilish (bo'sh joylarni olib tashlash)
+        const comparisonAmount = value ? parseComparisonNumber(value) : null;
         
         comparisons.push({
             location: location,

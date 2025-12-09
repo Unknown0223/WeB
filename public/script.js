@@ -1754,7 +1754,8 @@ const renderKpiCards = (stats) => {
     }
 
     // Unread notification'larni tekshirish va avatar'ni yangilash
-    async function checkUnreadNotifications() {
+    // Global qilish - realtime.js'da ishlatish uchun
+    window.checkUnreadNotifications = async function checkUnreadNotifications() {
         try {
             const res = await fetch('/api/notifications?unread_only=true');
             if (!res || !res.ok) return;
@@ -1780,7 +1781,8 @@ const renderKpiCards = (stats) => {
     }
 
     // Avatar'ga pulsatsiya effekti qo'shish/olib tashlash
-    function updateAvatarNotificationState(unreadCount) {
+    // Global qilish - realtime.js'da ishlatish uchun
+    window.updateAvatarNotificationState = function updateAvatarNotificationState(unreadCount) {
         const avatarDisplay = document.getElementById('user-avatar-display');
         if (avatarDisplay) {
             if (unreadCount > 0) {

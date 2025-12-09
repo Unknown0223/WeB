@@ -121,15 +121,19 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 };
             }
 
-            // Report data'dan barcha qiymatlarni yig'ish
+            // Report data'dan faqat tanlangan brend uchun qiymatlarni yig'ish
             try {
                 const rawData = report.data || '{}';
                 const reportData = JSON.parse(rawData);
                 
                 let reportTotal = 0;
                 for (const key in reportData) {
-                    const value = parseFloat(reportData[key]) || 0;
-                    reportTotal += value;
+                    // Key format: {brandId}_{columnName}
+                    const parts = key.split('_');
+                    if (parts.length >= 2 && parts[0] === targetBrandId) {
+                        const value = parseFloat(reportData[key]) || 0;
+                        reportTotal += value;
+                    }
                 }
                 
                 locationTotals[location].operator_amount += reportTotal;
@@ -274,12 +278,17 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 .where('r.location', location);
 
             let operatorAmount = 0;
+            const targetBrandIdStr = String(brandId);
             for (const report of reports) {
                 try {
                     const reportData = JSON.parse(report.data || '{}');
                     for (const key in reportData) {
-                        const value = parseFloat(reportData[key]) || 0;
-                        operatorAmount += value;
+                        // Key format: {brandId}_{columnName}
+                        const parts = key.split('_');
+                        if (parts.length >= 2 && parts[0] === targetBrandIdStr) {
+                            const value = parseFloat(reportData[key]) || 0;
+                            operatorAmount += value;
+                        }
                     }
                 } catch (error) {
                     // Silent error handling
@@ -344,12 +353,21 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
 
         // Agar farqlar bo'lsa, barcha operatorlarga notification yaratish
         if (differences.length > 0) {
+            console.log(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial`);
+            console.log(`🔔 [COMPARISON] Brand: ${brandName}, Date: ${date}`);
+            
             try {
                 // Barcha operatorlarni olish
                 const operators = await db('users')
                     .where('role', 'operator')
                     .where('status', 'active')
                     .select('id');
+
+                console.log(`🔔 [COMPARISON] Topilgan operatorlar soni: ${operators.length}`);
+                
+                if (operators.length === 0) {
+                    console.log(`⚠️ [COMPARISON] Hech qanday aktiv operator topilmadi`);
+                }
 
                 // Har bir operator uchun notification yaratish
                 const notificationData = operators.map(operator => ({
@@ -369,11 +387,50 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 }));
 
                 if (notificationData.length > 0) {
+                    console.log(`💾 [COMPARISON] ${notificationData.length} ta notification yaratilmoqda...`);
                     await db('notifications').insert(notificationData);
+                    console.log(`✅ [COMPARISON] Notification'lar muvaffaqiyatli yaratildi`);
+                    
+                    // WebSocket orqali realtime yuborish
+                    try {
+                        if (global.broadcastWebSocket) {
+                            console.log(`📡 [COMPARISON] WebSocket orqali realtime yuborilmoqda...`);
+                            
+                            // Har bir operator uchun alohida yuborish
+                            for (const operator of operators) {
+                                global.broadcastWebSocket('comparison_difference', {
+                                    user_id: operator.id,
+                                    notification: {
+                                        type: 'comparison_difference',
+                                        title: `Solishtirishda farqlar aniqlandi`,
+                                        message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
+                                        details: {
+                                            date,
+                                            brand_id: brandId,
+                                            brand_name: brandName,
+                                            differences: differences,
+                                            total_differences: differences.length
+                                        }
+                                    }
+                                });
+                            }
+                            
+                            console.log(`✅ [COMPARISON] WebSocket orqali ${operators.length} ta operatorga yuborildi`);
+                        } else {
+                            console.log(`⚠️ [COMPARISON] global.broadcastWebSocket funksiyasi mavjud emas`);
+                        }
+                    } catch (wsError) {
+                        console.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError);
+                    }
+                } else {
+                    console.log(`⚠️ [COMPARISON] Notification data bo'sh, yuborilmaydi`);
                 }
             } catch (error) {
+                console.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error);
                 // Notification yaratishda xatolik bo'lsa ham, asosiy javob qaytariladi
             }
+        } else {
+            console.log(`ℹ️ [COMPARISON] Farqlar topilmadi, notification yuborilmaydi`);
         }
 
         res.json({
@@ -484,8 +541,13 @@ router.get('/export', isAuthenticated, hasPermission('comparison:export'), async
             }
             try {
                 const reportData = JSON.parse(report.data || '{}');
+                const targetBrandIdStr = String(brandId);
                 for (const key in reportData) {
-                    locationTotals[location].operator_amount += parseFloat(reportData[key]) || 0;
+                    // Key format: {brandId}_{columnName}
+                    const parts = key.split('_');
+                    if (parts.length >= 2 && parts[0] === targetBrandIdStr) {
+                        locationTotals[location].operator_amount += parseFloat(reportData[key]) || 0;
+                    }
                 }
             } catch (error) {
                 // Silent error handling
@@ -697,12 +759,17 @@ router.post('/import', isAuthenticated, checkComparisonEditPermission, upload.si
                 .where('r.location', location);
 
             let operatorAmount = 0;
+            const targetBrandIdStr = String(brandId);
             for (const report of reports) {
                 try {
                     const reportData = JSON.parse(report.data || '{}');
                     for (const key in reportData) {
-                        const value = parseFloat(reportData[key]) || 0;
-                        operatorAmount += value;
+                        // Key format: {brandId}_{columnName}
+                        const parts = key.split('_');
+                        if (parts.length >= 2 && parts[0] === targetBrandIdStr) {
+                            const value = parseFloat(reportData[key]) || 0;
+                            operatorAmount += value;
+                        }
                     }
                 } catch (error) {
                     // Silent error handling
