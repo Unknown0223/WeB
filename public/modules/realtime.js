@@ -250,15 +250,12 @@ function handleWebSocketMessage(data) {
                 }
             }
             
-            // Toast ko'rsatish
-            const onlineStatusText = payload.isOnline ? '🟢 online' : '🔴 offline';
-            showToast(`${payload.username} ${onlineStatusText} bo'ldi`);
+            // Faqat ma'lumotlarni yangilash, toast ko'rsatilmaydi
             break;
             
         case 'new_report':
             // Yangi hisobot qo'shildi
             console.log('🔔 [REALTIME] Yangi hisobot qo\'shildi:', payload);
-            showToast(`📊 Yangi hisobot: ${payload.location} - ${payload.date}`);
             
             // Dashboard yangilash
             const dashboardPage = document.getElementById('dashboard');
@@ -292,7 +289,6 @@ function handleWebSocketMessage(data) {
         case 'report_edited':
             // Hisobot tahrirlandi
             console.log('🔔 [REALTIME] Hisobot tahrirlandi:', payload);
-            showToast(`✏️ Hisobot yangilandi: ${payload.location} - ${payload.date}`);
             
             // Dashboard yangilash
             const dashboardPageEdit = document.getElementById('dashboard');
@@ -369,9 +365,7 @@ function handleWebSocketMessage(data) {
                 });
             }
             
-            // Toast ko'rsatish
-            const registeredUsername = payload.user?.username || payload.username || 'Yangi foydalanuvchi';
-            showToast(`🆕 Yangi registratsiya so'rovi: ${registeredUsername}`, false);
+            // Faqat ma'lumotlarni yangilash, toast ko'rsatilmaydi
             break;
             
         case 'account_status_changed':
@@ -440,12 +434,7 @@ function handleWebSocketMessage(data) {
                 }
             }
             
-            // Toast ko'rsatish
-            const accountStatusText = payload.status === 'active' ? '✅ aktiv' : 
-                              payload.status === 'blocked' ? '🚫 bloklangan' : 
-                              payload.status === 'archived' ? '📦 arxivlangan' : payload.status;
-            const accountUsername = payload.fullname || payload.username || 'Foydalanuvchi';
-            showToast(`${accountUsername} ${accountStatusText} bo'ldi`);
+            // Faqat ma'lumotlarni yangilash, toast ko'rsatilmaydi
             break;
             
         case 'brand_updated':
@@ -463,11 +452,7 @@ function handleWebSocketMessage(data) {
                 });
             }
             
-            // Toast ko'rsatish
-            const brandActionText = payload.action === 'created' ? 'yaratildi' : 
-                                   payload.action === 'updated' ? 'yangilandi' : 'o\'chirildi';
-            const brandName = payload.brand?.name || 'Brend';
-            showToast(`🏢 ${brandName} ${brandActionText}`);
+            // Faqat ma'lumotlarni yangilash, toast ko'rsatilmaydi
             break;
             
         case 'role_updated':
@@ -495,9 +480,7 @@ function handleWebSocketMessage(data) {
                 });
             }
             
-            // Toast ko'rsatish
-            const roleActionText = payload.action === 'created' ? 'yaratildi' : 'yangilandi';
-            showToast(`👤 Rol "${payload.role_name}" ${roleActionText}`);
+            // Faqat ma'lumotlarni yangilash, toast ko'rsatilmaydi
             break;
             
         case 'settings_updated':
@@ -547,8 +530,7 @@ function handleWebSocketMessage(data) {
                 }
             }
             
-            // Toast ko'rsatish
-            showToast(`⚙️ Sozlama "${payload.key}" yangilandi`);
+            // Faqat ma'lumotlarni yangilash, toast ko'rsatilmaydi
             break;
             
         case 'audit_log_added':

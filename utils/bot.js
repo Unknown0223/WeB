@@ -28,6 +28,12 @@ function formatNumber(num) {
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+// Brend nomi va qiymat o'rtasida nuqtalar bilan to'ldirish
+function formatBrandLine(brandName, value, maxLength = 30) {
+    const dots = '.'.repeat(Math.max(1, maxLength - brandName.length - value.length));
+    return `${escapeHtml(brandName)} ${dots} ${value}`;
+}
+
 // Filiallar tugmalarini yaratish (grid formatida)
 function createLocationButtons(locations, selectedLocations = []) {
     const buttons = [];
@@ -249,24 +255,37 @@ async function formatAndSendReport(payload) {
             }
         }
         
-        // Brendlar bo'yicha ko'rsatish (faqat umumiy summa, ustunlarsiz)
+        // Brendlar bo'yicha ko'rsatish (ustun tekis, ikki nuqta bilan)
         messageText += `<b>Yangilangan summalar:</b>\n\n`;
         
         const sortedBrandIds = Object.keys(brandTotals).sort((a, b) => a - b);
+        const brandLines = [];
+        
+        // Eng uzun brend nomini va eng uzun qiymatni topish (ustun tekisligi uchun)
+        let maxBrandNameLength = 0;
+        let maxValueLength = 0;
+        const brandValues = [];
         
         for (const brandId of sortedBrandIds) {
             const { brandTotal } = brandTotals[brandId];
-            
             if (brandTotal > 0) {
                 const brandName = brandsMap[brandId] || `Brend #${brandId}`;
-                
-                // Qiymat allaqachon tanlangan valyutada saqlangan, konvertatsiya qilmaslik kerak
-                // Faqat formatlash kerak
-                messageText += `${escapeHtml(brandName)}: <code>${formatCurrency(brandTotal, reportCurrency)}</code>\n`;
+                const formattedValue = formatCurrency(brandTotal, reportCurrency);
+                maxBrandNameLength = Math.max(maxBrandNameLength, brandName.length);
+                maxValueLength = Math.max(maxValueLength, formattedValue.length);
+                brandValues.push({ brandName, formattedValue });
             }
         }
         
-        messageText += `\n`;
+        // Har bir brend uchun formatlash (ustun tekis - brend nomlari va qiymatlar)
+        for (const { brandName, formattedValue } of brandValues) {
+            const brandSpaces = ' '.repeat(maxBrandNameLength - brandName.length);
+            const valueSpaces = ' '.repeat(maxValueLength - formattedValue.length);
+            brandLines.push(`${escapeHtml(brandName)}${brandSpaces}: ${valueSpaces}<code>${formattedValue}</code>`);
+        }
+        
+        // Har bir brend alohida qatorda
+        messageText += brandLines.join('\n') + `\n`;
 
         // Jami summa - qiymat allaqachon tanlangan valyutada, konvertatsiya qilmaslik kerak
         messageText += `💰 <b>JAMI:</b> <code>${formatCurrency(grandTotal, reportCurrency)}</code>`;
@@ -335,27 +354,59 @@ async function formatAndSendReport(payload) {
             }
         }
         
-        // Brendlar bo'yicha o'zgarishlarni ko'rsatish (faqat umumiy summa)
+        // Brendlar bo'yicha o'zgarishlarni ko'rsatish (ustun tekis, ikki nuqta bilan)
         const sortedBrandIds = Object.keys(brandChanges).sort((a, b) => a - b);
+        const brandLines = [];
+        const brandData = [];
         
+        // Ma'lumotlarni to'plash
         for (const brandId of sortedBrandIds) {
             const { newTotal, oldTotal } = brandChanges[brandId];
             
             if (newTotal > 0 || oldTotal > 0) {
                 const brandName = brandsMap[brandId] || `Brend #${brandId}`;
-                
-                if (newTotal !== oldTotal) {
-                    const sign = newTotal > oldTotal ? '➕' : '➖';
-                    // Qiymatlar allaqachon tanlangan valyutada, konvertatsiya qilmaslik kerak
-                    messageText += `${escapeHtml(brandName)}: <s>${formatCurrency(oldTotal, reportCurrency)}</s> → <code>${formatCurrency(newTotal, reportCurrency)}</code> ${sign}\n`;
-                } else {
-                    // Qiymat allaqachon tanlangan valyutada, konvertatsiya qilmaslik kerak
-                    messageText += `${escapeHtml(brandName)}: <code>${formatCurrency(newTotal, reportCurrency)}</code>\n`;
-                }
+                const formattedNewValue = formatCurrency(newTotal, reportCurrency);
+                const formattedOldValue = formatCurrency(oldTotal, reportCurrency);
+                brandData.push({ brandName, newTotal, oldTotal, formattedNewValue, formattedOldValue });
             }
         }
         
-        messageText += `\n`;
+        // Eng uzun brend nomini va eng uzun qiymat kombinatsiyasini topish (ustun tekisligi uchun)
+        let maxBrandNameLength = 0;
+        let maxValueLength = 0;
+        for (const { brandName, formattedNewValue, formattedOldValue, newTotal, oldTotal } of brandData) {
+            maxBrandNameLength = Math.max(maxBrandNameLength, brandName.length);
+            
+            if (newTotal !== oldTotal) {
+                // O'zgarishlar uchun: oldValue + " → " + newValue + " ➕" (HTML tag'larsiz uzunlik)
+                // " → " = 3 belgi, " ➕" = 2 belgi, jami 5 belgi
+                const changeLength = formattedOldValue.length + formattedNewValue.length + 5;
+                maxValueLength = Math.max(maxValueLength, changeLength);
+            } else {
+                // O'zgarish yo'q
+                maxValueLength = Math.max(maxValueLength, formattedNewValue.length);
+            }
+        }
+        
+        // Har bir brend uchun formatlash (ustun tekis - brend nomlari va qiymatlar)
+        for (const { brandName, newTotal, oldTotal, formattedNewValue, formattedOldValue } of brandData) {
+            const brandSpaces = ' '.repeat(maxBrandNameLength - brandName.length);
+            
+            if (newTotal !== oldTotal) {
+                const sign = newTotal > oldTotal ? '➕' : '➖';
+                // HTML tag'larsiz uzunlikni hisoblash (faqat matn uzunligi)
+                const changeText = `${formattedOldValue} → ${formattedNewValue} ${sign}`;
+                const changeLength = changeText.length;
+                const valueSpaces = ' '.repeat(maxValueLength - changeLength);
+                brandLines.push(`${escapeHtml(brandName)}${brandSpaces}: ${valueSpaces}<s>${formattedOldValue}</s> → <code>${formattedNewValue}</code> ${sign}`);
+            } else {
+                const valueSpaces = ' '.repeat(maxValueLength - formattedNewValue.length);
+                brandLines.push(`${escapeHtml(brandName)}${brandSpaces}: ${valueSpaces}<code>${formattedNewValue}</code>`);
+            }
+        }
+        
+        // Har bir brend alohida qatorda
+        messageText += brandLines.join('\n') + `\n`;
         
         // Jami summalar - qiymatlar allaqachon tanlangan valyutada, konvertatsiya qilmaslik kerak
         const difference = newGrandTotal - oldGrandTotal;
