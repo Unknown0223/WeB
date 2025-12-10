@@ -243,6 +243,9 @@ export function updateLoaderType(type) {
             loaderAnimation.className = 'loader-hexagon';
             loaderAnimation.innerHTML = '';
             break;
+        default:
+            loaderAnimation.className = 'loader-spinner';
+            loaderAnimation.innerHTML = '';
     }
 }
 

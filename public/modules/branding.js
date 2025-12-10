@@ -55,7 +55,8 @@ let currentBranding = {
     loader: {
         type: 'spinner',
         text: 'Yuklanmoqda...',
-        showProgress: false
+        showProgress: false,
+        blurBackground: true
     }
 };
 
@@ -65,7 +66,34 @@ let currentBranding = {
 export function setupBrandingControls() {
     // Hozirgi sozlamalarni yuklash
     if (state.settings.branding_settings) {
-        currentBranding = { ...currentBranding, ...state.settings.branding_settings };
+        // Loader sozlamalarini chuqur merge qilish (nested object)
+        if (state.settings.branding_settings.loader) {
+            currentBranding.loader = {
+                type: state.settings.branding_settings.loader.type || currentBranding.loader.type || 'spinner',
+                text: state.settings.branding_settings.loader.text || currentBranding.loader.text || 'Yuklanmoqda...',
+                showProgress: state.settings.branding_settings.loader.showProgress !== undefined 
+                    ? state.settings.branding_settings.loader.showProgress 
+                    : currentBranding.loader.showProgress !== undefined 
+                        ? currentBranding.loader.showProgress 
+                        : false,
+                blurBackground: state.settings.branding_settings.loader.blurBackground !== undefined 
+                    ? state.settings.branding_settings.loader.blurBackground 
+                    : currentBranding.loader.blurBackground !== undefined 
+                        ? currentBranding.loader.blurBackground 
+                        : true
+            };
+            
+            // sessionStorage'ga cache qilish (sahifa yuklanganda tezroq yuklanish uchun)
+            try {
+                sessionStorage.setItem('branding_settings_cache', JSON.stringify(currentBranding));
+            } catch (e) {
+                // Xatolikni e'tiborsiz qoldirish
+            }
+        }
+        
+        // Qolgan sozlamalarni merge qilish
+        const { loader, ...otherSettings } = state.settings.branding_settings;
+        currentBranding = { ...currentBranding, ...otherSettings };
     }
     
     // Tab navigationni sozlash
@@ -391,7 +419,18 @@ export function setupAnimationsTab() {
  */
 export async function saveBrandingSettings() {
     try {
-        console.log('💾 Brending saqlanmoqda:', currentBranding);
+        // Loader sozlamalarini to'liq saqlashni ta'minlash
+        if (!currentBranding.loader) {
+            currentBranding.loader = {};
+        }
+        
+        // Agar loader sozlamalari to'liq emas bo'lsa, default qiymatlar qo'shish
+        currentBranding.loader = {
+            type: currentBranding.loader.type || 'spinner',
+            text: currentBranding.loader.text || 'Yuklanmoqda...',
+            showProgress: currentBranding.loader.showProgress !== undefined ? currentBranding.loader.showProgress : false,
+            blurBackground: currentBranding.loader.blurBackground !== undefined ? currentBranding.loader.blurBackground : true
+        };
         
         const res = await safeFetch('/api/settings', {
             method: 'POST',
@@ -404,11 +443,21 @@ export async function saveBrandingSettings() {
             throw new Error(error.message || 'Xatolik yuz berdi');
         }
         
-        console.log('✅ Brending muvaffaqiyatli saqlandi');
+        // State'ni yangilash
+        if (state.settings) {
+            state.settings.branding_settings = currentBranding;
+        }
+        
+        // sessionStorage'ga cache qilish (sahifa yuklanganda tezroq yuklanish uchun)
+        try {
+            sessionStorage.setItem('branding_settings_cache', JSON.stringify(currentBranding));
+        } catch (e) {
+            // Xatolikni e'tiborsiz qoldirish
+        }
+        
         showToast('✅ Brending sozlamalari saqlandi!');
         applyBranding(currentBranding);
     } catch (error) {
-        console.error('❌ Brending saqlashda xatolik:', error);
         showToast(`❌ ${error.message}`, true);
     }
 }
@@ -429,13 +478,27 @@ export function setupLoaderTab() {
     
     // Saqlangan sozlamalarni yuklash
     if (currentBranding.loader) {
-        if (loaderTypeSelect) loaderTypeSelect.value = currentBranding.loader.type || 'spinner';
-        if (loaderTextInput) loaderTextInput.value = currentBranding.loader.text || 'Yuklanmoqda...';
-        if (loaderShowProgress) loaderShowProgress.checked = currentBranding.loader.showProgress || false;
+        const loaderType = currentBranding.loader.type || 'spinner';
+        const loaderText = currentBranding.loader.text || 'Yuklanmoqda...';
+        const showProgress = currentBranding.loader.showProgress || false;
+        const blurBackground = currentBranding.loader.blurBackground !== undefined ? currentBranding.loader.blurBackground : true;
         
-        updateLoaderPreview(currentBranding.loader.type || 'spinner');
-        if (loaderPreviewText) loaderPreviewText.textContent = currentBranding.loader.text || 'Yuklanmoqda...';
-        if (loaderPreviewProgress) loaderPreviewProgress.style.display = currentBranding.loader.showProgress ? 'block' : 'none';
+        if (loaderTypeSelect) {
+            loaderTypeSelect.value = loaderType;
+        }
+        if (loaderTextInput) {
+            loaderTextInput.value = loaderText;
+        }
+        if (loaderShowProgress) {
+            loaderShowProgress.checked = showProgress;
+        }
+        if (loaderBlurBackground) {
+            loaderBlurBackground.checked = blurBackground;
+        }
+        
+        updateLoaderPreview(loaderType);
+        if (loaderPreviewText) loaderPreviewText.textContent = loaderText;
+        if (loaderPreviewProgress) loaderPreviewProgress.style.display = showProgress ? 'block' : 'none';
     }
     
     // Loader turini o'zgartirish
@@ -470,10 +533,50 @@ export function setupLoaderTab() {
         });
     }
     
+    // Blur effekti
+    if (loaderBlurBackground) {
+        loaderBlurBackground.addEventListener('change', (e) => {
+            const blur = e.target.checked;
+            currentBranding.loader.blurBackground = blur;
+        });
+    }
+    
     // Test tugmasi
     if (testLoaderBtn) {
         testLoaderBtn.addEventListener('click', () => {
-            showPageLoader(currentBranding.loader.text);
+            const loaderSettings = currentBranding.loader || {};
+            const loaderType = loaderSettings.type || 'spinner';
+            const loaderText = loaderSettings.text || 'Yuklanmoqda...';
+            const showProgress = loaderSettings.showProgress || false;
+            const blurBackground = loaderSettings.blurBackground !== undefined ? loaderSettings.blurBackground : true;
+            
+            // Loader turini o'rnatish
+            updateLoaderType(loaderType);
+            
+            // Loader matnini o'rnatish
+            const loaderTextEl = document.getElementById('loader-text');
+            if (loaderTextEl) {
+                loaderTextEl.textContent = loaderText;
+            }
+            
+            // Progress bar
+            const loaderProgress = document.getElementById('loader-progress');
+            if (loaderProgress) {
+                loaderProgress.style.display = showProgress ? 'block' : 'none';
+            }
+            
+            // Blur effekti
+            const pageLoader = document.getElementById('page-loader');
+            if (pageLoader) {
+                if (blurBackground) {
+                    pageLoader.classList.add('blur-background');
+                } else {
+                    pageLoader.classList.remove('blur-background');
+                }
+            }
+            
+            showPageLoader(loaderText);
+            
             setTimeout(() => {
                 hidePageLoader();
             }, 3000);
@@ -651,11 +754,13 @@ function applyBrandingToUI(branding) {
     const loaderType = branding.loader?.type || 'spinner';
     const loaderText = branding.loader?.text || 'Yuklanmoqda...';
     const showProgress = branding.loader?.showProgress || false;
+    const blurBackground = branding.loader?.blurBackground !== undefined ? branding.loader.blurBackground : true;
     
     updateLoaderType(loaderType);
     
     const loaderTextEl = document.getElementById('loader-text');
     const loaderProgress = document.getElementById('loader-progress');
+    const pageLoader = document.getElementById('page-loader');
     
     if (loaderTextEl) {
         loaderTextEl.textContent = loaderText;
@@ -663,6 +768,14 @@ function applyBrandingToUI(branding) {
     
     if (loaderProgress) {
         loaderProgress.style.display = showProgress ? 'block' : 'none';
+    }
+    
+    if (pageLoader) {
+        if (blurBackground) {
+            pageLoader.classList.add('blur-background');
+        } else {
+            pageLoader.classList.remove('blur-background');
+        }
     }
 }
 

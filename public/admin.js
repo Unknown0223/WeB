@@ -69,18 +69,12 @@ async function init() {
             showPageLoader('Tizim yuklanmoqda...');
         }
         
-        console.log('🚀 [ADMIN] Init boshlandi');
-        const initStartTime = Date.now();
-        
         // Joriy foydalanuvchini olish
         state.currentUser = await fetchCurrentUser();
         if (!state.currentUser) {
-            console.warn('⚠️ [ADMIN] Foydalanuvchi topilmadi');
             hidePageLoader();
             return;
         }
-        
-        console.log(`✅ [ADMIN] Foydalanuvchi olingan: ${state.currentUser.username}`);
         
         applyPermissions();
         
@@ -91,9 +85,6 @@ async function init() {
             { key: 'rolesData', fetch: fetchRoles, permission: 'roles:manage' },
             { key: 'pendingUsers', fetch: fetchPendingUsers, permission: 'users:edit' }
         ];
-
-        console.log('📦 [ADMIN] Ma\'lumotlar yuklanmoqda...');
-        const dataLoadStartTime = Date.now();
         
         const results = await Promise.all(dataSources.map(async ds => {
             if (hasPermission(state.currentUser, ds.permission)) {
@@ -101,9 +92,6 @@ async function init() {
             }
             return null;
         }));
-
-        const dataLoadTime = Date.now() - dataLoadStartTime;
-        console.log(`✅ [ADMIN] Ma'lumotlar yuklandi. Vaqt: ${dataLoadTime}ms`);
 
         results.forEach((data, index) => {
             const { key } = dataSources[index];
@@ -120,18 +108,19 @@ async function init() {
         });
 
         // AVVAL brending qo'llash (loader turi uchun)
-        applyBranding(state.settings.branding_settings);
-        
-        // Loader matnini yangilash (agar brending sozlamalarida bo'lsa)
-        const loaderText = state.settings.branding_settings?.loader?.text || 'Tizim yuklanmoqda...';
-        const loaderTextElement = document.getElementById('loader-text');
-        if (loaderTextElement) {
-            loaderTextElement.textContent = loaderText;
+        if (state.settings.branding_settings) {
+            applyBranding(state.settings.branding_settings);
+        } else {
+            // Default loader sozlamalari
+            const loaderText = 'Tizim yuklanmoqda...';
+            const loaderType = 'spinner';
+            
+            const loaderTextElement = document.getElementById('loader-text');
+            if (loaderTextElement) {
+                loaderTextElement.textContent = loaderText;
+            }
+            updateLoaderType(loaderType);
         }
-        
-        // Loader animatsiyasini yangilash (agar brending sozlamalarida bo'lsa)
-        const loaderType = state.settings.branding_settings?.loader?.type || 'spinner';
-        updateLoaderType(loaderType);
         
         // Komponentlarni render qilish
         renderAllComponents();
@@ -337,6 +326,36 @@ function setupEventListeners() {
         addSafeListener(btn, 'click', () => 
             document.getElementById(btn.dataset.target)?.classList.add('hidden')
         );
+    });
+
+    // Admin panel modal oynalarini tashqariga bosilganda yopish
+    document.addEventListener('click', (e) => {
+        // Faqat admin panel sahifasida ishlaydi
+        if (!document.body.classList.contains('admin-layout')) return;
+        
+        // Barcha ochiq modal oynalarni tekshirish
+        const openModals = document.querySelectorAll('.modal:not(.hidden)');
+        
+        if (openModals.length === 0) return;
+        
+        const clickedElement = e.target;
+        
+        // Agar bosilgan joy har qanday modal-content ichida bo'lsa, yopilmaydi
+        if (clickedElement.closest('.modal-content')) {
+            return;
+        }
+        
+        // Barcha ochiq modal oynalarni tekshirish
+        openModals.forEach(modal => {
+            const modalContent = modal.querySelector('.modal-content');
+            
+            // Agar bosilgan joy modal oynaning o'zi bo'lsa (background) yoki tashqarisida bo'lsa, yopiladi
+            if (clickedElement === modal || 
+                (modal.contains(clickedElement) && modalContent && !modalContent.contains(clickedElement)) ||
+                !modal.contains(clickedElement)) {
+                modal.classList.add('hidden');
+            }
+        });
     });
 
     // Parol ko'rish/yashirish tugmasi

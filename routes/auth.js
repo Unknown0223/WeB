@@ -8,17 +8,39 @@ const similarity = require('string-similarity');
 
 const router = express.Router();
 
-// Login sahifasi uchun brending sozlamalarini olish
+// Login sahifasi uchun brending sozlamalarini olish (loader sozlamalari bilan)
 router.get('/public/settings/branding', async (req, res) => {
     try {
         const brandingSetting = await db('settings').where({ key: 'branding_settings' }).first();
         const settings = brandingSetting 
             ? JSON.parse(brandingSetting.value) 
-            : { text: 'MANUS', color: '#4CAF50', animation: 'anim-glow-pulse', border: 'border-none' };
+            : { 
+                text: 'MANUS', 
+                color: '#4CAF50', 
+                animation: 'anim-glow-pulse', 
+                border: 'border-none',
+                loader: {
+                    type: 'spinner',
+                    text: 'Yuklanmoqda...',
+                    showProgress: false,
+                    blurBackground: true
+                }
+            };
         res.json(settings);
     } catch (error) {
         console.error("Public branding settings xatoligi:", error);
-        res.status(500).json({ text: 'MANUS', color: '#4CAF50', animation: 'anim-glow-pulse', border: 'border-none' });
+        res.status(500).json({ 
+            text: 'MANUS', 
+            color: '#4CAF50', 
+            animation: 'anim-glow-pulse', 
+            border: 'border-none',
+            loader: {
+                type: 'spinner',
+                text: 'Yuklanmoqda...',
+                showProgress: false,
+                blurBackground: true
+            }
+        });
     }
 });
 
