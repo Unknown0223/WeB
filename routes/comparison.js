@@ -551,6 +551,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                         console.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError.message);
                     }
                 }
+                }
             } catch (error) {
                 console.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error.message);
             }
