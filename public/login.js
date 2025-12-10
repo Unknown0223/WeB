@@ -110,9 +110,6 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(timeoutAbort);
             clearTimeout(timeoutId);
             
-            const elapsedTime = Date.now() - startTime;
-            console.log(`✅ [LOGIN] Login muvaffaqiyatli. Vaqt: ${elapsedTime}ms`);
-
             const result = await response.json();
 
             if (!response.ok) {
@@ -124,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Agar server "ok" javobini bersa (200)
             // Qisqa kechikish bilan redirect (UX uchun)
             submitButton.innerHTML = 'Muvaffaqiyatli! <span class="spinner"></span>';
+            
             setTimeout(() => {
                 window.location.href = result.redirectUrl || '/';
             }, 300);
@@ -135,7 +133,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // Agar server bilan umuman bog'lanib bo'lmasa yoki serverdan xatolik kelsa
             if (error.name === 'AbortError') {
                 errorMessage.textContent = 'So\'rov vaqti tugadi. Iltimos, qayta urinib ko\'ring.';
-                console.error('❌ [LOGIN] Request timeout');
             } else if (error.message) {
                 errorMessage.textContent = error.message;
             } else {
@@ -147,8 +144,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (error.secretWordRequired) {
                 errorMessage.textContent = error.message;
             }
-            
-            console.error('❌ [LOGIN] Login jarayonida xatolik:', error);
         } finally {
             submitButton.disabled = false;
             submitButton.innerHTML = originalButtonText;

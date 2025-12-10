@@ -1,6 +1,7 @@
 const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
+const { getFilteredLocations, applyReportsFilter } = require('../utils/userAccessFilter.js');
 
 const router = express.Router();
 
@@ -41,10 +42,8 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
             .leftJoin('users as u_creator', 'r.created_by', 'u_creator.id')
             .where('r.report_date', date);
         
-        // Admin uchun filiallar cheklovi
-        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
-            submittedReportsQuery.whereIn('r.location', user.locations);
-        }
+        // Universal access filter qo'llash
+        await applyReportsFilter(submittedReportsQuery, user);
         
         const submittedReports = await submittedReportsQuery
             .select(
@@ -107,16 +106,14 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
         const startDate = sevenDaysAgo.toISOString().split('T')[0];
 
-        const weeklyDynamicsQuery = db('reports')
-            .select('report_date')
+        const weeklyDynamicsQuery = db('reports as r')
+            .select('r.report_date')
             .count('* as count')
-            .where('report_date', '>=', startDate)
-            .andWhere('report_date', '<=', date);
+            .where('r.report_date', '>=', startDate)
+            .andWhere('r.report_date', '<=', date);
         
-        // Admin uchun filiallar cheklovi
-        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
-            weeklyDynamicsQuery.whereIn('location', user.locations);
-        }
+        // Universal access filter qo'llash
+        await applyReportsFilter(weeklyDynamicsQuery, user, 'r.location', 'r.brand_id');
         
         const weeklyDynamics = await weeklyDynamicsQuery
             .groupBy('report_date')

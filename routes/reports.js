@@ -2,6 +2,7 @@ const express = require('express');
 const { db, logAction } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { sendToTelegram } = require('../utils/bot.js');
+const { applyReportsFilter, getUserAccessFilter } = require('../utils/userAccessFilter.js');
 
 const router = express.Router();
 
@@ -23,22 +24,16 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
 
         // Foydalanuvchining huquqlariga qarab so'rovni filtrlash
         if (user.permissions.includes('reports:view_all')) {
-            // Admin/Menejer barcha hisobotlarni ko'radi
-            // Lekin agar admin uchun filiallar belgilangan bo'lsa, faqat shu filiallar bo'yicha cheklanadi
-            if (user.role === 'admin' && user.locations && user.locations.length > 0) {
-                query.whereIn('r.location', user.locations);
-            }
-            // Super admin uchun hech qanday cheklov yo'q
+            // Barcha hisobotlarni ko'rish huquqi bor, lekin access filter qo'llanadi
+            await applyReportsFilter(query, user);
         } else if (user.permissions.includes('reports:view_assigned')) {
-            // Menejer o'ziga biriktirilgan filiallar hisobotlarini ko'radi.
-            if (user.locations.length === 0) {
-                // Agar biriktirilgan filial bo'lmasa, bo'sh ro'yxat qaytaramiz.
-                return res.json({ reports: {}, total: 0, pages: 0, currentPage: 1 });
-            }
-            query.whereIn('r.location', user.locations);
+            // Biriktirilgan filiallar hisobotlarini ko'rish
+            await applyReportsFilter(query, user);
         } else if (user.permissions.includes('reports:view_own')) {
-            // Operator faqat o'zi yaratgan hisobotlarni ko'radi.
+            // Faqat o'zi yaratgan hisobotlarni ko'rish
             query.where('r.created_by', user.id);
+            // Access filter ham qo'llanadi (filial va brend cheklovlari)
+            await applyReportsFilter(query, user);
         } else {
             // Agar hech qanday ko'rish huquqi bo'lmasa, bo'sh ro'yxat qaytaramiz.
             return res.json({ reports: {}, total: 0, pages: 0, currentPage: 1 });
@@ -129,9 +124,21 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
         return res.status(400).json({ message: "Bo'sh hisobotni saqlab bo'lmaydi. Iltimos, ma'lumot kiriting." });
     }
 
-    // Foydalanuvchiga filial biriktirilganligini tekshirish
-    if (!user.permissions.includes('reports:view_all') && !user.locations.includes(location)) {
-        return res.status(403).json({ message: "Siz faqat o'zingizga biriktirilgan filiallar uchun hisobot qo'sha olasiz." });
+    // Universal access filter logikasini tekshirish
+    const filter = await getUserAccessFilter(user);
+    
+    // Filial tekshiruvi
+    if (filter.allowedLocations !== null) {
+        if (filter.allowedLocations.length === 0 || !filter.allowedLocations.includes(location)) {
+            return res.status(403).json({ message: "Siz faqat o'zingizga biriktirilgan filiallar uchun hisobot qo'sha olasiz." });
+        }
+    }
+    
+    // Brend tekshiruvi (agar brand_id berilgan bo'lsa)
+    if (brand_id && filter.allowedBrandIds !== null) {
+        if (filter.allowedBrandIds.length === 0 || !filter.allowedBrandIds.includes(parseInt(brand_id))) {
+            return res.status(403).json({ message: "Siz faqat o'zingizga biriktirilgan brendlar uchun hisobot qo'sha olasiz." });
+        }
     }
 
     try {
@@ -216,11 +223,36 @@ router.put('/:id', isAuthenticated, async (req, res) => {
         }
 
         const canEditAll = user.permissions.includes('reports:edit_all');
-        const canEditAssigned = user.permissions.includes('reports:edit_assigned') && user.locations.includes(oldReport.location);
         const canEditOwn = user.permissions.includes('reports:edit_own') && oldReport.created_by === user.id;
+        
+        // Universal access filter logikasini tekshirish
+        const filter = await getUserAccessFilter(user);
+        
+        // Filial tekshiruvi
+        let canEditAssigned = false;
+        if (user.permissions.includes('reports:edit_assigned')) {
+            if (filter.allowedLocations === null) {
+                canEditAssigned = true; // Barcha filiallar
+            } else if (filter.allowedLocations.length > 0 && filter.allowedLocations.includes(oldReport.location)) {
+                canEditAssigned = true;
+            }
+        }
 
         if (!canEditAll && !canEditAssigned && !canEditOwn) {
             return res.status(403).json({ message: "Bu hisobotni tahrirlash uchun sizda ruxsat yo'q." });
+        }
+        
+        // Yangi filial va brend tekshiruvi
+        if (filter.allowedLocations !== null) {
+            if (filter.allowedLocations.length === 0 || !filter.allowedLocations.includes(location)) {
+                return res.status(403).json({ message: "Siz faqat o'zingizga biriktirilgan filiallar uchun hisobot tahrirlay olasiz." });
+            }
+        }
+        
+        if (brand_id && filter.allowedBrandIds !== null) {
+            if (filter.allowedBrandIds.length === 0 || !filter.allowedBrandIds.includes(parseInt(brand_id))) {
+                return res.status(403).json({ message: "Siz faqat o'zingizga biriktirilgan brendlar uchun hisobot tahrirlay olasiz." });
+            }
         }
 
         if (date !== oldReport.report_date || location !== oldReport.location) {

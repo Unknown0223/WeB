@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
+const { applyBrandsFilter, getUserAccessFilter } = require('../utils/userAccessFilter');
 
 // GET /api/brands - Barcha brendlarni olish (barcha autentifikatsiya qilingan foydalanuvchilar uchun)
 // Query parameter: location - faqat shu filialdagi brendlarni olish
@@ -60,51 +61,42 @@ router.get('/', isAuthenticated, async (req, res) => {
 router.get('/for-user', isAuthenticated, async (req, res) => {
     try {
         const user = req.session.user;
-        let brands = [];
-
-        if (user.role === 'operator') {
-            // Operator uchun: faqat o'z filiallariga biriktirilgan brendlar
-            const userLocations = await db('user_locations')
-                .where('user_id', user.id)
-                .pluck('location_name');
-
-            if (userLocations.length > 0) {
-                brands = await db('brands')
-                    .join('brand_locations', 'brands.id', 'brand_locations.brand_id')
-                    .whereIn('brand_locations.location_name', userLocations)
-                    .distinct('brands.*')
-                    .orderBy('brands.name');
+        
+        // Universal access filter logikasini qo'llash
+        const filter = await getUserAccessFilter(user);
+        
+        let brandsQuery = db('brands').select('*').orderBy('name');
+        
+        // Brendlar filter qo'llash
+        if (filter.allowedBrandIds !== null && filter.allowedBrandIds.length > 0) {
+            brandsQuery.whereIn('id', filter.allowedBrandIds);
+        } else if (filter.allowedBrandIds !== null && filter.allowedBrandIds.length === 0) {
+            // Hech qanday brendga ruxsat yo'q
+            return res.json([]);
+        }
+        
+        // Agar filiallar belgilangan bo'lsa, faqat shu filiallardagi brendlarni ko'rsatish
+        if (filter.allowedLocations !== null && filter.allowedLocations.length > 0) {
+            brandsQuery.join('brand_locations', 'brands.id', 'brand_locations.brand_id')
+                .whereIn('brand_locations.location_name', filter.allowedLocations)
+                .distinct('brands.*');
+        }
+        
+        const brands = await brandsQuery;
+        
+        // Har bir brend uchun filiallarni olish
+        for (let brand of brands) {
+            let brandLocationsQuery = db('brand_locations')
+                .where('brand_id', brand.id)
+                .select('location_name');
+            
+            // Agar filiallar cheklangan bo'lsa, faqat ruxsat etilgan filiallarni ko'rsatish
+            if (filter.allowedLocations !== null && filter.allowedLocations.length > 0) {
+                brandLocationsQuery.whereIn('location_name', filter.allowedLocations);
             }
-        } else if (user.role === 'manager') {
-            // Menejer uchun: faqat o'ziga biriktirilgan brendlar
-            brands = await db('brands')
-                .join('user_brands', 'brands.id', 'user_brands.brand_id')
-                .where('user_brands.user_id', user.id)
-                .select('brands.*')
-                .orderBy('brands.name');
-        } else if (user.role === 'admin') {
-            // Admin uchun: agar brendlar belgilangan bo'lsa, faqat shu brendlar
-            const userBrands = await db('user_brands')
-                .where('user_id', user.id)
-                .pluck('brand_id');
-
-            if (userBrands.length > 0) {
-                // Admin uchun belgilangan brendlar mavjud - faqat shu brendlar
-                brands = await db('brands')
-                    .whereIn('id', userBrands)
-                    .select('*')
-                    .orderBy('name');
-            } else {
-                // Admin uchun brendlar belgilanmagan - barcha brendlar
-                brands = await db('brands')
-                    .select('*')
-                    .orderBy('name');
-            }
-        } else if (user.role === 'super_admin') {
-            // Super admin uchun: barcha brendlar (cheklov yo'q)
-            brands = await db('brands')
-                .select('*')
-                .orderBy('name');
+            
+            const locations = await brandLocationsQuery;
+            brand.locations = locations.map(l => l.location_name);
         }
 
         res.json(brands);

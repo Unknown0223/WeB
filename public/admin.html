@@ -164,18 +164,174 @@
             const loader = document.getElementById('page-loader');
             const loaderAnimation = document.getElementById('loader-animation');
             const loaderText = document.getElementById('loader-text');
+            const loaderProgress = document.getElementById('loader-progress');
             
+            // Brending sozlamalarini sessionStorage'dan o'qish
+            let brandingSettings = null;
+            try {
+                const cachedSettings = sessionStorage.getItem('branding_settings_cache');
+                if (cachedSettings) {
+                    brandingSettings = JSON.parse(cachedSettings);
+                }
+            } catch (e) {
+                // Xatolikni e'tiborsiz qoldirish
+            }
+            
+            // Agar sessionStorage'da yo'q bo'lsa, serverdan yuklab olish
+            if (!brandingSettings) {
+                // Async ravishda serverdan yuklab olish (loader ko'rsatilgandan keyin yangilash uchun)
+                (async function() {
+                    try {
+                        const response = await fetch('/api/public/settings/branding');
+                        if (response.ok) {
+                            const settings = await response.json();
+                            brandingSettings = settings;
+                            // sessionStorage'ga cache qilish
+                            try {
+                                sessionStorage.setItem('branding_settings_cache', JSON.stringify(brandingSettings));
+                                
+                                // Loader sozlamalarini yangilash
+                                if (brandingSettings.loader) {
+                                    const loaderType = brandingSettings.loader.type || 'spinner';
+                                    const loaderTextValue = brandingSettings.loader.text || 'Tizim yuklanmoqda...';
+                                    const showProgress = brandingSettings.loader.showProgress !== undefined ? brandingSettings.loader.showProgress : false;
+                                    const blurBackground = brandingSettings.loader.blurBackground !== undefined ? brandingSettings.loader.blurBackground : true;
+                                    
+                                    // Loader turini yangilash
+                                    updateLoaderFromSettings(loaderType, loaderTextValue, showProgress, blurBackground);
+                                }
+                            } catch (e) {
+                                // Xatolikni e'tiborsiz qoldirish
+                            }
+                        }
+                    } catch (error) {
+                        // Xatolikni e'tiborsiz qoldirish
+                    }
+                })();
+            }
+            
+            // Loader sozlamalarini aniqlash
+            let loaderType = 'spinner'; // Default
+            let loaderTextValue = 'Tizim yuklanmoqda...';
+            let showProgress = false;
+            let blurBackground = true;
+            
+            if (brandingSettings && brandingSettings.loader) {
+                loaderType = brandingSettings.loader.type || 'spinner';
+                loaderTextValue = brandingSettings.loader.text || 'Tizim yuklanmoqda...';
+                showProgress = brandingSettings.loader.showProgress !== undefined ? brandingSettings.loader.showProgress : false;
+                blurBackground = brandingSettings.loader.blurBackground !== undefined ? brandingSettings.loader.blurBackground : true;
+            }
+            
+            // Loader sozlamalarini yangilash funksiyasi
+            function updateLoaderFromSettings(type, text, progress, blur) {
+                const loaderAnim = document.getElementById('loader-animation');
+                const loaderTxt = document.getElementById('loader-text');
+                const loaderProg = document.getElementById('loader-progress');
+                const loaderEl = document.getElementById('page-loader');
+                
+                if (!loaderAnim) return;
+                
+                // Loader turini yangilash
+                const loaderClasses = ['loader-spinner', 'loader-dots', 'loader-pulse', 'loader-gradient', 
+                                      'loader-bars', 'loader-circle-progress', 'loader-bounce', 
+                                      'loader-cube', 'loader-dna', 'loader-hexagon'];
+                loaderClasses.forEach(cls => loaderAnim.classList.remove(cls));
+                loaderAnim.className = `loader-${type}`;
+                
+                // Loader turiga qarab HTML qo'shish
+                switch(type) {
+                    case 'dots':
+                        loaderAnim.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+                        break;
+                    case 'bars':
+                        loaderAnim.innerHTML = '<div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>';
+                        break;
+                    case 'progress':
+                        loaderAnim.innerHTML = '<svg width="60" height="60"><circle cx="30" cy="30" r="28"></circle></svg>';
+                        break;
+                    case 'bounce':
+                        loaderAnim.innerHTML = '<div class="ball"></div><div class="ball"></div><div class="ball"></div>';
+                        break;
+                    case 'cube':
+                        loaderAnim.innerHTML = '<div class="face"></div>';
+                        break;
+                    case 'dna':
+                        loaderAnim.innerHTML = '<div class="strand"></div><div class="strand"></div>';
+                        break;
+                    default:
+                        loaderAnim.innerHTML = '';
+                }
+                
+                if (loaderTxt) loaderTxt.textContent = text;
+                if (loaderProg) loaderProg.style.display = progress ? 'block' : 'none';
+                if (loaderEl) {
+                    if (blur) {
+                        loaderEl.classList.add('blur-background');
+                    } else {
+                        loaderEl.classList.remove('blur-background');
+                    }
+                }
+            }
+            
+            // Loader turini o'rnatish
+            if (loaderAnimation) {
+                // Barcha loader klaslarini olib tashlash
+                const loaderClasses = ['loader-spinner', 'loader-dots', 'loader-pulse', 'loader-gradient', 
+                                      'loader-bars', 'loader-circle-progress', 'loader-bounce', 
+                                      'loader-cube', 'loader-dna', 'loader-hexagon'];
+                loaderClasses.forEach(cls => loaderAnimation.classList.remove(cls));
+                
+                // Yangi loader turini qo'llash
+                loaderAnimation.className = `loader-${loaderType}`;
+                
+                // Loader turiga qarab HTML qo'shish
+                switch(loaderType) {
+                    case 'dots':
+                        loaderAnimation.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+                        break;
+                    case 'bars':
+                        loaderAnimation.innerHTML = '<div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>';
+                        break;
+                    case 'progress':
+                        loaderAnimation.innerHTML = '<svg width="60" height="60"><circle cx="30" cy="30" r="28"></circle></svg>';
+                        break;
+                    case 'bounce':
+                        loaderAnimation.innerHTML = '<div class="ball"></div><div class="ball"></div><div class="ball"></div>';
+                        break;
+                    case 'cube':
+                        loaderAnimation.innerHTML = '<div class="face"></div>';
+                        break;
+                    case 'dna':
+                        loaderAnimation.innerHTML = '<div class="strand"></div><div class="strand"></div>';
+                        break;
+                    default:
+                        loaderAnimation.innerHTML = '';
+                }
+            }
+            
+            // Loader matnini o'rnatish
+            if (loaderText) {
+                loaderText.textContent = loaderTextValue;
+            }
+            
+            // Progress bar
+            if (loaderProgress) {
+                loaderProgress.style.display = showProgress ? 'block' : 'none';
+            }
+            
+            // Blur effekti
+            if (loader) {
+                if (blurBackground) {
+                    loader.classList.add('blur-background');
+                } else {
+                    loader.classList.remove('blur-background');
+                }
+            }
+            
+            // Loader aktivlashtirish
             if (loader && !loader.classList.contains('active')) {
                 loader.classList.add('active');
-            }
-            
-            // Default loader animatsiyasini o'rnatish
-            if (loaderAnimation && !loaderAnimation.className) {
-                loaderAnimation.className = 'loader-spinner';
-            }
-            
-            if (loaderText && !loaderText.textContent) {
-                loaderText.textContent = 'Tizim yuklanmoqda...';
             }
         })();
     </script>
@@ -2806,95 +2962,149 @@
     <!-- MODAL OYNALAR -->
     <div id="user-form-modal" class="modal hidden">
         <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 class="modal-title" id="user-modal-title">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M11 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
-                            <path fill-rule="evenodd" d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z"/>
-                        </svg>
-                        <span>Foydalanuvchi</span>
-                    </h3>
-                    <button class="btn-close close-modal-btn" data-target="user-form-modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="user-form">
-                <input type="hidden" id="edit-user-id">
-                <div class="form-group">
-                    <label for="user-username">Login (username)</label>
-                    <input type="text" id="user-username" class="form-control" required>
-                </div>
-                <div class="form-group">
-                    <label for="user-fullname">To'liq ism (F.I.Sh)</label>
-                    <input type="text" id="user-fullname" class="form-control">
-                </div>
-                <div class="form-group" id="password-group">
-                    <label for="user-password">Yangi Parol</label>
-                    <div class="secure-input-wrapper">
-                        <input type="password" id="user-password" class="form-control" minlength="8" autocomplete="new-password">
-                        <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+            <div class="modal-content" style="max-width: 800px; width: 95%; max-height: 90vh; display: flex; flex-direction: column;">
+                <div class="modal-header-enhanced" style="padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); flex-shrink: 0;">
+                    <div class="modal-icon-wrapper">
+                        <i data-feather="user"></i>
                     </div>
-                    <small>Yangi foydalanuvchi uchun majburiy. Tahrirlashda bo'sh qoldiring.</small>
+                    <div style="flex: 1;">
+                        <h3 class="modal-title" id="user-modal-title" style="margin: 0; display: flex; align-items: center; gap: 12px;">
+                            <span>Foydalanuvchi</span>
+                        </h3>
+                        <p class="modal-subtitle">Foydalanuvchi ma'lumotlarini tahrirlash</p>
+                    </div>
+                    <button class="btn-close close-modal-btn" data-target="user-form-modal" style="position: static; background: rgba(255,255,255,0.1); border-radius: 8px; padding: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+                        <i data-feather="x"></i>
+                    </button>
                 </div>
-                <div class="form-group">
-                    <label for="user-role">Rol</label>
-                    <select id="user-role" class="form-control"></select>
-                </div>
+                <div class="modal-body" style="padding: 20px; overflow-y: auto; flex: 1; min-height: 0;">
+                    <form id="user-form" style="display: flex; flex-direction: column; gap: 20px;">
+                        <input type="hidden" id="edit-user-id">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="user-username" style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-primary);">Login (username)</label>
+                            <input type="text" id="user-username" class="form-control" required style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; transition: all 0.3s; width: 100%;" onfocus="this.style.borderColor='rgba(79,172,254,0.6)'; this.style.background='rgba(0,0,0,0.3)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='rgba(0,0,0,0.2)'">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="user-fullname" style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-primary);">To'liq ism (F.I.Sh)</label>
+                            <input type="text" id="user-fullname" class="form-control" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; transition: all 0.3s; width: 100%;" onfocus="this.style.borderColor='rgba(79,172,254,0.6)'; this.style.background='rgba(0,0,0,0.3)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='rgba(0,0,0,0.2)'">
+                        </div>
+                        <div class="form-group" id="password-group" style="margin-bottom: 0;">
+                            <label for="user-password" style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-primary);">Yangi Parol</label>
+                            <div class="secure-input-wrapper" style="position: relative;">
+                                <input type="password" id="user-password" class="form-control" minlength="8" autocomplete="new-password" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); padding: 12px; padding-right: 45px; border-radius: 8px; transition: all 0.3s; width: 100%;" onfocus="this.style.borderColor='rgba(79,172,254,0.6)'; this.style.background='rgba(0,0,0,0.3)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='rgba(0,0,0,0.2)'">
+                                <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 5px;"><i data-feather="eye"></i></button>
+                            </div>
+                            <small style="display: block; margin-top: 6px; color: var(--text-secondary); font-size: 12px;">Yangi foydalanuvchi uchun majburiy. Tahrirlashda bo'sh qoldiring.</small>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="user-role" style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-primary);">Rol</label>
+                            <select id="user-role" class="form-control" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; transition: all 0.3s; cursor: pointer; width: 100%;" onfocus="this.style.borderColor='rgba(79,172,254,0.6)'; this.style.background='rgba(0,0,0,0.3)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='rgba(0,0,0,0.2)'"></select>
+                        </div>
                 
-                <!-- User-specific sozlamalar -->
-                <div class="form-group" id="user-settings-group" style="display: none;">
-                    <label style="font-weight: 600; margin-bottom: 10px; display: block;">Foydalanuvchi uchun sozlamalar:</label>
-                    <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 15px;">
-                        Bu sozlamalar faqat shu foydalanuvchi uchun ishlaydi. Rol sozlamalaridan ustun keladi.
-                    </p>
+                        <!-- User-specific sozlamalar -->
+                        <div class="form-group" id="user-settings-group" style="display: none; margin-bottom: 0; padding: 20px; background: linear-gradient(135deg, rgba(79, 172, 254, 0.1) 0%, rgba(0, 0, 0, 0.3) 100%); border-radius: 12px; border: 1px solid rgba(79, 172, 254, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(79, 172, 254, 0.2); display: flex; align-items: center; justify-content: center;">
+                            <i data-feather="settings" style="width: 20px; height: 20px; color: #4facfe;"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-weight: 600; margin-bottom: 4px; display: block; color: var(--text-primary); font-size: 16px;">Foydalanuvchi uchun sozlamalar</label>
+                            <p style="color: rgba(255,255,255,0.6); font-size: 12px; margin: 0; line-height: 1.4;">
+                                Bu sozlamalar faqat shu foydalanuvchi uchun ishlaydi. Rol sozlamalaridan ustun keladi.
+                            </p>
+                        </div>
+                    </div>
                     
-                    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                        <div style="flex: 1; min-width: 200px;">
-                            <label style="display: block; margin-bottom: 8px; font-size: 14px;">Filiallar:</label>
-                            <select id="user-requires-locations" class="form-control" style="margin-bottom: 10px;">
+                    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 20px;">
+                        <!-- Filiallar Talabi -->
+                        <div style="padding: 18px; background: rgba(0,0,0,0.4); border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); transition: all 0.3s ease; position: relative; overflow: hidden;" onmouseover="this.style.borderColor='rgba(79,172,254,0.5)'; this.style.background='rgba(0,0,0,0.5)'; this.style.boxShadow='0 4px 12px rgba(79,172,254,0.15)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.12)'; this.style.background='rgba(0,0,0,0.4)'; this.style.boxShadow='none'">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px;">
+                                <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(79, 172, 254, 0.15); display: flex; align-items: center; justify-content: center;">
+                                    <i data-feather="map-pin" style="width: 18px; height: 18px; color: #4facfe;"></i>
+                                </div>
+                                <label style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0; flex: 1;">Filiallar Talabi</label>
+                            </div>
+                            <select id="user-requires-locations" class="form-control" style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.18); padding: 14px 16px; border-radius: 10px; transition: all 0.3s ease; cursor: pointer; color: var(--text-primary); font-size: 14px; appearance: none; background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23ffffff\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 14px center; background-size: 18px; padding-right: 44px;" onfocus="this.style.borderColor='rgba(79,172,254,0.7)'; this.style.background='rgba(0,0,0,0.6)'; this.style.boxShadow='0 0 0 3px rgba(79,172,254,0.1)'" onblur="this.style.borderColor='rgba(255,255,255,0.18)'; this.style.background='rgba(0,0,0,0.5)'; this.style.boxShadow='none'">
                                 <option value="">Rol sozlamasiga qarab</option>
                                 <option value="true">Majburiy (kamida 1 ta tanlash kerak)</option>
                                 <option value="false">Ko'rsatilmaydi</option>
                                 <option value="null">Ixtiyoriy (skip qilish mumkin)</option>
                             </select>
+                            <div id="user-role-location-info" style="margin-top: 12px; padding: 10px 12px; background: rgba(79, 172, 254, 0.12); border-left: 3px solid rgba(79, 172, 254, 0.5); border-radius: 6px; display: block;">
+                                <p style="color: rgba(79, 172, 254, 0.95); font-size: 12px; margin: 0; line-height: 1.5; display: flex; align-items: flex-start; gap: 6px;">
+                                    <i data-feather="info" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px;"></i>
+                                    <span id="user-role-location-text" style="flex: 1;">Rol sozlamasi yuklanmoqda...</span>
+                                </p>
+                            </div>
                         </div>
-                        <div style="flex: 1; min-width: 200px;">
-                            <label style="display: block; margin-bottom: 8px; font-size: 14px;">Brendlar:</label>
-                            <select id="user-requires-brands" class="form-control" style="margin-bottom: 10px;">
+                        
+                        <!-- Brendlar Talabi -->
+                        <div style="padding: 18px; background: rgba(0,0,0,0.4); border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); transition: all 0.3s ease; position: relative; overflow: hidden;" onmouseover="this.style.borderColor='rgba(79,172,254,0.5)'; this.style.background='rgba(0,0,0,0.5)'; this.style.boxShadow='0 4px 12px rgba(79,172,254,0.15)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.12)'; this.style.background='rgba(0,0,0,0.4)'; this.style.boxShadow='none'">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px;">
+                                <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(79, 172, 254, 0.15); display: flex; align-items: center; justify-content: center;">
+                                    <i data-feather="tag" style="width: 18px; height: 18px; color: #4facfe;"></i>
+                                </div>
+                                <label style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0; flex: 1;">Brendlar Talabi</label>
+                            </div>
+                            <select id="user-requires-brands" class="form-control" style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.18); padding: 14px 16px; border-radius: 10px; transition: all 0.3s ease; cursor: pointer; color: var(--text-primary); font-size: 14px; appearance: none; background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23ffffff\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 14px center; background-size: 18px; padding-right: 44px;" onfocus="this.style.borderColor='rgba(79,172,254,0.7)'; this.style.background='rgba(0,0,0,0.6)'; this.style.boxShadow='0 0 0 3px rgba(79,172,254,0.1)'" onblur="this.style.borderColor='rgba(255,255,255,0.18)'; this.style.background='rgba(0,0,0,0.5)'; this.style.boxShadow='none'">
                                 <option value="">Rol sozlamasiga qarab</option>
                                 <option value="true">Majburiy (kamida 1 ta tanlash kerak)</option>
                                 <option value="false">Ko'rsatilmaydi</option>
                                 <option value="null">Ixtiyoriy (skip qilish mumkin)</option>
                             </select>
+                            <div id="user-role-brand-info" style="margin-top: 12px; padding: 10px 12px; background: rgba(79, 172, 254, 0.12); border-left: 3px solid rgba(79, 172, 254, 0.5); border-radius: 6px; display: block;">
+                                <p style="color: rgba(79, 172, 254, 0.95); font-size: 12px; margin: 0; line-height: 1.5; display: flex; align-items: flex-start; gap: 6px;">
+                                    <i data-feather="info" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px;"></i>
+                                    <span id="user-role-brand-text" style="flex: 1;">Rol sozlamasi yuklanmoqda...</span>
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
                 
-                <div class="form-group">
-                    <label for="user-device-limit">Ruxsat etilgan qurilmalar soni</label>
-                    <input type="number" id="user-device-limit" class="form-control" value="1" min="1">
-                </div>
-                <div class="form-group" id="user-locations-group">
-                    <label>Biriktirilgan filiallar:</label>
-                    <div class="checkbox-grid" id="locations-checkbox-list"></div>
-                </div>
-                <div class="form-group" id="user-brands-group" style="display: none;">
-                    <label>Biriktirilgan brendlar (Menejerlar uchun):</label>
-                    <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 10px;">
-                        Menejer faqat o'ziga biriktirilgan brendlar ma'lumotlarini ko'radi
-                    </p>
-                    <div id="user-brands-list" style="max-height: 200px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; background: rgba(0,0,0,0.2);">
-                        <!-- Brendlar checkbox ro'yxati -->
-                    </div>
-                </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="user-device-limit" style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-primary);">Ruxsat etilgan qurilmalar soni</label>
+                            <input type="number" id="user-device-limit" class="form-control" value="1" min="1" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 8px; transition: all 0.3s; width: 100%;" onfocus="this.style.borderColor='rgba(79,172,254,0.6)'; this.style.background='rgba(0,0,0,0.3)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='rgba(0,0,0,0.2)'">
+                        </div>
+                        <div class="form-group" id="user-locations-group" style="margin-bottom: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <label style="font-weight: 500; color: var(--text-primary); margin: 0;">Biriktirilgan filiallar:</label>
+                                <button type="button" class="btn btn-secondary" id="select-user-locations-btn" onclick="openSelectUserLocationsModal()" style="padding: 8px 16px; border-radius: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; background: rgba(79, 172, 254, 0.1); border: 1px solid rgba(79, 172, 254, 0.3); color: #4facfe; transition: all 0.3s;" onmouseover="this.style.background='rgba(79, 172, 254, 0.2)'; this.style.borderColor='rgba(79, 172, 254, 0.5)'" onmouseout="this.style.background='rgba(79, 172, 254, 0.1)'; this.style.borderColor='rgba(79, 172, 254, 0.3)'">
+                                    <i data-feather="map-pin" style="width: 14px; height: 14px;"></i>
+                                    Filiallar Tanlash
+                                </button>
+                            </div>
+                            <div id="selected-user-locations-display" style="padding: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; min-height: 50px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                                <span style="color: rgba(255,255,255,0.5); font-size: 13px;">Filiallar tanlanmagan</span>
+                            </div>
+                            <div class="checkbox-grid" id="locations-checkbox-list" style="display: none;"></div>
+                        </div>
+                        <div class="form-group" id="user-brands-group" style="display: none; margin-bottom: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div>
+                                    <label style="display: block; margin-bottom: 4px; font-weight: 500; color: var(--text-primary);">Biriktirilgan brendlar (Admin va Menejerlar uchun):</label>
+                                    <p style="color: rgba(255,255,255,0.6); font-size: 12px; margin: 0; line-height: 1.4;">
+                                        Admin va Menejer faqat o'ziga biriktirilgan brendlar ma'lumotlarini ko'radi
+                                    </p>
+                                </div>
+                                <button type="button" class="btn btn-secondary" id="select-user-brands-btn" onclick="openSelectUserBrandsModal()" style="padding: 8px 16px; border-radius: 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; background: rgba(79, 172, 254, 0.1); border: 1px solid rgba(79, 172, 254, 0.3); color: #4facfe; transition: all 0.3s;" onmouseover="this.style.background='rgba(79, 172, 254, 0.2)'; this.style.borderColor='rgba(79, 172, 254, 0.5)'" onmouseout="this.style.background='rgba(79, 172, 254, 0.1)'; this.style.borderColor='rgba(79, 172, 254, 0.3)'">
+                                    <i data-feather="tag" style="width: 14px; height: 14px;"></i>
+                                    Brendlar Tanlash
+                                </button>
+                            </div>
+                            <div id="selected-user-brands-display" style="padding: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; min-height: 50px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                                <span style="color: rgba(255,255,255,0.5); font-size: 13px;">Brendlar tanlanmagan</span>
+                            </div>
+                            <div id="user-brands-list" style="display: none;">
+                                <!-- Brendlar checkbox ro'yxati -->
+                            </div>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary close-modal-btn" data-target="user-form-modal">Bekor qilish</button>
                     <button type="submit" form="user-form" class="btn btn-primary">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
-                        </svg>
+                        <i data-feather="check"></i>
                         Saqlash
                     </button>
                 </div>
@@ -3021,6 +3231,70 @@
         </div>
     </div>
 
+    <!-- User Locations Selection Modal -->
+    <div id="user-locations-selection-modal" class="modal hidden">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="max-width: 600px; width: 95%;">
+                <div class="modal-header-enhanced">
+                    <div class="modal-icon-wrapper">
+                        <i data-feather="map-pin"></i>
+                    </div>
+                    <div style="flex: 1;">
+                        <h3 class="modal-title" style="margin: 0;">Filiallar Tanlash</h3>
+                        <p class="modal-subtitle">Foydalanuvchi uchun filiallarni tanlang</p>
+                    </div>
+                    <button class="btn-close close-modal-btn" data-target="user-locations-selection-modal" style="position: static; background: rgba(255,255,255,0.1); border-radius: 8px; padding: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+                        <i data-feather="x"></i>
+                    </button>
+                </div>
+                <div class="modal-body" style="padding: 20px; max-height: 60vh; overflow-y: auto;">
+                    <div class="checkbox-grid" id="user-locations-selection-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
+                        <!-- Filiallar ro'yxati JavaScript orqali to'ldiriladi -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="user-locations-selection-modal">Bekor qilish</button>
+                    <button type="button" class="btn btn-primary" id="save-user-locations-btn">
+                        <i data-feather="check"></i>
+                        Saqlash
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Brands Selection Modal -->
+    <div id="user-brands-selection-modal" class="modal hidden">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="max-width: 600px; width: 95%;">
+                <div class="modal-header-enhanced">
+                    <div class="modal-icon-wrapper">
+                        <i data-feather="tag"></i>
+                    </div>
+                    <div style="flex: 1;">
+                        <h3 class="modal-title" style="margin: 0;">Brendlar Tanlash</h3>
+                        <p class="modal-subtitle">Foydalanuvchi uchun brendlarni tanlang</p>
+                    </div>
+                    <button class="btn-close close-modal-btn" data-target="user-brands-selection-modal" style="position: static; background: rgba(255,255,255,0.1); border-radius: 8px; padding: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+                        <i data-feather="x"></i>
+                    </button>
+                </div>
+                <div class="modal-body" style="padding: 20px; max-height: 60vh; overflow-y: auto;">
+                    <div id="user-brands-selection-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
+                        <!-- Brendlar ro'yxati JavaScript orqali to'ldiriladi -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="user-brands-selection-modal">Bekor qilish</button>
+                    <button type="button" class="btn btn-primary" id="save-user-brands-btn">
+                        <i data-feather="check"></i>
+                        Saqlash
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="telegram-connect-modal" class="modal hidden">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -3055,10 +3329,26 @@
     </div>
 
     <div id="sessions-modal" class="modal hidden">
-        <div class="modal-content">
-            <button class="close-modal-btn" data-target="sessions-modal"><i data-feather="x"></i></button>
-            <h3 class="modal-title" id="sessions-modal-title"></h3>
-            <div id="sessions-list-container" class="sessions-list"></div>
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="max-width: 700px; width: 95%; max-height: 85vh; display: flex; flex-direction: column;">
+                <div class="modal-header-enhanced" style="padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); flex-shrink: 0;">
+                    <div class="modal-icon-wrapper" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);">
+                        <i data-feather="smartphone" style="color: #667eea;"></i>
+                    </div>
+                    <div style="flex: 1;">
+                        <h3 class="modal-title" id="sessions-modal-title" style="margin: 0; display: flex; align-items: center; gap: 12px;">
+                            <span>Aktiv Sessiyalar</span>
+                        </h3>
+                        <p class="modal-subtitle" style="margin: 4px 0 0 0; color: rgba(255,255,255,0.6); font-size: 13px;">Foydalanuvchi sessiyalari ro'yxati</p>
+                    </div>
+                    <button class="btn-close close-modal-btn" data-target="sessions-modal" style="position: static; background: rgba(255,255,255,0.1); border-radius: 8px; padding: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+                        <i data-feather="x"></i>
+                    </button>
+                </div>
+                <div class="modal-body" style="padding: 20px; overflow-y: auto; flex: 1; min-height: 0;">
+                    <div id="sessions-list-container" class="sessions-list"></div>
+                </div>
+            </div>
         </div>
     </div>
     

@@ -316,12 +316,15 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
         return res.status(403).json({ message: "Super admin yaratish faqat super admin tomonidan mumkin." });
     }
     
-    // Admin role'ni yaratish mumkin emas - faqat super admin yaratiladi
-    if (role === 'admin') {
-        return res.status(403).json({ message: "Admin role'ni yaratish mumkin emas. Faqat super admin yaratiladi." });
+    // Admin role'ni faqat super admin yaratishi mumkin
+    if (role === 'admin' && currentUserRole !== 'super_admin') {
+        return res.status(403).json({ message: "Admin role'ni faqat super admin yaratishi mumkin." });
     }
     
-    if ((role === 'operator' || role === 'manager') && locations.length === 0) {
+    // Admin va super admin uchun filiallar va brendlar shart emas
+    if (role === 'admin' || role === 'super_admin') {
+        // Admin va super admin uchun filiallar va brendlar ixtiyoriy
+    } else if ((role === 'operator' || role === 'manager') && locations.length === 0) {
         return res.status(400).json({ message: "Operator yoki Menejer uchun kamida bitta filial tanlanishi shart." });
     }
     
@@ -334,9 +337,9 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
         await userRepository.updateUser(adminId, userId, role, device_limit, fullname, ipAddress, userAgent);
         await userRepository.updateUserLocations(adminId, userId, locations, ipAddress, userAgent);
         
-        // Manager uchun brendlarni yangilash
+        // Admin va Manager uchun brendlarni yangilash
         await db('user_brands').where('user_id', userId).del();
-        if (role === 'manager' && brands.length > 0) {
+        if ((role === 'admin' || role === 'manager') && brands.length > 0) {
             const brandRecords = brands.map(brandId => ({
                 user_id: userId,
                 brand_id: brandId
@@ -459,6 +462,14 @@ router.put('/:id/approve', (req, res, next) => {
         console.error(`   - Requested role: ${role}`);
         console.error(`   - Current user role: ${currentUserRole}`);
         return res.status(403).json({ message: "Super admin yaratish faqat super admin tomonidan mumkin." });
+    }
+    
+    // Admin rolini faqat super admin yaratishi mumkin
+    if (role === 'admin' && currentUserRole !== 'super_admin') {
+        console.error(`❌ [BACKEND] 2. XATOLIK: Admin yaratishga urinish!`);
+        console.error(`   - Requested role: ${role}`);
+        console.error(`   - Current user role: ${currentUserRole}`);
+        return res.status(403).json({ message: "Admin rolini faqat super admin yaratishi mumkin." });
     }
     
     // Rol bazada mavjudligini tekshirish va talablarini olish

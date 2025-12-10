@@ -9,12 +9,9 @@ exports.up = function(knex) {
     table.boolean('requires_brands').defaultTo(false).notNullable();
     table.boolean('requires_locations').defaultTo(false).notNullable();
   }).then(() => {
-    // Mavjud rollar uchun standart qiymatlar
-    return knex('roles').where('role_name', 'admin').update({ requires_brands: true, requires_locations: false });
-  }).then(() => {
-    return knex('roles').where('role_name', 'manager').update({ requires_brands: true, requires_locations: true });
-  }).then(() => {
-    return knex('roles').where('role_name', 'operator').update({ requires_brands: false, requires_locations: true });
+    // Faqat super_admin roli mavjud bo'lishi kerak, boshqa rollar superadmin tomonidan yaratiladi
+    // Shuning uchun faqat super_admin roli uchun shartlarni o'rnatamiz
+    return knex('roles').where('role_name', 'super_admin').update({ requires_brands: null, requires_locations: null });
   });
 };
 

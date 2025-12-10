@@ -463,9 +463,31 @@ function handleWebSocketMessage(data) {
             const rolesPage = document.getElementById('roles');
             if (rolesPage && rolesPage.classList.contains('active')) {
                 console.log('🔄 [REALTIME] Roles sahifasi aktiv, yangilanmoqda...');
-                import('./roles.js').then(module => {
-                    if (module.renderRoles) {
-                        module.renderRoles();
+                // Avval state'ni yangilash, keyin render qilish
+                import('./api.js').then(async ({ safeFetch }) => {
+                    try {
+                        const rolesData = await safeFetch('/api/roles');
+                        if (rolesData && rolesData.roles) {
+                            import('./state.js').then(({ state }) => {
+                                state.roles = rolesData.roles;
+                                state.allPermissions = rolesData.all_permissions;
+                                
+                                // Keyin render qilish
+                                import('./roles.js').then(module => {
+                                    if (module.renderRoles) {
+                                        module.renderRoles();
+                                    }
+                                });
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Roles yangilashda xatolik:', error);
+                        // Xatolik bo'lsa ham render qilishga harakat qilish
+                        import('./roles.js').then(module => {
+                            if (module.renderRoles) {
+                                module.renderRoles();
+                            }
+                        });
                     }
                 });
             }

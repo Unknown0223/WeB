@@ -9,6 +9,7 @@ export function initializeUserPermissions() {
     // console.log('✅ Initializing user permissions module...');
     setupUserPermissionTabs();
     setupUserPermissionTypes();
+    setupSaveButton();
     
     // Birinchi tab va contentni aktiv qilish
     const firstTab = document.querySelector('.roles-tab[data-tab="roles-permissions"]');
@@ -22,6 +23,18 @@ export function initializeUserPermissions() {
     } else {
         // console.error('❌ First tab or content not found!');
     }
+}
+
+// Setup Save Button Event Listener
+function setupSaveButton() {
+    // Event delegation yoki to'g'ridan-to'g'ri event listener
+    document.addEventListener('click', (e) => {
+        const saveBtn = e.target.closest('#save-user-permissions-btn');
+        if (saveBtn) {
+            e.preventDefault();
+            window.saveUserPermissions(e);
+        }
+    });
 }
 
 // Setup Tab Navigation
@@ -648,21 +661,44 @@ window.toggleUserPermission = function(permissionKey, isChecked) {
 };
 
 // Save User Permissions
-window.saveUserPermissions = async function() {
+window.saveUserPermissions = async function(event) {
     if (!currentSelectedUser) {
         alert('Iltimos, foydalanuvchini tanlang!');
         return;
     }
     
-    const btn = event.target;
+    // Event parametri bo'lmasa, button'ni to'g'ridan-to'g'ri topish
+    let btn;
+    if (event && event.target) {
+        btn = event.target.closest('button') || event.target;
+    } else {
+        btn = document.getElementById('save-user-permissions-btn');
+    }
+    
+    if (!btn) {
+        console.error('Save button topilmadi!');
+        return;
+    }
+    
     btn.disabled = true;
+    const originalHTML = btn.innerHTML;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saqlanmoqda...';
     
     try {
         // Collect permissions from assigned panel
         const assignedList = document.getElementById('assigned-permissions-list');
+        if (!assignedList) {
+            throw new Error('Assigned permissions list topilmadi');
+        }
+        
         const permissionCards = assignedList.querySelectorAll('.permission-item-card');
         const permissions = Array.from(permissionCards).map(card => card.dataset.permission);
+        
+        console.log('💾 [USER PERMISSIONS] Saqlanmoqda:', {
+            userId: currentSelectedUser.id,
+            type: currentPermissionType,
+            permissionsCount: permissions.length
+        });
         
         const response = await fetch(`/api/users/${currentSelectedUser.id}/permissions`, {
             method: 'POST',
@@ -673,7 +709,25 @@ window.saveUserPermissions = async function() {
             })
         });
         
-        if (!response.ok) throw new Error('Failed to save');
+        if (!response.ok) {
+            let errorMessage = 'Huquqlarni saqlashda xatolik';
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.message || errorMessage;
+            } catch (e) {
+                if (response.status === 403) {
+                    errorMessage = 'Bu amalni bajarish uchun sizda yetarli huquq yo\'q';
+                } else if (response.status === 401) {
+                    errorMessage = 'Avtorizatsiyadan o\'tmagansiz. Iltimos, qayta kiring.';
+                } else if (response.status === 404) {
+                    errorMessage = 'Foydalanuvchi topilmadi';
+                }
+            }
+            throw new Error(errorMessage);
+        }
+        
+        const result = await response.json();
+        console.log('✅ [USER PERMISSIONS] Saqlandi:', result);
         
         // Success
         btn.classList.remove('btn-primary');
@@ -683,7 +737,7 @@ window.saveUserPermissions = async function() {
         setTimeout(() => {
             btn.classList.remove('btn-success');
             btn.classList.add('btn-primary');
-            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M15.854 12.854c.2-.2.2-.523 0-.722l-3.536-3.536a.5.5 0 0 0-.722 0l-3.536 3.536c-.2.2-.2.523 0 .722l.722.722c.2.2.523.2.722 0L12 11.086V15.5a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-4.414l2.496 2.496c.2.2.523.2.722 0l.636-.636z"/></svg> Saqlash';
+            btn.innerHTML = originalHTML;
             btn.disabled = false;
         }, 2000);
         
@@ -692,10 +746,10 @@ window.saveUserPermissions = async function() {
         loadUsersForPermissions();
         
     } catch (error) {
-        // console.error('Error saving permissions:', error);
-        alert('Huquqlarni saqlashda xatolik!');
+        console.error('❌ [USER PERMISSIONS] Saqlashda xatolik:', error);
+        alert(`Huquqlarni saqlashda xatolik: ${error.message}`);
         btn.disabled = false;
-        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M15.854 12.854c.2-.2.2-.523 0-.722l-3.536-3.536a.5.5 0 0 0-.722 0l-3.536 3.536c-.2.2-.2.523 0 .722l.722.722c.2.2.523.2.722 0L12 11.086V15.5a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-4.414l2.496 2.496c.2.2.523.2.722 0l.636-.636z"/></svg> Saqlash';
+        btn.innerHTML = originalHTML;
     }
 };
 

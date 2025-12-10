@@ -67,7 +67,8 @@ const initializeDB = async () => {
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
 
-    const initialRoles = ['super_admin', 'admin', 'manager', 'operator'];
+    // Faqat super_admin roli yaratiladi, boshqa rollar superadmin tomonidan yaratiladi
+    const initialRoles = ['super_admin'];
     
     const initialPermissions = [
         { permission_key: 'reports:view_all', description: 'Barcha hisobotlarni ko\'rish (Pivot uchun ham)', category: 'Hisobotlar' },
@@ -101,25 +102,10 @@ const initializeDB = async () => {
     ];
 
     // === MUAMMO TUZATILGAN JOY ===
-    // Har bir rol uchun standart huquqlar to'plami kengaytirildi
+    // Faqat super_admin roli uchun huquqlar belgilanadi
+    // Boshqa rollar superadmin tomonidan yaratiladi va ularning huquqlari ham superadmin tomonidan belgilanadi
     const rolePerms = {
-        super_admin: initialPermissions.map(p => p.permission_key), // Super admin barcha huquqlarga ega va cheklovsiz
-        admin: initialPermissions.map(p => p.permission_key), // Admin barcha huquqlarga ega, lekin cheklovlar bilan
-        manager: [
-            'dashboard:view', 
-            'reports:view_all', // Barcha hisobotlarni ko'rish
-            'reports:create',
-            'reports:edit_assigned', // Biriktirilganlarni tahrirlash
-            'reports:edit_own',
-            'comparison:view', // Qiymatlarni solishtirish
-            'comparison:edit', // Solishtirish summalarini kiritish
-            'comparison:export' // Excel export
-        ],
-        operator: [
-            'reports:view_own', // Faqat o'z hisobotlarini ko'rish
-            'reports:create', 
-            'reports:edit_own'
-        ]
+        super_admin: initialPermissions.map(p => p.permission_key) // Super admin barcha huquqlarga ega va cheklovsiz
     };
     // ============================
 
@@ -150,11 +136,6 @@ const initializeDB = async () => {
         // Super admin: hech qanday shartlar yo'q (to'liq dotup) - null
         await trx('roles')
             .where('role_name', 'super_admin')
-            .update({ requires_locations: null, requires_brands: null });
-        
-        // Admin: shartlar ixtiyoriy (null) - istalgan dotup yoki chegaralangan
-        await trx('roles')
-            .where('role_name', 'admin')
             .update({ requires_locations: null, requires_brands: null });
     });
 

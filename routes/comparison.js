@@ -3,6 +3,7 @@ const ExcelJS = require('exceljs');
 const multer = require('multer');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
+const { applyReportsFilter } = require('../utils/userAccessFilter.js');
 
 const router = express.Router();
 
@@ -60,7 +61,7 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
         const brandName = brand ? brand.name : null;
         
         // Avval barcha hisobotlarni olamiz (brand_id null bo'lishi mumkin, lekin data ichida brand_id bor)
-        const allReports = await db('reports as r')
+        const allReportsQuery = db('reports as r')
             .leftJoin('brands as b', 'r.brand_id', 'b.id')
             .select(
                 'r.id',
@@ -73,6 +74,11 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 'b.name as brand_name'
             )
             .where('r.report_date', formattedDate);
+        
+        // Universal access filter qo'llash
+        await applyReportsFilter(allReportsQuery, req.session.user);
+        
+        const allReports = await allReportsQuery;
         
         // Endi data ichidan brand_id ni tekshirib, faqat tanlangan brand_id uchun filtrlash
         const targetBrandId = String(parseInt(brandId));
