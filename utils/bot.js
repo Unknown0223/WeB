@@ -8,6 +8,7 @@ const { format } = require('date-fns');
 
 let bot;
 let botIsInitialized = false;
+let pollingConflictHandled = false; // 409 Conflict xatolikni bir marta handle qilish uchun
 
 const userStates = {}; // Adminning holatini saqlash uchun
 const NODE_SERVER_URL = process.env.APP_BASE_URL || "http://127.0.0.1:3000/";
@@ -658,6 +659,9 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         }
     }
 
+    // 409 Conflict flag'ni qayta tiklash
+    pollingConflictHandled = false;
+
     bot = new TelegramBot(botToken, options);
     botIsInitialized = true;
 
@@ -670,10 +674,38 @@ const initializeBot = async (botToken, options = { polling: true }) => {
     }
 
     bot.on('polling_error', (error) => {
+        // 409 Conflict - boshqa bot instance allaqachon polling qilmoqda
+        if (error.code === 'ETELEGRAM' && error.message && error.message.includes('409')) {
+            if (!pollingConflictHandled) {
+                pollingConflictHandled = true;
+                console.warn('⚠️ [BOT] 409 Conflict: Boshqa bot instance allaqachon polling qilmoqda.');
+                console.warn('⚠️ [BOT] Bu bot instance polling rejimini to\'xtatmoqda. Webhook rejimiga o\'tish tavsiya etiladi.');
+                try {
+                    if (bot && bot.isPolling && bot.isPolling()) {
+                        bot.stopPolling();
+                        botIsInitialized = false;
+                        console.log('✅ [BOT] Polling to\'xtatildi. Webhook rejimini ishlatish tavsiya etiladi.');
+                    }
+                } catch (stopError) {
+                    console.error('❌ [BOT] Polling to\'xtatishda xatolik:', stopError);
+                }
+            }
+            // Xatolikni qayta ko'rsatmaslik
+            return;
+        }
+        
+        // Boshqa xatoliklarni ko'rsatish
         console.error('Polling xatoligi:', error.code, '-', error.message);
+        
         if (error.response && error.response.statusCode === 401) {
             console.error("Noto'g'ri bot tokeni. Bot to'xtatildi.");
-            bot.stopPolling();
+            try {
+                if (bot && bot.isPolling && bot.isPolling()) {
+                    bot.stopPolling();
+                }
+            } catch (stopError) {
+                console.error('❌ [BOT] Polling to\'xtatishda xatolik:', stopError);
+            }
             botIsInitialized = false;
         }
     });

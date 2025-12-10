@@ -194,6 +194,19 @@ router.post('/templates', isManagerOrAdmin, async (req, res) => {
             is_public: canMakePublic
         });
         
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [PIVOT] Yangi template yaratildi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('pivot_template_created', {
+                templateId: templateId,
+                name: name,
+                is_public: canMakePublic,
+                created_by: req.session.user.id,
+                created_by_username: req.session.user.username
+            });
+            console.log(`✅ [PIVOT] WebSocket yuborildi: pivot_template_created`);
+        }
+        
         res.status(201).json({ 
             message: "Шаблон успешно сохранен.", 
             templateId: templateId 
@@ -278,6 +291,19 @@ router.put('/templates/:id', isManagerOrAdmin, async (req, res) => {
             .where({ id: req.params.id })
             .update(updateData);
         
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [PIVOT] Template yangilandi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('pivot_template_updated', {
+                templateId: parseInt(req.params.id),
+                name: name,
+                is_public: isPublic,
+                updated_by: req.session.user.id,
+                updated_by_username: req.session.user.username
+            });
+            console.log(`✅ [PIVOT] WebSocket yuborildi: pivot_template_updated`);
+        }
+        
         res.json({ message: "Шаблон успешно обновлён." });
         
     } catch (error) {
@@ -313,9 +339,22 @@ router.delete('/templates/:id', isManagerOrAdmin, async (req, res) => {
             });
         }
         
+        const templateName = template.name;
         await db('pivot_templates')
             .where({ id: req.params.id })
             .del();
+        
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [PIVOT] Template o'chirildi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('pivot_template_deleted', {
+                templateId: parseInt(req.params.id),
+                name: templateName,
+                deleted_by: req.session.user.id,
+                deleted_by_username: req.session.user.username
+            });
+            console.log(`✅ [PIVOT] WebSocket yuborildi: pivot_template_deleted`);
+        }
         
         res.json({ message: "Шаблон успешно удален." });
         

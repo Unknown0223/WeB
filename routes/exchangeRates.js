@@ -73,6 +73,18 @@ router.post('/refresh', isAuthenticated, hasPermission('settings:edit_general'),
                 }
             }
             
+            // WebSocket orqali realtime yuborish
+            if (global.broadcastWebSocket) {
+                console.log(`📡 [EXCHANGE_RATES] Kurslar yangilandi, WebSocket orqali yuborilmoqda...`);
+                global.broadcastWebSocket('exchange_rates_updated', {
+                    rates: rates,
+                    date: today,
+                    updated_by: req.session.user.id,
+                    updated_by_username: req.session.user.username
+                });
+                console.log(`✅ [EXCHANGE_RATES] WebSocket yuborildi: exchange_rates_updated`);
+            }
+            
             res.json({ 
                 success: true, 
                 message: 'Kurslar muvaffaqiyatli yangilandi',

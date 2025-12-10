@@ -4,7 +4,7 @@
 import { state } from './state.js';
 import { DOM } from './dom.js';
 import { safeFetch, fetchUsers, fetchPendingUsers } from './api.js';
-import { showToast, parseUserAgent, showConfirmDialog } from './utils.js';
+import { showToast, parseUserAgent, showConfirmDialog, hasPermission } from './utils.js';
 
 // Selected users for bulk actions
 let selectedUsers = new Set();
@@ -20,106 +20,66 @@ let currentFilters = {
 // Brendlarni yuklash va render qilish
 async function loadBrandsForUser(userId = null) {
     try {
-        // Barcha brendlarni olish
-        const res = await safeFetch('/api/brands');
-        if (!res.ok) throw new Error('Brendlarni yuklashda xatolik');
-        const allBrands = await res.json();
-        
-        // Agar userId berilgan bo'lsa, foydalanuvchining brendlarini olish
-        let userBrands = [];
+        // Agar userId berilgan bo'lsa, foydalanuvchining brendlarini olish va ko'rsatish
         if (userId) {
             const userBrandsRes = await safeFetch(`/api/brands/user/${userId}`);
             if (userBrandsRes.ok) {
                 const data = await userBrandsRes.json();
-                userBrands = data.brands || [];
+                const userBrands = data.brands || [];
+                
+                // Tanlangan brendlarni ko'rsatish
+                const selectedBrands = userBrands.map(brand => ({
+                    id: brand.id,
+                    name: brand.name,
+                    emoji: brand.emoji || '🏢'
+                }));
+                updateSelectedBrandsDisplay(selectedBrands);
             }
+        } else {
+            // Yangi foydalanuvchi - bo'sh ko'rsatish
+            updateSelectedBrandsDisplay([]);
         }
         
-        // Brendlar ro'yxatini render qilish - user-brands-list yoki approval-brands-list
-        const container = document.getElementById('user-brands-list') || document.getElementById('approval-brands-list');
-        if (!container) return;
-        
-        if (allBrands.length === 0) {
-            container.innerHTML = '<p style="color: rgba(255,255,255,0.5); text-align: center;">Avval brendlar yarating</p>';
-            return;
-        }
-        
-        const allChecked = allBrands.every(brand => userBrands.some(ub => ub.id === brand.id));
-        
-        let html = `
-            <label class="checkbox-item" style="
-                display: flex;
-                align-items: center;
-                padding: 10px;
-                border-radius: 6px;
-                cursor: pointer;
-                background: rgba(79, 172, 254, 0.1);
-                border: 1px solid rgba(79, 172, 254, 0.3);
-                margin-bottom: 10px;
-                font-weight: 600;
-            ">
-                <input type="checkbox" class="select-all-brands-checkbox" ${allChecked ? 'checked' : ''} 
-                    style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
-                <span style="font-size: 14px; color: #4facfe;">✓ Barchasi</span>
-            </label>
-            <div style="border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0;"></div>
-        `;
-        
-        html += allBrands.map(brand => {
-            const isChecked = userBrands.some(ub => ub.id === brand.id);
-            const brandEmoji = brand.emoji || '🏢';
-            const brandColor = brand.color || '#4facfe';
+        // Approval modal uchun (approval-brands-list)
+        const approvalContainer = document.getElementById('approval-brands-list');
+        if (approvalContainer) {
+            const res = await safeFetch('/api/brands');
+            if (!res.ok) throw new Error('Brendlarni yuklashda xatolik');
+            const allBrands = await res.json();
             
-            return `
-                <label class="checkbox-item brand-checkbox-label" style="
-                    display: flex;
-                    align-items: center;
-                    padding: 8px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    transition: background 0.2s;
-                ">
-                    <input type="checkbox" name="user-brand" value="${brand.id}" ${isChecked ? 'checked' : ''} 
-                        class="brand-checkbox" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
-                    <span style="font-size: 20px; margin-right: 8px;">${brandEmoji}</span>
-                    <span style="font-size: 14px; color: ${brandColor};">${brand.name}</span>
-                </label>
-            `;
-        }).join('');
-        
-        container.innerHTML = html;
-        
-        // Barchasi checkbox event listener
-        const selectAllCheckbox = container.querySelector('.select-all-brands-checkbox');
-        if (selectAllCheckbox) {
-            selectAllCheckbox.addEventListener('change', (e) => {
-                const checkboxes = container.querySelectorAll('.brand-checkbox');
-                checkboxes.forEach(cb => {
-                    cb.checked = e.target.checked;
-                });
-            });
+            if (allBrands.length === 0) {
+                approvalContainer.innerHTML = '<p style="color: rgba(255,255,255,0.5); text-align: center;">Avval brendlar yarating</p>';
+                return;
+            }
+            
+            approvalContainer.innerHTML = allBrands.map(brand => {
+                const brandEmoji = brand.emoji || '🏢';
+                const brandColor = brand.color || '#4facfe';
+                
+                return `
+                    <label class="checkbox-item brand-checkbox-label" style="
+                        display: flex;
+                        align-items: center;
+                        padding: 8px;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        transition: background 0.2s;
+                    ">
+                        <input type="checkbox" name="approval-brand" value="${brand.id}" 
+                            class="brand-checkbox" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
+                        <span style="font-size: 20px; margin-right: 8px;">${brandEmoji}</span>
+                        <span style="font-size: 14px; color: ${brandColor};">${brand.name}</span>
+                    </label>
+                `;
+            }).join('');
         }
         
-        // Individual checkbox event listener
-        const brandCheckboxes = container.querySelectorAll('.brand-checkbox');
-        brandCheckboxes.forEach(cb => {
-            cb.addEventListener('change', () => {
-                const allChecked = Array.from(brandCheckboxes).every(checkbox => checkbox.checked);
-                if (selectAllCheckbox) {
-                    selectAllCheckbox.checked = allChecked;
-                }
-            });
-        });
-        
-        // Hover effects
-        container.querySelectorAll('.brand-checkbox-label').forEach(label => {
-            label.addEventListener('mouseenter', () => {
-                label.style.background = 'rgba(255,255,255,0.05)';
-            });
-            label.addEventListener('mouseleave', () => {
-                label.style.background = 'transparent';
-            });
-        });
+        // user-brands-list ni doim yashirib qo'yish (faqat modal orqali tanlash)
+        const userBrandsList = document.getElementById('user-brands-list');
+        if (userBrandsList) {
+            userBrandsList.classList.add('hidden');
+            userBrandsList.style.display = 'none';
+        }
     } catch (error) {
         // console.error('Brendlarni yuklash xatosi:', error);
         showToast('Brendlarni yuklashda xatolik', 'error');
@@ -132,8 +92,9 @@ export function renderModernUsers() {
 
     // Apply filters
     let filteredUsers = state.users.filter(user => {
-        // Super admin'ni faqat super admin o'zi ko'rsin
-        if (user.role === 'super_admin' && state.currentUser?.role !== 'super_admin') {
+        // Superadmin'ni faqat superadmin o'zi ko'rsin
+        if ((user.role === 'superadmin' || user.role === 'super_admin') && 
+            state.currentUser?.role !== 'superadmin' && state.currentUser?.role !== 'super_admin') {
             return false;
         }
         
@@ -168,6 +129,82 @@ export function renderModernUsers() {
 
     DOM.userListContainer.innerHTML = filteredUsers.map(user => renderModernUserCard(user)).join('');
     feather.replace();
+    
+    // Event delegation - barcha user card action buttonlar uchun
+    setupUserCardEventListeners();
+}
+
+// Setup event listeners for user card action buttons
+function setupUserCardEventListeners() {
+    if (!DOM.userListContainer) return;
+    
+    // Event delegation - barcha user card action buttonlar uchun
+    DOM.userListContainer.addEventListener('click', async (e) => {
+        const button = e.target.closest('.user-card-action-btn');
+        if (!button) return;
+        
+        // Icon yoki span ichida bosilgan bo'lsa, button'ni topish
+        const actualButton = button.closest('button') || button;
+        if (!actualButton) return;
+        
+        // Permission tekshirish
+        const permission = actualButton.dataset.permission;
+        if (permission && !hasPermission(state.currentUser, permission)) {
+            showToast('Sizda bu amalni bajarish uchun huquq yo\'q', 'error');
+            return;
+        }
+        
+        await handleUserActions({ target: actualButton });
+    });
+    
+    // Sessiya tugatish buttonlari uchun (event delegation)
+    if (DOM.sessionsListContainer) {
+        // Eski listener'larni olib tashlash
+        DOM.sessionsListContainer.removeEventListener('click', handleSessionTerminate);
+        DOM.sessionsListContainer.addEventListener('click', handleSessionTerminate);
+    }
+}
+
+// Sessiya tugatish handler
+async function handleSessionTerminate(e) {
+    const button = e.target.closest('.terminate-session-btn');
+    if (!button) return;
+    
+    const sessionId = button.dataset.sid;
+    if (!sessionId) return;
+    
+    const confirmed = await showConfirmDialog({
+        title: '⚠️ Sessiyani Tugatish',
+        message: 'Rostdan ham bu sessiyani tugatmoqchimisiz?',
+        confirmText: 'Ha, tugatish',
+        cancelText: 'Bekor qilish',
+        type: 'danger',
+        icon: 'alert-triangle'
+    });
+    
+    if (!confirmed) return;
+    
+    try {
+        const res = await safeFetch(`/api/sessions/${sessionId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!res || !res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData.message || 'Sessiyani tugatishda xatolik');
+        }
+        
+        showToast('Sessiya muvaffaqiyatli tugatildi', 'success');
+        
+        // Modal'ni yangilash - saqlangan userId va username dan foydalanish
+        const userId = DOM.sessionsModal?.dataset.userId;
+        const username = DOM.sessionsModal?.dataset.username;
+        if (userId && username) {
+            await openSessionsModal(userId, username);
+        }
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
 }
 
 // Render single modern user card
@@ -522,6 +559,13 @@ export async function toggleLocationVisibilityForApprovalForm() {
             approvalRoleRequirementsGroup.style.display = 'block';
             console.log(`   ✅ "Rol Shartini Kiritish" ko'rsatildi`);
         }
+        
+        // Shartlar belgilanmagan bo'limini ko'rsatish
+        const requirementsNotSet = document.getElementById('requirements-not-set');
+        const requirementsSet = document.getElementById('requirements-set');
+        if (requirementsNotSet) requirementsNotSet.style.display = 'block';
+        if (requirementsSet) requirementsSet.style.display = 'none';
+        
         if (submitBtn) {
             submitBtn.style.display = 'none';
             console.log(`   ✅ Tasdiqlash tugmasi yashirildi`);
@@ -543,9 +587,54 @@ export async function toggleLocationVisibilityForApprovalForm() {
         console.log(`✅ [ROL TANLASH] 5. Shartlar belgilangan! UI o'zgartirilmoqda...`);
         // Shartlar belgilangan - filiallar va brendlarni ko'rsatish
         if (approvalRoleRequirementsGroup) {
-            approvalRoleRequirementsGroup.style.display = 'none';
-            console.log(`   ✅ "Rol Shartini Kiritish" yashirildi`);
+            approvalRoleRequirementsGroup.style.display = 'block';
+            console.log(`   ✅ "Rol Shartlari" ko'rsatildi`);
         }
+        
+        // Shartlar belgilangan bo'limini ko'rsatish va ma'lumotlarni to'ldirish
+        const requirementsNotSet = document.getElementById('requirements-not-set');
+        const requirementsSet = document.getElementById('requirements-set');
+        const requirementsInfo = document.getElementById('requirements-info');
+        
+        if (requirementsNotSet) requirementsNotSet.style.display = 'none';
+        if (requirementsSet) requirementsSet.style.display = 'block';
+        
+        // Shartlar ma'lumotlarini ko'rsatish
+        if (requirementsInfo && roleData) {
+            const requirements = [];
+            if (requiresLocations === true) {
+                requirements.push('<span style="color: #4facfe;"><i data-feather="check" style="width: 14px; height: 14px; vertical-align: middle;"></i> Filiallar majburiy</span>');
+            } else if (requiresLocations === null) {
+                requirements.push('<span style="color: rgba(255,255,255,0.6);"><i data-feather="info" style="width: 14px; height: 14px; vertical-align: middle;"></i> Filiallar ixtiyoriy</span>');
+            } else {
+                requirements.push('<span style="color: rgba(255,255,255,0.4);"><i data-feather="x" style="width: 14px; height: 14px; vertical-align: middle;"></i> Filiallar kerak emas</span>');
+            }
+            
+            if (requiresBrands === true) {
+                requirements.push('<span style="color: #4facfe;"><i data-feather="check" style="width: 14px; height: 14px; vertical-align: middle;"></i> Brendlar majburiy</span>');
+            } else if (requiresBrands === null) {
+                requirements.push('<span style="color: rgba(255,255,255,0.6);"><i data-feather="info" style="width: 14px; height: 14px; vertical-align: middle;"></i> Brendlar ixtiyoriy</span>');
+            } else {
+                requirements.push('<span style="color: rgba(255,255,255,0.4);"><i data-feather="x" style="width: 14px; height: 14px; vertical-align: middle;"></i> Brendlar kerak emas</span>');
+            }
+            
+            requirementsInfo.innerHTML = requirements.join(' • ');
+            feather.replace();
+        }
+        
+        // O'zgartirish tugmasi event listener
+        const editRequirementsBtn = document.getElementById('edit-role-requirements-btn');
+        if (editRequirementsBtn) {
+            editRequirementsBtn.onclick = () => {
+                console.log(`🔧 [ROL TANLASH] "O'zgartirish" tugmasi bosildi`);
+                openRoleRequirementsModal(role, roleData);
+            };
+            feather.replace();
+            console.log(`   ✅ "O'zgartirish" tugmasi event listener qo'shildi`);
+        }
+        
+        // Tasdiqlash tugmasini faqat shartlar to'g'ri belgilanganda ko'rsatish
+        // Shartlar belgilangan bo'lsa, tasdiqlash tugmasini ko'rsatish
         if (submitBtn) {
             submitBtn.style.display = 'block';
             console.log(`   ✅ Tasdiqlash tugmasi ko'rsatildi`);
@@ -647,16 +736,78 @@ async function loadLocationsForApproval() {
         
         if (DOM.approvalLocationsCheckboxList) {
             if (locations.length === 0) {
-                DOM.approvalLocationsCheckboxList.innerHTML = '<p style="color: #ff6b6b; padding: 10px;">⚠️ Tizimda filiallar mavjud emas. Avval filiallar yarating.</p>';
+                DOM.approvalLocationsCheckboxList.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.5);">
+                        <i data-feather="alert-circle" style="width: 48px; height: 48px; margin-bottom: 10px; opacity: 0.5;"></i>
+                        <p style="margin: 0; font-size: 14px;">⚠️ Tizimda filiallar mavjud emas. Avval filiallar yarating.</p>
+                    </div>
+                `;
+                feather.replace();
                 console.warn('⚠️ [WEB] Filiallar ro\'yxati bo\'sh');
             } else {
-                DOM.approvalLocationsCheckboxList.innerHTML = locations.map(loc => `
-                    <label class="checkbox-item">
-                        <input type="checkbox" value="${loc}" name="approval-location">
-                        <span>${loc}</span>
+                // Zamonaviy card ko'rinishida render qilish
+                DOM.approvalLocationsCheckboxList.innerHTML = locations.map((loc, index) => `
+                    <label class="location-card-approval" data-location="${loc}" style="
+                        display: flex;
+                        align-items: center;
+                        padding: 12px 16px;
+                        background: rgba(255,255,255,0.05);
+                        border: 2px solid rgba(255,255,255,0.1);
+                        border-radius: 10px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        margin-bottom: 10px;
+                        position: relative;
+                        overflow: hidden;
+                    ">
+                        <input type="checkbox" value="${loc}" name="approval-location" 
+                            style="
+                                width: 20px;
+                                height: 20px;
+                                margin-right: 12px;
+                                cursor: pointer;
+                                accent-color: #4facfe;
+                            ">
+                        <div style="flex: 1; display: flex; align-items: center; gap: 10px;">
+                            <div style="
+                                width: 40px;
+                                height: 40px;
+                                border-radius: 8px;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                font-weight: 700;
+                                font-size: 16px;
+                                color: #fff;
+                                flex-shrink: 0;
+                            ">${loc.charAt(0).toUpperCase()}</div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; font-size: 14px; color: rgba(255,255,255,0.9); margin-bottom: 2px;">${loc}</div>
+                                <div style="font-size: 12px; color: rgba(255,255,255,0.5);">Filial</div>
+                            </div>
+                            <div class="location-check-icon" style="
+                                width: 24px;
+                                height: 24px;
+                                border-radius: 50%;
+                                background: #4facfe;
+                                display: none;
+                                align-items: center;
+                                justify-content: center;
+                                color: #fff;
+                                font-size: 14px;
+                            ">
+                                <i data-feather="check" style="width: 16px; height: 16px;"></i>
+                            </div>
+                        </div>
                     </label>
                 `).join('');
+                
+                feather.replace();
                 console.log('✅ [WEB] Filiallar ro\'yxati render qilindi. Filiallar soni:', locations.length);
+                
+                // Event listenerlarni qo'shish
+                setupApprovalLocationsInteractivity();
             }
         } else {
             console.warn('⚠️ [WEB] approval-locations-checkbox-list elementi topilmadi');
@@ -665,7 +816,148 @@ async function loadLocationsForApproval() {
         console.error('❌ [WEB] Filiallarni yuklashda xatolik:', error);
         console.error('❌ [WEB] Error stack:', error.stack);
         if (DOM.approvalLocationsCheckboxList) {
-            DOM.approvalLocationsCheckboxList.innerHTML = `<p style="color: #ff6b6b; padding: 10px;">⚠️ Xatolik: ${error.message}</p>`;
+            DOM.approvalLocationsCheckboxList.innerHTML = `
+                <div style="text-align: center; padding: 40px 20px; color: #ff6b6b;">
+                    <i data-feather="alert-triangle" style="width: 48px; height: 48px; margin-bottom: 10px;"></i>
+                    <p style="margin: 0; font-size: 14px;">⚠️ Xatolik: ${error.message}</p>
+                </div>
+            `;
+            feather.replace();
+        }
+    }
+}
+
+// Filiallar interaktivligini sozlash
+function setupApprovalLocationsInteractivity() {
+    // Qidiruv funksiyasi
+    const searchInput = document.getElementById('approval-locations-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase().trim();
+            const locationCards = document.querySelectorAll('.location-card-approval');
+            
+            locationCards.forEach(card => {
+                const locationName = card.dataset.location.toLowerCase();
+                if (locationName.includes(searchTerm)) {
+                    card.style.display = 'flex';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        });
+    }
+    
+    // Checkbox o'zgarganda card ko'rinishini yangilash
+    const checkboxes = document.querySelectorAll('#approval-locations-checkbox-list input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const card = e.target.closest('.location-card-approval');
+            const checkIcon = card?.querySelector('.location-check-icon');
+            
+            if (e.target.checked) {
+                card.style.background = 'rgba(79, 172, 254, 0.15)';
+                card.style.borderColor = '#4facfe';
+                if (checkIcon) checkIcon.style.display = 'flex';
+            } else {
+                card.style.background = 'rgba(255,255,255,0.05)';
+                card.style.borderColor = 'rgba(255,255,255,0.1)';
+                if (checkIcon) checkIcon.style.display = 'none';
+            }
+            
+            updateApprovalLocationsCount();
+            feather.replace();
+        });
+        
+        // Hover effekti
+        const card = checkbox.closest('.location-card-approval');
+        if (card) {
+            card.addEventListener('mouseenter', () => {
+                if (!checkbox.checked) {
+                    card.style.background = 'rgba(255,255,255,0.08)';
+                    card.style.borderColor = 'rgba(255,255,255,0.2)';
+                    card.style.transform = 'translateY(-2px)';
+                }
+            });
+            
+            card.addEventListener('mouseleave', () => {
+                if (!checkbox.checked) {
+                    card.style.background = 'rgba(255,255,255,0.05)';
+                    card.style.borderColor = 'rgba(255,255,255,0.1)';
+                    card.style.transform = 'translateY(0)';
+                }
+            });
+        }
+    });
+    
+    // Barchasini tanlash
+    const selectAllBtn = document.getElementById('select-all-locations-approval');
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', () => {
+            const visibleCheckboxes = Array.from(checkboxes).filter(cb => {
+                const card = cb.closest('.location-card-approval');
+                return card && card.style.display !== 'none';
+            });
+            
+            const allChecked = visibleCheckboxes.every(cb => cb.checked);
+            
+            visibleCheckboxes.forEach(cb => {
+                cb.checked = !allChecked;
+                const card = cb.closest('.location-card-approval');
+                const checkIcon = card?.querySelector('.location-check-icon');
+                
+                if (!allChecked) {
+                    card.style.background = 'rgba(79, 172, 254, 0.15)';
+                    card.style.borderColor = '#4facfe';
+                    if (checkIcon) checkIcon.style.display = 'flex';
+                } else {
+                    card.style.background = 'rgba(255,255,255,0.05)';
+                    card.style.borderColor = 'rgba(255,255,255,0.1)';
+                    if (checkIcon) checkIcon.style.display = 'none';
+                }
+            });
+            
+            updateApprovalLocationsCount();
+            feather.replace();
+        });
+    }
+    
+    // Barchasini tozalash
+    const clearAllBtn = document.getElementById('clear-all-locations-approval');
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', () => {
+            checkboxes.forEach(cb => {
+                cb.checked = false;
+                const card = cb.closest('.location-card-approval');
+                const checkIcon = card?.querySelector('.location-check-icon');
+                
+                card.style.background = 'rgba(255,255,255,0.05)';
+                card.style.borderColor = 'rgba(255,255,255,0.1)';
+                if (checkIcon) checkIcon.style.display = 'none';
+            });
+            
+            updateApprovalLocationsCount();
+            feather.replace();
+        });
+    }
+    
+    // Tanlanganlar sonini yangilash
+    updateApprovalLocationsCount();
+}
+
+// Tanlangan filiallar sonini yangilash
+function updateApprovalLocationsCount() {
+    const countElement = document.getElementById('selected-locations-count');
+    if (countElement) {
+        const checkedCount = document.querySelectorAll('#approval-locations-checkbox-list input[type="checkbox"]:checked').length;
+        const totalCount = document.querySelectorAll('#approval-locations-checkbox-list input[type="checkbox"]').length;
+        countElement.textContent = `Tanlangan: ${checkedCount} / ${totalCount}`;
+        
+        if (checkedCount > 0) {
+            countElement.style.color = '#4facfe';
+            countElement.style.fontWeight = '600';
+        } else {
+            countElement.style.color = 'rgba(255,255,255,0.6)';
+            countElement.style.fontWeight = '400';
         }
     }
 }
@@ -749,12 +1041,30 @@ export function openUserModalForAdd() {
     if (DOM.passwordGroup) DOM.passwordGroup.style.display = 'block';
     if (DOM.passwordInput) DOM.passwordInput.required = true;
     if (DOM.userRoleSelect) {
-        DOM.userRoleSelect.innerHTML = state.roles
-            .filter(r => r.role_name !== 'admin' && r.role_name !== 'super_admin') // Admin va super admin yaratish mumkin emas
-            .map(r => 
-                `<option value="${r.role_name}">${r.role_name}</option>`
-            ).join('');
+        if (!state.roles || !Array.isArray(state.roles)) {
+            DOM.userRoleSelect.innerHTML = '<option value="">Rollar yuklanmoqda...</option>';
+        } else {
+            DOM.userRoleSelect.innerHTML = state.roles
+                .filter(r => r.role_name !== 'admin' && r.role_name !== 'superadmin' && r.role_name !== 'super_admin') // Admin va superadmin yaratish mumkin emas
+                .map(r => 
+                    `<option value="${r.role_name}">${r.role_name}</option>`
+                ).join('');
+        }
     }
+    
+    // Tanlangan filiallar va brendlarni tozalash
+    updateSelectedLocationsDisplay([]);
+    updateSelectedBrandsDisplay([]);
+    
+    // Event listener'larni qo'shish
+    setupLocationBrandSelectors();
+    
+    // Tanlangan filiallar va brendlarni tozalash
+    updateSelectedLocationsDisplay([]);
+    updateSelectedBrandsDisplay([]);
+    
+    // Event listener'larni qo'shish
+    setupLocationBrandSelectors();
     
     // Sozlamalarni tozalash
     if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
@@ -785,11 +1095,15 @@ export async function openUserModalForEdit(userId) {
     DOM.fullnameInput.value = user.fullname || '';
     DOM.passwordGroup.style.display = 'none';
     DOM.passwordInput.required = false;
-    DOM.userRoleSelect.innerHTML = state.roles
-        .filter(r => r.role_name !== 'admin' && r.role_name !== 'super_admin') // Admin va super admin yaratish mumkin emas
-        .map(r => 
-            `<option value="${r.role_name}" ${user.role === r.role_name ? 'selected' : ''}>${r.role_name}</option>`
-        ).join('');
+    if (!state.roles || !Array.isArray(state.roles)) {
+        DOM.userRoleSelect.innerHTML = `<option value="${user.role || ''}" selected>${user.role || 'Rollar yuklanmoqda...'}</option>`;
+    } else {
+        DOM.userRoleSelect.innerHTML = state.roles
+            .filter(r => r.role_name !== 'admin' && r.role_name !== 'super_admin') // Admin va super admin yaratish mumkin emas
+            .map(r => 
+                `<option value="${r.role_name}" ${user.role === r.role_name ? 'selected' : ''}>${r.role_name}</option>`
+            ).join('');
+    }
     DOM.deviceLimitInput.value = user.device_limit;
     
     // User-specific sozlamalarni yuklash
@@ -815,47 +1129,416 @@ export async function openUserModalForEdit(userId) {
         if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
     }
     
-    document.querySelectorAll('#locations-checkbox-list input').forEach(cb => {
-        cb.checked = user.locations.includes(cb.value);
-    });
+    // Filiallarni tanlash
+    if (user.locations && Array.isArray(user.locations)) {
+        document.querySelectorAll('#locations-checkbox-list input').forEach(cb => {
+            cb.checked = user.locations.includes(cb.value);
+        });
+    }
     
     // Rol tanlanganda sozlamalar bo'limini ko'rsatish
     if (DOM.userRoleSelect) {
+        // Eski event listener'larni olib tashlash
+        const newSelect = DOM.userRoleSelect.cloneNode(true);
+        DOM.userRoleSelect.parentNode.replaceChild(newSelect, DOM.userRoleSelect);
+        DOM.userRoleSelect = newSelect;
+        
         DOM.userRoleSelect.addEventListener('change', toggleLocationVisibilityForUserForm);
     }
     
     toggleLocationVisibilityForUserForm();
     
-    // Brendlarni yuklash (agar kerak bo'lsa)
-    if (DOM.userBrandsGroup && DOM.userBrandsGroup.style.display === 'block') {
+    // Tanlangan filiallarni ko'rsatish
+    updateSelectedLocationsDisplay(user.locations || []);
+    
+    // Tanlangan brendlarni ko'rsatish
+    if (DOM.userBrandsGroup && DOM.userBrandsGroup.style.display !== 'none') {
         await loadBrandsForUser(userId);
+        // Brendlarni yuklagandan keyin tanlanganlarni ko'rsatish
+        const userBrandsRes = await safeFetch(`/api/brands/user/${userId}`);
+        if (userBrandsRes && userBrandsRes.ok) {
+            const data = await userBrandsRes.json();
+            const userBrands = data.brands || [];
+            updateSelectedBrandsDisplay(userBrands);
+        }
+    }
+    
+    // Event listener'larni qo'shish
+    setupLocationBrandSelectors();
+    
+    // Feather icons
+    if (window.feather) {
+        window.feather.replace();
     }
     
     DOM.userFormModal.classList.remove('hidden');
 }
+
+// Tanlangan filiallarni ko'rsatish
+function updateSelectedLocationsDisplay(selectedLocations) {
+    const display = document.getElementById('selected-locations-display');
+    if (!display) return;
+    
+    if (!selectedLocations || selectedLocations.length === 0) {
+        display.innerHTML = '<div class="empty-selection">Filiallar tanlanmagan</div>';
+        return;
+    }
+    
+    display.innerHTML = selectedLocations.map(loc => `
+        <div class="selected-item-tag">
+            <div class="tag-content">
+                <span class="tag-icon">📍</span>
+                <span class="tag-text">${loc}</span>
+            </div>
+            <button type="button" class="remove-btn" onclick="removeLocation('${loc}')" title="O'chirish">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z"/>
+                </svg>
+            </button>
+        </div>
+    `).join('');
+}
+
+// Tanlangan brendlarni ko'rsatish
+function updateSelectedBrandsDisplay(selectedBrands) {
+    const display = document.getElementById('selected-brands-display');
+    if (!display) return;
+    
+    if (!selectedBrands || selectedBrands.length === 0) {
+        display.innerHTML = '<div class="empty-selection">Brendlar tanlanmagan</div>';
+        return;
+    }
+    
+    display.innerHTML = selectedBrands.map(brand => `
+        <div class="selected-item-tag">
+            <div class="tag-content">
+                <span class="tag-icon">${brand.emoji || '🏢'}</span>
+                <span class="tag-text">${brand.name}</span>
+            </div>
+            <button type="button" class="remove-btn" onclick="removeBrand(${brand.id})" title="O'chirish">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z"/>
+                </svg>
+            </button>
+        </div>
+    `).join('');
+}
+
+// Filiallarni o'chirish
+window.removeLocation = function(location) {
+    const checkbox = document.querySelector(`#locations-checkbox-list input[value="${location}"]`);
+    if (checkbox) checkbox.checked = false;
+    
+    const selectedLocations = Array.from(document.querySelectorAll('#locations-checkbox-list input:checked'))
+        .map(cb => cb.value);
+    updateSelectedLocationsDisplay(selectedLocations);
+};
+
+// Brendlarni o'chirish
+window.removeBrand = function(brandId) {
+    // Modal ichidagi checkbox'ni yangilash
+    const modalCheckbox = document.querySelector(`#brands-modal-list input[value="${brandId}"]`);
+    if (modalCheckbox) {
+        modalCheckbox.checked = false;
+        const item = modalCheckbox.closest('.modal-list-item');
+        if (item) item.classList.remove('selected');
+    }
+    
+    // Tanlangan brendlarni yangilash
+    const selectedBrandIds = Array.from(document.querySelectorAll('#brands-modal-list input:checked'))
+        .map(cb => parseInt(cb.closest('.modal-list-item').dataset.brandId));
+    
+    // Brendlar ma'lumotlarini olish va ko'rsatish
+    safeFetch('/api/brands').then(res => {
+        if (res && res.ok) {
+            return res.json();
+        }
+        return [];
+    }).then(brands => {
+        const selectedBrands = brands
+            .filter(b => selectedBrandIds.includes(b.id))
+            .map(brand => ({
+                id: brand.id,
+                name: brand.name,
+                emoji: brand.emoji || '🏢'
+            }));
+        updateSelectedBrandsDisplay(selectedBrands);
+    }).catch(error => {
+        console.error('Brendlarni yuklashda xatolik:', error);
+    });
+};
+
+// Filiallar va brendlar selector'larini sozlash
+function setupLocationBrandSelectors() {
+    const selectLocationsBtn = document.getElementById('select-locations-btn');
+    const selectBrandsBtn = document.getElementById('select-brands-btn');
+    
+    if (selectLocationsBtn) {
+        selectLocationsBtn.onclick = () => openLocationsSelectModal();
+    }
+    
+    if (selectBrandsBtn) {
+        selectBrandsBtn.onclick = () => openBrandsSelectModal();
+    }
+}
+
+// Filiallar tanlash modal'ini ochish
+async function openLocationsSelectModal() {
+    const modal = document.getElementById('locations-select-modal');
+    const list = document.getElementById('locations-modal-list');
+    const searchInput = document.getElementById('locations-search-input');
+    
+    if (!modal || !list) return;
+    
+    // Hozirgi tanlangan filiallarni olish - selected-locations-display dan
+    const selectedLocationsDisplay = document.getElementById('selected-locations-display');
+    const selectedLocations = [];
+    if (selectedLocationsDisplay) {
+        selectedLocationsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
+            const locationName = tag.querySelector('.tag-text')?.textContent;
+            if (locationName) {
+                selectedLocations.push(locationName);
+            }
+        });
+    }
+    
+    // Filiallarni yuklash
+    try {
+        const settingsRes = await safeFetch('/api/settings');
+        if (!settingsRes || !settingsRes.ok) throw new Error('Filiallarni yuklab bo\'lmadi');
+        const settings = await settingsRes.json();
+        const locations = settings.app_settings?.locations || [];
+        
+        // Modal'da ko'rsatish - grid ko'rinishida
+        list.innerHTML = locations.map(loc => {
+            const isSelected = selectedLocations.includes(loc);
+            const locEscaped = loc.replace(/'/g, "\\'");
+            return `
+                <div class="modal-list-item ${isSelected ? 'selected' : ''}" data-location="${locEscaped}" onclick="toggleLocationCard('${locEscaped}')" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; text-align: center; min-height: 100px; cursor: pointer;">
+                    <input type="checkbox" id="loc-checkbox-${locEscaped}" ${isSelected ? 'checked' : ''} onchange="toggleLocationSelection('${locEscaped}', this)" onclick="event.stopPropagation();" style="margin-bottom: 8px; cursor: pointer;">
+                    <div class="item-content" style="flex-direction: column; gap: 8px; pointer-events: none;">
+                        <span class="item-icon" style="font-size: 32px;">📍</span>
+                        <span class="item-name" style="font-size: 13px; font-weight: 600;">${loc}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        // Qidiruv
+        if (searchInput) {
+            searchInput.value = '';
+            searchInput.oninput = (e) => {
+                const query = e.target.value.toLowerCase();
+                list.querySelectorAll('.modal-list-item').forEach(item => {
+                    const location = item.dataset.location.toLowerCase();
+                    item.style.display = location.includes(query) ? 'flex' : 'none';
+                });
+            };
+        }
+        
+        modal.classList.remove('hidden');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+// Brendlar tanlash modal'ini ochish
+async function openBrandsSelectModal() {
+    const modal = document.getElementById('brands-select-modal');
+    const list = document.getElementById('brands-modal-list');
+    const searchInput = document.getElementById('brands-search-input');
+    
+    if (!modal || !list) return;
+    
+    // Hozirgi tanlangan brendlarni olish - selected-brands-display dan
+    const selectedBrandsDisplay = document.getElementById('selected-brands-display');
+    const selectedBrandIds = [];
+    if (selectedBrandsDisplay) {
+        selectedBrandsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
+            const removeBtn = tag.querySelector('.remove-btn');
+            if (removeBtn && removeBtn.onclick) {
+                // onclick atributidan brandId ni olish
+                const onclickStr = removeBtn.getAttribute('onclick') || '';
+                const match = onclickStr.match(/removeBrand\((\d+)\)/);
+                if (match) {
+                    selectedBrandIds.push(parseInt(match[1]));
+                }
+            }
+        });
+    }
+    
+    // Brendlarni yuklash
+    try {
+        const res = await safeFetch('/api/brands');
+        if (!res || !res.ok) throw new Error('Brendlarni yuklab bo\'lmadi');
+        const brands = await res.json();
+        
+        // Modal'da ko'rsatish - grid ko'rinishida
+        list.innerHTML = brands.map(brand => {
+            const isSelected = selectedBrandIds.includes(brand.id);
+            return `
+                <div class="modal-list-item ${isSelected ? 'selected' : ''}" data-brand-id="${brand.id}" onclick="toggleBrandCard(${brand.id})" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; text-align: center; min-height: 100px; cursor: pointer;">
+                    <input type="checkbox" id="brand-checkbox-${brand.id}" ${isSelected ? 'checked' : ''} onchange="toggleBrandSelection(${brand.id}, this)" onclick="event.stopPropagation();" style="margin-bottom: 8px; cursor: pointer;">
+                    <div class="item-content" style="flex-direction: column; gap: 8px; pointer-events: none;">
+                        <span class="item-icon" style="font-size: 32px;">${brand.emoji || '🏢'}</span>
+                        <span class="item-name" style="font-size: 13px; font-weight: 600;">${brand.name}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        // Qidiruv
+        if (searchInput) {
+            searchInput.value = '';
+            searchInput.oninput = (e) => {
+                const query = e.target.value.toLowerCase();
+                list.querySelectorAll('.modal-list-item').forEach(item => {
+                    const brandName = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
+                    item.style.display = brandName.includes(query) ? 'flex' : 'none';
+                });
+            };
+        }
+        
+        modal.classList.remove('hidden');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+// Filial kartochka bosilganda tanlash
+window.toggleLocationCard = function(location) {
+    const checkbox = document.getElementById(`loc-checkbox-${location.replace(/'/g, "\\'")}`);
+    if (checkbox) {
+        checkbox.checked = !checkbox.checked;
+        toggleLocationSelection(location, checkbox);
+    }
+};
+
+// Filial tanlash
+window.toggleLocationSelection = function(location, checkbox) {
+    const item = checkbox.closest('.modal-list-item');
+    if (item) {
+        if (checkbox.checked) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    }
+};
+
+// Brend kartochka bosilganda tanlash
+window.toggleBrandCard = function(brandId) {
+    const checkbox = document.getElementById(`brand-checkbox-${brandId}`);
+    if (checkbox) {
+        checkbox.checked = !checkbox.checked;
+        toggleBrandSelection(brandId, checkbox);
+    }
+};
+
+// Brend tanlash
+window.toggleBrandSelection = function(brandId, checkbox) {
+    const item = checkbox.closest('.modal-list-item');
+    if (item) {
+        if (checkbox.checked) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    }
+};
+
+// Filiallarni saqlash
+document.addEventListener('DOMContentLoaded', () => {
+    const saveLocationsBtn = document.getElementById('save-locations-btn');
+    if (saveLocationsBtn) {
+        saveLocationsBtn.onclick = () => {
+            const selectedLocations = Array.from(document.querySelectorAll('#locations-modal-list input:checked'))
+                .map(cb => cb.closest('.modal-list-item').dataset.location);
+            
+            // Ko'rinishni yangilash (checkbox'larni yangilash kerak emas, chunki ular yashirilgan)
+            updateSelectedLocationsDisplay(selectedLocations);
+            
+            // Modal'ni yopish
+            document.getElementById('locations-select-modal').classList.add('hidden');
+        };
+    }
+    
+    const saveBrandsBtn = document.getElementById('save-brands-btn');
+    if (saveBrandsBtn) {
+        saveBrandsBtn.onclick = async () => {
+            const selectedBrandIds = Array.from(document.querySelectorAll('#brands-modal-list input:checked'))
+                .map(cb => parseInt(cb.closest('.modal-list-item').dataset.brandId));
+            
+            // Brendlar ma'lumotlarini olish va ko'rsatish
+            try {
+                const res = await safeFetch('/api/brands');
+                if (res && res.ok) {
+                    const brands = await res.json();
+                    const selectedBrands = brands
+                        .filter(b => selectedBrandIds.includes(b.id))
+                        .map(brand => ({
+                            id: brand.id,
+                            name: brand.name,
+                            emoji: brand.emoji || '🏢'
+                        }));
+                    
+                    // Ko'rinishni yangilash
+                    updateSelectedBrandsDisplay(selectedBrands);
+                }
+            } catch (error) {
+                console.error('Brendlarni yuklashda xatolik:', error);
+            }
+            
+            // Modal'ni yopish
+            document.getElementById('brands-select-modal').classList.add('hidden');
+        };
+    }
+});
 
 export async function handleUserFormSubmit(e) {
     e.preventDefault();
     const userId = DOM.editUserIdInput.value;
     const isEditing = !!userId;
     
+    // Tanlangan filiallarni olish - selected-locations-display dan
+    const selectedLocationsDisplay = document.getElementById('selected-locations-display');
+    const selectedLocations = [];
+    if (selectedLocationsDisplay) {
+        selectedLocationsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
+            const locationName = tag.querySelector('.tag-text')?.textContent;
+            if (locationName) {
+                selectedLocations.push(locationName);
+            }
+        });
+    }
+    
+    // Tanlangan brendlarni olish - selected-brands-display dan
+    const selectedBrandsDisplay = document.getElementById('selected-brands-display');
+    const selectedBrandIds = [];
+    if (selectedBrandsDisplay) {
+        selectedBrandsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
+            const removeBtn = tag.querySelector('.remove-btn');
+            if (removeBtn) {
+                const onclickStr = removeBtn.getAttribute('onclick') || '';
+                const match = onclickStr.match(/removeBrand\((\d+)\)/);
+                if (match) {
+                    selectedBrandIds.push(parseInt(match[1]));
+                }
+            }
+        });
+    }
+    
     const data = {
         username: DOM.usernameInput.value.trim(),
         fullname: DOM.fullnameInput.value.trim(),
         role: DOM.userRoleSelect.value,
         device_limit: parseInt(DOM.deviceLimitInput.value) || 1,
-        locations: Array.from(document.querySelectorAll('#locations-checkbox-list input:checked'))
-            .map(cb => cb.value)
+        locations: selectedLocations,
+        brands: selectedBrandIds
     };
     
     if (!isEditing && DOM.passwordInput.value) {
         data.password = DOM.passwordInput.value;
-    }
-    
-    // Manager uchun brendlarni saqlash
-    if (data.role === 'manager') {
-        data.brands = Array.from(document.querySelectorAll('#user-brands-list input:checked'))
-            .map(cb => parseInt(cb.value));
     }
     
     // User-specific sozlamalarni qo'shish
@@ -885,7 +1568,10 @@ export async function handleUserFormSubmit(e) {
         if (!res || !res.ok) throw new Error((await res.json()).message);
         
         const result = await res.json();
-        showToast(result.message);
+        
+        // Muvaffaqiyat xabari
+        const successMessage = result.message || (isEditing ? 'Foydalanuvchi muvaffaqiyatli yangilandi' : 'Foydalanuvchi muvaffaqiyatli yaratildi');
+        showToast(successMessage, false);
         
         // Super admin yaratilganda avtomatik login qilish
         if (result.autoLogin && result.loginData) {
@@ -909,16 +1595,22 @@ export async function handleUserFormSubmit(e) {
             }
         }
         
+        // Foydalanuvchilar ro'yxatini yangilash
         const usersRes = await fetchUsers();
         if (usersRes) {
             state.users = usersRes;
-            const activeTab = DOM.userTabs.querySelector('.active').dataset.status;
+            const activeTab = DOM.userTabs?.querySelector('.active')?.dataset.status || 'active';
             renderUsersByStatus(activeTab);
         }
         
-        DOM.userFormModal.classList.add('hidden');
+        // Modal'ni yopish
+        if (DOM.userFormModal) {
+            DOM.userFormModal.classList.add('hidden');
+        }
     } catch (error) {
-        showToast(error.message, true);
+        console.error('Foydalanuvchi saqlashda xatolik:', error);
+        const errorMessage = error.message || 'Foydalanuvchi saqlashda xatolik yuz berdi';
+        showToast(errorMessage, true);
     }
 }
 
@@ -956,8 +1648,7 @@ export async function handleUserActions(e) {
                 const usersRes = await fetchUsers();
                 if (usersRes) {
                     state.users = usersRes;
-                    const activeTab = DOM.userTabs.querySelector('.active').dataset.status;
-                    renderUsersByStatus(activeTab);
+                    renderModernUsers();
                 }
             } catch (error) { 
                 showToast(error.message, true); 
@@ -976,21 +1667,33 @@ export async function handleUserActions(e) {
 }
 
 async function openSessionsModal(userId, username) {
+    if (!DOM.sessionsModal || !DOM.sessionsModalTitle || !DOM.sessionsListContainer) {
+        console.error('Sessions modal elementlari topilmadi');
+        return;
+    }
+    
     DOM.sessionsModalTitle.textContent = `"${username}"ning Aktiv Sessiyalari`;
     DOM.sessionsListContainer.innerHTML = '<div class="skeleton-item"></div>';
     DOM.sessionsModal.classList.remove('hidden');
     
+    // User ID va username ni saqlash (keyinroq yangilash uchun)
+    DOM.sessionsModal.dataset.userId = userId;
+    DOM.sessionsModal.dataset.username = username;
+    
     try {
         const res = await safeFetch(`/api/users/${userId}/sessions`);
-        if (!res || !res.ok) throw new Error('Sessiyalarni yuklab bo\'lmadi');
+        if (!res || !res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData.message || 'Sessiyalarni yuklab bo\'lmadi');
+        }
         const sessions = await res.json();
         
         DOM.sessionsListContainer.innerHTML = sessions.length > 0 ? sessions.map(s => `
             <div class="session-item ${s.is_current ? 'current' : ''}">
                 <div class="session-details">
                     <div><strong>IP Manzil:</strong> ${s.ip_address || 'Noma\'lum'}</div>
-                    <div><strong>Qurilma:</strong> ${s.user_agent || 'Noma\'lum'}</div>
-                    <div><strong>Oxirgi faollik:</strong> ${new Date(s.last_activity).toLocaleString()}</div>
+                    <div><strong>Qurilma:</strong> ${parseUserAgent(s.user_agent) || 'Noma\'lum'}</div>
+                    <div><strong>Oxirgi faollik:</strong> ${new Date(s.last_activity).toLocaleString('uz-UZ')}</div>
                 </div>
                 ${!s.is_current 
                     ? `<button class="btn btn-danger btn-sm terminate-session-btn" data-sid="${s.sid}">Tugatish</button>` 
@@ -998,6 +1701,7 @@ async function openSessionsModal(userId, username) {
             </div>
         `).join('') : '<div class="empty-state">Aktiv sessiyalar topilmadi.</div>';
     } catch (error) {
+        console.error('Sessions modal xatolik:', error);
         DOM.sessionsListContainer.innerHTML = `<div class="empty-state error">${error.message}</div>`;
     }
 }
@@ -1081,8 +1785,33 @@ export async function openApprovalModal(userId, username) {
     // Super admin'dan tashqari barcha rollarni ko'rsatish
     console.log(`🚪 [MODAL OCHISH] 3. Rollarni yuklash...`);
     console.log(`   - State.roles soni: ${state.roles?.length || 0}`);
-    DOM.approvalRoleSelect.innerHTML = state.roles
-        .filter(r => r.role_name !== 'super_admin') // Super admin yaratish mumkin emas
+    
+    // state.roles mavjudligini tekshirish
+    if (!state.roles || !Array.isArray(state.roles)) {
+        console.warn('⚠️ [MODAL OCHISH] state.roles mavjud emas yoki array emas, rollarni yuklashga harakat qilinmoqda...');
+        try {
+            // Rollarni yuklash
+            const { fetchRoles } = await import('./api.js');
+            const rolesData = await fetchRoles();
+            if (rolesData && rolesData.roles && Array.isArray(rolesData.roles)) {
+                state.roles = rolesData.roles;
+                console.log(`   ✅ Rollar yuklandi. Soni: ${state.roles.length}`);
+            } else {
+                console.error('❌ [MODAL OCHISH] Rollar yuklanmadi yoki noto\'g\'ri formatda');
+                DOM.approvalRoleSelect.innerHTML = '<option value="">Rollar yuklanmadi</option>';
+                showToast('Rollar yuklanmadi. Iltimos, sahifani yangilang.', true);
+                return;
+            }
+        } catch (error) {
+            console.error('❌ [MODAL OCHISH] Rollarni yuklashda xatolik:', error);
+            DOM.approvalRoleSelect.innerHTML = '<option value="">Xatolik yuz berdi</option>';
+            showToast('Rollar yuklanmadi. Iltimos, sahifani yangilang.', true);
+            return;
+        }
+    }
+    
+    DOM.approvalRoleSelect.innerHTML = '<option value="">Rolni tanlang...</option>' + state.roles
+        .filter(r => r.role_name !== 'superadmin' && r.role_name !== 'super_admin') // Superadmin yaratish mumkin emas
         .map(r => {
             // Rol nomlarini o'zbek tiliga tarjima qilish
             const roleNames = {
@@ -1168,6 +1897,14 @@ export async function openApprovalModal(userId, username) {
     console.log(`🚪 [MODAL OCHISH] 6. Modal ochilmoqda...`);
     DOM.approvalModal.classList.remove('hidden');
     feather.replace();
+    
+    // Qidiruv input uchun feather icon yangilash
+    setTimeout(() => {
+        const searchInput = document.getElementById('approval-locations-search');
+        if (searchInput) {
+            feather.replace();
+        }
+    }, 100);
     
     console.log('✅ ========================================');
     console.log('✅ [MODAL OCHISH] Modal ochildi');
@@ -1344,69 +2081,17 @@ export async function submitUserApproval(e) {
         console.log(`   - RoleData to'liq ma'lumot:`, JSON.stringify(roleData, null, 2));
     }
     
-    // Super admin uchun hech qanday shartlar yo'q (to'liq dotup)
-    if (role === 'super_admin') {
-        console.log(`✅ [TASDIQLASH] Super admin uchun shartlar tekshirilmaydi (to'liq dotup)`);
-        // Super admin uchun hech qanday validatsiya yo'q
+    // Superadmin uchun hech qanday shartlar yo'q (to'liq dostup)
+    if (role === 'superadmin' || role === 'super_admin') {
+        console.log(`✅ [TASDIQLASH] Superadmin uchun shartlar tekshirilmaydi (to'liq dostup)`);
+        // Superadmin uchun hech qanday validatsiya yo'q
         const data = {
             role: role,
             locations: [],
             brands: []
         };
         
-        console.log(`📤 [TASDIQLASH] Super admin uchun API'ga yuborilmoqda...`);
-        console.log(`   - Data:`, JSON.stringify(data, null, 2));
-
-        try {
-            console.log(`🌐 [TASDIQLASH] API so'rovini yuborish...`);
-            const res = await safeFetch(`/api/users/${userId}/approve`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            
-            if (!res || !res.ok) {
-                const errorData = await res.json();
-                throw new Error(errorData.message);
-            }
-            
-            const result = await res.json();
-            showToast(result.message);
-            
-            const [pendingRes, usersRes] = await Promise.all([
-                fetchPendingUsers(),
-                fetchUsers()
-            ]);
-
-            if (pendingRes) {
-                state.pendingUsers = pendingRes;
-                renderPendingUsers();
-            }
-            if (usersRes) {
-                state.users = usersRes;
-                const activeTab = DOM.userTabs.querySelector('.active')?.dataset.status || 'active';
-                renderUsersByStatus(activeTab);
-            }
-            
-            DOM.approvalModal.classList.add('hidden');
-        } catch (error) {
-            console.error('❌ [TASDIQLASH] Xatolik:', error);
-            showToast(error.message, true);
-        }
-        return;
-    }
-    
-    // Admin roli uchun ham shartlar ixtiyoriy (istalgan dotup yoki chegaralangan)
-    if (role === 'admin') {
-        console.log(`✅ [TASDIQLASH] Admin roli uchun shartlar ixtiyoriy (istalgan dotup yoki chegaralangan)`);
-        // Admin roli uchun shartlar ixtiyoriy - tanlangan filiallar va brendlar bilan chegaralanadi
-        const data = {
-            role: role,
-            locations: Array.from(document.querySelectorAll('#approval-locations-checkbox-list input:checked')).map(cb => cb.value),
-            brands: Array.from(document.querySelectorAll('#approval-brands-list input:checked')).map(cb => parseInt(cb.value))
-        };
-        
-        console.log(`📤 [TASDIQLASH] Admin roli uchun API'ga yuborilmoqda...`);
+        console.log(`📤 [TASDIQLASH] Superadmin uchun API'ga yuborilmoqda...`);
         console.log(`   - Data:`, JSON.stringify(data, null, 2));
 
         try {
@@ -2592,69 +3277,14 @@ function setupRequestsFilters() {
     }
     
     // Bulk actions for selected requests
+    // NOTE: Bulk approve o'chirildi, chunki har bir foydalanuvchi uchun rol va shartlarni tanlash kerak
+    // Har bir foydalanuvchini alohida modal orqali tasdiqlash kerak
     const bulkApproveBtn = document.getElementById('requests-bulk-approve-btn');
     if (bulkApproveBtn) {
         bulkApproveBtn.addEventListener('click', async () => {
             if (selectedRequests.size === 0) return;
             
-            const confirmed = await showConfirmDialog({
-                title: 'Tanlanganlarni tasdiqlash',
-                message: `Tanlangan ${selectedRequests.size} ta so'rovni tasdiqlashni xohlaysizmi?`,
-                confirmText: 'Ha, tasdiqlash',
-                cancelText: 'Bekor qilish',
-                type: 'warning',
-                icon: 'check-circle'
-            });
-            if (!confirmed) return;
-            
-            try {
-                console.log('✅ [BULK APPROVE] Tanlangan so\'rovlar tasdiqlanmoqda. Count:', selectedRequests.size);
-                
-                for (const userId of selectedRequests) {
-                    console.log('📤 [BULK APPROVE] User ID tasdiqlanmoqda:', userId);
-                    const res = await safeFetch(`/api/users/${userId}/approve`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            role: 'operator',
-                            locations: [],
-                            brands: []
-                        })
-                    });
-                    
-                    if (!res || !res.ok) {
-                        const errorData = await res.json();
-                        console.error('❌ [BULK APPROVE] Xatolik User ID:', userId, errorData);
-                        throw new Error(errorData?.message || `User ID ${userId} tasdiqlashda xatolik`);
-                    }
-                    
-                    console.log('✅ [BULK APPROVE] User ID tasdiqlandi:', userId);
-                }
-                
-                showToast('Tanlangan so\'rovlar tasdiqlandi', 'success');
-                selectedRequests.clear();
-                
-                const [pendingRes, usersRes] = await Promise.all([
-                    fetchPendingUsers(),
-                    fetchUsers()
-                ]);
-                
-                if (pendingRes) {
-                    state.pendingUsers = pendingRes;
-                }
-                if (usersRes) {
-                    state.users = usersRes;
-                }
-                
-                renderModernRequests();
-                updateRequestsStatistics();
-                updateRequestsBulkActions();
-                
-                console.log('✅ [BULK APPROVE] Barcha ma\'lumotlar yangilandi');
-            } catch (error) {
-                console.error('❌ [BULK APPROVE] Xatolik:', error);
-                showToast(`Xatolik: ${error.message}`, 'error');
-            }
+            showToast('Har bir foydalanuvchini alohida tasdiqlash kerak. Iltimos, foydalanuvchini tanlab "Tasdiqlash" tugmasini bosing.', 'info');
         });
     }
     
@@ -2882,13 +3512,19 @@ function formatDateTime(timestamp) {
 function openRoleRequirementsModal(roleName, roleData) {
     console.log(`🔧 [WEB] Rol shartlarini belgilash modal'i ochilmoqda. Role: ${roleName}`);
     
-    // Super admin uchun modal ochmaslik (to'liq dotup)
-    if (roleName === 'super_admin') {
-        console.log(`✅ [WEB] Super admin uchun shartlar belgilanmaydi (to'liq dotup)`);
+    // Superadmin uchun modal ochmaslik (to'liq dostup)
+    if (roleName === 'superadmin' || roleName === 'super_admin') {
+        console.log(`✅ [WEB] Superadmin uchun shartlar belgilanmaydi (to'liq dostup)`);
         return;
     }
     
     // Admin roli uchun modal ochiladi (ixtiyoriy shartlar)
+    
+    // Mavjud shartlarni olish
+    const currentRequiresLocations = roleData?.requires_locations;
+    const currentRequiresBrands = roleData?.requires_brands;
+    const isEditing = currentRequiresLocations !== undefined && currentRequiresLocations !== null && 
+                      currentRequiresBrands !== undefined && currentRequiresBrands !== null;
     
     // Modal yaratish
     const modal = document.createElement('div');
@@ -2901,21 +3537,30 @@ function openRoleRequirementsModal(roleName, roleData) {
                 <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.1);">
                     <h5 class="modal-title" style="color: #fff; display: flex; align-items: center; gap: 10px;">
                         <i data-feather="settings" style="width: 24px; height: 24px;"></i>
-                        <span>Rol Shartlarini Belgilash</span>
+                        <span>Rol Shartlarini ${isEditing ? 'O\'zgartirish' : 'Belgilash'}</span>
                     </h5>
                     <button type="button" class="btn-close" onclick="this.closest('.modal').remove()" style="filter: invert(1);"></button>
                 </div>
                 <div class="modal-body" style="padding: 25px;">
+                    ${!isEditing ? `
                     <div style="background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 10px; padding: 15px; margin-bottom: 20px;">
                         <p style="color: rgba(255,255,255,0.9); font-size: 14px; margin: 0;">
                             <strong style="color: #ffc107;">"${roleName}"</strong> roli uchun shartlar belgilanmagan. 
                             Shartlar belgilanmasa, foydalanuvchiga bu rolni berib bo'lmaydi.
                         </p>
                     </div>
+                    ` : `
+                    <div style="background: rgba(79, 172, 254, 0.1); border: 1px solid rgba(79, 172, 254, 0.3); border-radius: 10px; padding: 15px; margin-bottom: 20px;">
+                        <p style="color: rgba(255,255,255,0.9); font-size: 14px; margin: 0;">
+                            <strong style="color: #4facfe;">"${roleName}"</strong> roli uchun shartlar mavjud. 
+                            Quyida shartlarni o'zgartirishingiz mumkin.
+                        </p>
+                    </div>
+                    `}
                     <form id="role-requirements-form">
                         <div class="form-group" style="margin-bottom: 20px;">
                             <label style="display: flex; align-items: center; gap: 10px; color: #fff; font-size: 14px; margin-bottom: 10px; cursor: pointer;">
-                                <input type="checkbox" id="modal-requires-locations" style="width: 18px; height: 18px; cursor: pointer;">
+                                <input type="checkbox" id="modal-requires-locations" ${currentRequiresLocations === true ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer;">
                                 <span>Filiallar belgilanishi shart</span>
                             </label>
                             <small style="display: block; color: rgba(255,255,255,0.6); font-size: 12px; margin-left: 28px; margin-top: 5px;">
@@ -2924,7 +3569,7 @@ function openRoleRequirementsModal(roleName, roleData) {
                         </div>
                         <div class="form-group" style="margin-bottom: 20px;">
                             <label style="display: flex; align-items: center; gap: 10px; color: #fff; font-size: 14px; margin-bottom: 10px; cursor: pointer;">
-                                <input type="checkbox" id="modal-requires-brands" style="width: 18px; height: 18px; cursor: pointer;">
+                                <input type="checkbox" id="modal-requires-brands" ${currentRequiresBrands === true ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer;">
                                 <span>Brendlar belgilanishi shart</span>
                             </label>
                             <small style="display: block; color: rgba(255,255,255,0.6); font-size: 12px; margin-left: 28px; margin-top: 5px;">
@@ -2934,7 +3579,7 @@ function openRoleRequirementsModal(roleName, roleData) {
                         <div style="background: rgba(79, 172, 254, 0.1); border: 1px solid rgba(79, 172, 254, 0.3); border-radius: 8px; padding: 12px; margin-top: 15px;">
                             <p style="color: rgba(255,255,255,0.8); font-size: 13px; margin: 0;">
                                 <i data-feather="info" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 5px;"></i>
-                                Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar yoki ikkalasi ham)
+                                ${isEditing ? 'Shartlarni o\'zgartirishingiz mumkin. Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar yoki ikkalasi ham).' : 'Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar yoki ikkalasi ham)'}
                             </p>
                         </div>
                     </form>
@@ -2945,7 +3590,7 @@ function openRoleRequirementsModal(roleName, roleData) {
                     </button>
                     <button type="button" id="save-role-requirements-modal-btn" class="btn btn-primary" style="background: #4facfe; border: none; color: #fff;">
                         <i data-feather="save" style="width: 16px; height: 16px;"></i>
-                        Shartlarni Saqlash va Davom Etish
+                        ${isEditing ? 'O\'zgarishlarni Saqlash' : 'Shartlarni Saqlash va Davom Etish'}
                     </button>
                 </div>
             </div>
@@ -2962,22 +3607,27 @@ function openRoleRequirementsModal(roleName, roleData) {
             const requiresLocations = document.getElementById('modal-requires-locations').checked;
             const requiresBrands = document.getElementById('modal-requires-brands').checked;
             
-            // Validatsiya: kamida bitta shart tanlanishi kerak
+            // Validatsiya: kamida bitta shart tanlanishi kerak (true bo'lishi kerak)
+            // false yoki null bo'lishi mumkin, lekin kamida bittasi true bo'lishi kerak
             if (!requiresLocations && !requiresBrands) {
                 showToast('Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar)', true);
                 return;
             }
             
             saveBtn.disabled = true;
+            const originalText = saveBtn.innerHTML;
             saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saqlanmoqda...';
             
             try {
+                // true/false/null qiymatlarini yuborish
+                // true = majburiy, false = kerak emas, null = ixtiyoriy
+                // Hozircha faqat true/false qo'llab-quvvatlaymiz
                 const res = await safeFetch(`/api/roles/${roleName}/requirements`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        requires_locations: requiresLocations,
-                        requires_brands: requiresBrands
+                        requires_locations: requiresLocations ? true : false,
+                        requires_brands: requiresBrands ? true : false
                     })
                 });
                 
@@ -2992,8 +3642,8 @@ function openRoleRequirementsModal(roleName, roleData) {
                 // State'ni yangilash
                 const roleIndex = state.roles.findIndex(r => r.role_name === roleName);
                 if (roleIndex > -1) {
-                    state.roles[roleIndex].requires_locations = requiresLocations;
-                    state.roles[roleIndex].requires_brands = requiresBrands;
+                    state.roles[roleIndex].requires_locations = requiresLocations ? true : false;
+                    state.roles[roleIndex].requires_brands = requiresBrands ? true : false;
                 }
                 
                 // Modal yopish
@@ -3008,7 +3658,7 @@ function openRoleRequirementsModal(roleName, roleData) {
                 console.error('❌ [WEB] Rol shartlarini saqlashda xatolik:', error);
                 showToast(error.message, true);
                 saveBtn.disabled = false;
-                saveBtn.innerHTML = '<i data-feather="save" style="width: 16px; height: 16px;"></i> Shartlarni Saqlash va Davom Etish';
+                saveBtn.innerHTML = originalText;
                 feather.replace();
             }
         };

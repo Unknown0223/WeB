@@ -1,6 +1,7 @@
 const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
+const { getVisibleLocations } = require('../utils/roleFiltering.js');
 
 const router = express.Router();
 
@@ -21,12 +22,23 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         const allLocations = settingsRow ? (JSON.parse(settingsRow.value).locations || []) : [];
         const totalUsers = usersCountResult.count;
         
-        // Admin uchun filiallar cheklovi
+        // Yangi logika: rol shartlari bo'yicha ko'rinadigan filiallarni olish
         const user = req.session.user;
-        let locationsToShow = allLocations;
-        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
-            locationsToShow = user.locations;
+        const visibleLocations = await getVisibleLocations(user);
+        
+        // Agar hech narsa ko'rinmasa, bo'sh natija qaytaramiz
+        if (visibleLocations.length === 0 && user.role !== 'superadmin' && user.role !== 'super_admin') {
+            return res.json({
+                generalStats: { totalUsers, totalLocations: 0, dailyTotalReports: 0 },
+                dailyStatus: { submittedCount: 0, statusData: [] },
+                weeklyDynamics: []
+            });
         }
+        
+        // Superadmin uchun barcha filiallar, boshqalar uchun faqat ko'rinadiganlar
+        let locationsToShow = (user.role === 'superadmin' || user.role === 'super_admin') 
+            ? allLocations 
+            : allLocations.filter(loc => visibleLocations.includes(loc));
 
         if (allLocations.length === 0) {
             return res.json({
@@ -37,13 +49,18 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         }
         
         // 2. Tanlangan sana uchun topshirilgan hisobotlarni olish (QO'SHIMCHA MA'LUMOTLAR BILAN)
-        const submittedReportsQuery = db('reports as r')
+        let submittedReportsQuery = db('reports as r')
             .leftJoin('users as u_creator', 'r.created_by', 'u_creator.id')
             .where('r.report_date', date);
         
-        // Admin uchun filiallar cheklovi
-        if (user.role === 'admin' && user.locations && user.locations.length > 0) {
-            submittedReportsQuery.whereIn('r.location', user.locations);
+        // Yangi logika: rol shartlari bo'yicha filtrlash
+        if (user.role !== 'superadmin' && user.role !== 'super_admin') {
+            if (visibleLocations.length > 0) {
+                submittedReportsQuery = submittedReportsQuery.whereIn('r.location', visibleLocations);
+            } else {
+                // Agar hech narsa ko'rinmasa, bo'sh natija
+                submittedReportsQuery = submittedReportsQuery.whereRaw('1 = 0');
+            }
         }
         
         const submittedReports = await submittedReportsQuery

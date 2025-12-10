@@ -305,11 +305,29 @@ wss.on('close', () => {
 // Broadcast funksiyasi (boshqa routerlar uchun)
 global.broadcastWebSocket = (type, payload) => {
     const message = JSON.stringify({ type, payload });
-    wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
+    let sentCount = 0;
+    let errorCount = 0;
+    
+    console.log(`📡 [BROADCAST] WebSocket yuborish boshlandi. Type: ${type}`);
+    console.log(`📡 [BROADCAST] Payload:`, JSON.stringify(payload, null, 2));
+    console.log(`📡 [BROADCAST] Ulangan clientlar soni: ${wss.clients.size}`);
+    
+    wss.clients.forEach((client, index) => {
+        try {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(message);
+                sentCount++;
+                console.log(`📡 [BROADCAST] Client ${index + 1} ga yuborildi`);
+            } else {
+                console.log(`⚠️ [BROADCAST] Client ${index + 1} ochiq emas (state: ${client.readyState})`);
+            }
+        } catch (error) {
+            errorCount++;
+            console.error(`❌ [BROADCAST] Client ${index + 1} ga yuborishda xatolik:`, error);
         }
     });
+    
+    console.log(`✅ [BROADCAST] Yakuniy natija: ${sentCount} ta yuborildi, ${errorCount} ta xatolik`);
 };
 
 // Serverni ishga tushirish
@@ -456,3 +474,101 @@ global.broadcastWebSocket = (type, payload) => {
         process.exit(1);
     }
 })();
+
+// Graceful shutdown funksiyasi
+async function gracefulShutdown(signal) {
+    console.log(`\n⚠️  [SERVER] ${signal} signal qabul qilindi. Server to'xtatilmoqda...`);
+    
+    let shutdownTimeout;
+    
+    // Timeout - agar 10 soniyada to'xtatilmasa, majburiy to'xtatish
+    shutdownTimeout = setTimeout(() => {
+        console.error('❌ [SERVER] Graceful shutdown vaqti tugadi. Majburiy to\'xtatish...');
+        process.exit(1);
+    }, 10000);
+    
+    try {
+        // 1. Bot polling'ni to'xtatish
+        const { getBot } = require('./utils/bot.js');
+        const bot = getBot();
+        if (bot && bot.isPolling && bot.isPolling()) {
+            console.log('🛑 [SERVER] Telegram bot polling to\'xtatilmoqda...');
+            try {
+                await bot.stopPolling();
+                console.log('✅ [SERVER] Telegram bot polling to\'xtatildi.');
+            } catch (botError) {
+                console.error('⚠️ [SERVER] Bot polling to\'xtatishda xatolik:', botError.message);
+            }
+        }
+        
+        // 2. WebSocket server'ni yopish
+        if (wss && wss.clients) {
+            console.log(`🛑 [SERVER] WebSocket server yopilmoqda... (${wss.clients.size} ta ulanish)`);
+            
+            // Barcha clientlarni yopish
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.close();
+                }
+            });
+            
+            await new Promise((resolve) => {
+                wss.close(() => {
+                    console.log('✅ [SERVER] WebSocket server yopildi.');
+                    resolve();
+                });
+            });
+        }
+        
+        // 3. HTTP server'ni yopish
+        if (server && server.listening) {
+            console.log('🛑 [SERVER] HTTP server yopilmoqda...');
+            await new Promise((resolve) => {
+                server.close(() => {
+                    console.log('✅ [SERVER] HTTP server yopildi.');
+                    resolve();
+                });
+            });
+        }
+        
+        // 4. Database connection'ni yopish (agar kerak bo'lsa)
+        const { db } = require('./db.js');
+        if (db && db.destroy) {
+            try {
+                await db.destroy();
+                console.log('✅ [SERVER] Database connection yopildi.');
+            } catch (dbError) {
+                console.error('⚠️ [SERVER] Database yopishda xatolik:', dbError.message);
+            }
+        }
+        
+        clearTimeout(shutdownTimeout);
+        console.log('✅ [SERVER] Graceful shutdown muvaffaqiyatli yakunlandi.');
+        process.exit(0);
+        
+    } catch (error) {
+        console.error('❌ [SERVER] Graceful shutdown xatolik:', error);
+        clearTimeout(shutdownTimeout);
+        process.exit(1);
+    }
+}
+
+// Graceful shutdown - Ctrl+C yoki process termination
+process.on('SIGINT', () => {
+    gracefulShutdown('SIGINT');
+});
+
+process.on('SIGTERM', () => {
+    gracefulShutdown('SIGTERM');
+});
+
+// Unhandled promise rejection
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ [SERVER] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Uncaught exception
+process.on('uncaughtException', (error) => {
+    console.error('❌ [SERVER] Uncaught Exception:', error);
+    process.exit(1);
+});

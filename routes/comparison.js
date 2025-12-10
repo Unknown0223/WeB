@@ -353,20 +353,60 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
 
         // Agar farqlar bo'lsa, barcha operatorlarga notification yaratish
         if (differences.length > 0) {
+            console.log(`🔔 [COMPARISON] ========================================`);
             console.log(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial`);
             console.log(`🔔 [COMPARISON] Brand: ${brandName}, Date: ${date}`);
+            console.log(`🔔 [COMPARISON] Farqlar ro'yxati:`, JSON.stringify(differences, null, 2));
             
             try {
-                // Barcha operatorlarni olish
-                const operators = await db('users')
+                // Barcha operatorlarni olish - barcha variantlarni tekshirish
+                console.log(`🔔 [COMPARISON] Operatorlarni qidirish boshlandi...`);
+                
+                // Avval barcha rollarni ko'rish
+                const allRoles = await db('users').distinct('role').pluck('role');
+                console.log(`🔔 [COMPARISON] Bazadagi barcha rollar:`, allRoles);
+                
+                // Barcha aktiv foydalanuvchilarni ko'rish
+                const allActiveUsers = await db('users')
+                    .where('status', 'active')
+                    .select('id', 'username', 'role', 'status');
+                console.log(`🔔 [COMPARISON] Barcha aktiv foydalanuvchilar:`, allActiveUsers);
+                
+                // Operatorlarni qidirish - turli variantlar
+                let operators = await db('users')
                     .where('role', 'operator')
                     .where('status', 'active')
-                    .select('id');
+                    .select('id', 'username', 'role');
+                
+                console.log(`🔔 [COMPARISON] 'operator' roli bilan topilganlar: ${operators.length}`, operators);
+                
+                // Agar 'operator' bilan topilmasa, 'kassir' yoki boshqa variantlarni tekshirish
+                if (operators.length === 0) {
+                    console.log(`⚠️ [COMPARISON] 'operator' roli bilan topilmadi, boshqa variantlarni tekshirish...`);
+                    
+                    // 'kassir' roli bilan qidirish
+                    const kassirUsers = await db('users')
+                        .where('role', 'kassir')
+                        .where('status', 'active')
+                        .select('id', 'username', 'role');
+                    console.log(`🔔 [COMPARISON] 'kassir' roli bilan topilganlar: ${kassirUsers.length}`, kassirUsers);
+                    
+                    // Barcha aktiv foydalanuvchilarni operator sifatida qabul qilish (test uchun)
+                    if (kassirUsers.length === 0) {
+                        console.log(`⚠️ [COMPARISON] 'kassir' roli bilan ham topilmadi`);
+                        console.log(`⚠️ [COMPARISON] Test rejimida: barcha aktiv foydalanuvchilar operator sifatida qabul qilinadi`);
+                        operators = allActiveUsers.map(u => ({ id: u.id, username: u.username, role: u.role }));
+                    } else {
+                        operators = kassirUsers;
+                    }
+                }
 
-                console.log(`🔔 [COMPARISON] Topilgan operatorlar soni: ${operators.length}`);
+                console.log(`🔔 [COMPARISON] Yakuniy topilgan operatorlar soni: ${operators.length}`);
+                console.log(`🔔 [COMPARISON] Operatorlar ro'yxati:`, operators);
                 
                 if (operators.length === 0) {
                     console.log(`⚠️ [COMPARISON] Hech qanday aktiv operator topilmadi`);
+                    console.log(`⚠️ [COMPARISON] Notification yuborilmaydi`);
                 }
 
                 // Har bir operator uchun notification yaratish
@@ -388,42 +428,84 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
 
                 if (notificationData.length > 0) {
                     console.log(`💾 [COMPARISON] ${notificationData.length} ta notification yaratilmoqda...`);
-                    await db('notifications').insert(notificationData);
-                    console.log(`✅ [COMPARISON] Notification'lar muvaffaqiyatli yaratildi`);
+                    // Circular structure xatolikni oldini olish uchun faqat kerakli ma'lumotlarni ko'rsatish
+                    const notificationDataForLog = notificationData.map(n => ({
+                        user_id: n.user_id,
+                        type: n.type,
+                        title: n.title,
+                        message: n.message,
+                        details: n.details,
+                        is_read: n.is_read
+                    }));
+                    console.log(`💾 [COMPARISON] Notification data:`, JSON.stringify(notificationDataForLog, null, 2));
+                    
+                    try {
+                        await db('notifications').insert(notificationData);
+                        console.log(`✅ [COMPARISON] Notification'lar muvaffaqiyatli bazaga yozildi`);
+                    } catch (insertError) {
+                        console.error(`❌ [COMPARISON] Notification'lar bazaga yozishda xatolik:`, insertError);
+                        console.error(`❌ [COMPARISON] Error message:`, insertError.message);
+                        console.error(`❌ [COMPARISON] Error stack:`, insertError.stack);
+                    }
                     
                     // WebSocket orqali realtime yuborish
                     try {
+                        console.log(`📡 [COMPARISON] WebSocket yuborishga harakat qilinmoqda...`);
+                        console.log(`📡 [COMPARISON] global.broadcastWebSocket mavjudligi:`, typeof global.broadcastWebSocket);
+                        
                         if (global.broadcastWebSocket) {
                             console.log(`📡 [COMPARISON] WebSocket orqali realtime yuborilmoqda...`);
                             
+                            let successCount = 0;
+                            let errorCount = 0;
+                            
                             // Har bir operator uchun alohida yuborish
                             for (const operator of operators) {
-                                global.broadcastWebSocket('comparison_difference', {
-                                    user_id: operator.id,
-                                    notification: {
-                                        type: 'comparison_difference',
-                                        title: `Solishtirishda farqlar aniqlandi`,
-                                        message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
-                                        details: {
-                                            date,
-                                            brand_id: brandId,
-                                            brand_name: brandName,
-                                            differences: differences,
-                                            total_differences: differences.length
+                                try {
+                                    const wsPayload = {
+                                        user_id: operator.id,
+                                        notification: {
+                                            type: 'comparison_difference',
+                                            title: `Solishtirishda farqlar aniqlandi`,
+                                            message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
+                                            details: {
+                                                date,
+                                                brand_id: brandId,
+                                                brand_name: brandName,
+                                                differences: differences,
+                                                total_differences: differences.length
+                                            }
                                         }
-                                    }
-                                });
+                                    };
+                                    
+                                    console.log(`📡 [COMPARISON] Operator ${operator.id} (${operator.username}) uchun yuborilmoqda...`);
+                                    console.log(`📡 [COMPARISON] Payload:`, JSON.stringify(wsPayload, null, 2));
+                                    
+                                    global.broadcastWebSocket('comparison_difference', wsPayload);
+                                    successCount++;
+                                    console.log(`✅ [COMPARISON] Operator ${operator.id} ga muvaffaqiyatli yuborildi`);
+                                } catch (operatorError) {
+                                    errorCount++;
+                                    console.error(`❌ [COMPARISON] Operator ${operator.id} ga yuborishda xatolik:`, operatorError);
+                                }
                             }
                             
-                            console.log(`✅ [COMPARISON] WebSocket orqali ${operators.length} ta operatorga yuborildi`);
+                            console.log(`✅ [COMPARISON] WebSocket yuborish yakunlandi:`);
+                            console.log(`   - Muvaffaqiyatli: ${successCount} ta`);
+                            console.log(`   - Xatoliklar: ${errorCount} ta`);
                         } else {
                             console.log(`⚠️ [COMPARISON] global.broadcastWebSocket funksiyasi mavjud emas`);
+                            console.log(`⚠️ [COMPARISON] global obyekti:`, Object.keys(global));
                         }
                     } catch (wsError) {
                         console.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError);
+                        console.error(`❌ [COMPARISON] Error message:`, wsError.message);
+                        console.error(`❌ [COMPARISON] Error stack:`, wsError.stack);
                     }
                 } else {
                     console.log(`⚠️ [COMPARISON] Notification data bo'sh, yuborilmaydi`);
+                    console.log(`⚠️ [COMPARISON] Operators length: ${operators.length}`);
+                    console.log(`⚠️ [COMPARISON] Operators:`, operators);
                 }
             } catch (error) {
                 console.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error);

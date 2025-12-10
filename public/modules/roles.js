@@ -11,26 +11,106 @@ const permissionExclusionGroups = {
     edit: ['reports:edit_all', 'reports:edit_assigned', 'reports:edit_own']
 };
 
-export function renderRoles() {
+// Category iconlarini qaytarish
+function getCategoryIcon(category) {
+    const icons = {
+        'Boshqaruv Paneli': '📊',
+        'Dashboard': '📊',
+        'Hisobotlar': '📝',
+        'Reports': '📝',
+        'Foydalanuvchilar': '👥',
+        'Users': '👥',
+        'Rollar': '🔐',
+        'Roles': '🔐',
+        'Sozlamalar': '⚙️',
+        'Settings': '⚙️',
+        'Audit': '📋',
+        'Tizim Jurnali': '📋',
+        'Export': '📤',
+        'Import': '📥',
+        'KPI': '📈',
+        'Filiallar': '🏢',
+        'Brendlar': '🏷️',
+        'Brands': '🏷️'
+    };
+    return icons[category] || '🔒';
+}
+
+// Category'ni kengaytirish/yig'ish funksiyasi
+window.toggleRoleCategory = function(header) {
+    const group = header.closest('.permission-category-group');
+    if (!group) return;
+    
+    group.classList.toggle('collapsed');
+    
+    const content = group.querySelector('.permission-category-content');
+    const arrow = header.querySelector('.category-arrow');
+    
+    if (group.classList.contains('collapsed')) {
+        content.style.maxHeight = '0';
+        if (arrow) arrow.style.transform = 'rotate(-90deg)';
+    } else {
+        content.style.maxHeight = content.scrollHeight + 'px';
+        if (arrow) arrow.style.transform = 'rotate(0deg)';
+    }
+};
+
+export function renderRoles(autoSelectRole = null) {
     if (!state.roles || !state.allPermissions) return;
     
-    // Super admin'ni ro'yxatdan olib tashlash
-    const filteredRoles = state.roles.filter(role => role.role_name !== 'super_admin');
+    // Joriy tanlangan rolni saqlash
+    const currentSelectedRole = autoSelectRole || state.currentEditingRole;
+    
+    // Superadmin'ni ro'yxatdan olib tashlash (super_admin va superadmin)
+    const filteredRoles = state.roles.filter(role => 
+        role.role_name !== 'super_admin' && role.role_name !== 'superadmin'
+    );
     
     DOM.rolesList.innerHTML = filteredRoles.map(role => 
-        `<li data-role="${role.role_name}">${role.role_name}</li>`
+        `<li data-role="${role.role_name}" class="role-list-item">
+            <span class="role-name" onclick="handleRoleItemClick(event, '${role.role_name}')">${role.role_name}</span>
+            <div class="role-actions">
+                <button class="role-action-btn role-edit-btn" onclick="event.stopPropagation(); editRole('${role.role_name}')" title="Tahrirlash">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                </button>
+                <button class="role-action-btn role-delete-btn" onclick="event.stopPropagation(); deleteRole('${role.role_name}')" title="O'chirish">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                </button>
+            </div>
+        </li>`
     ).join('');
     
+    // Event listeners
+    setupRoleListEventListeners();
+    
     DOM.permissionsGrid.innerHTML = Object.entries(state.allPermissions).map(([category, perms]) => `
-        <div class="permission-category">
-            <h4 class="permission-category-title">${category}</h4>
-            <div class="permission-list">
-                ${perms.map(perm => `
-                    <label class="permission-item">
-                        <input type="checkbox" value="${perm.key}">
-                        <span>${perm.description}</span>
-                    </label>
-                `).join('')}
+        <div class="permission-category-group collapsed">
+            <div class="permission-category-header" onclick="toggleRoleCategory(this)">
+                <div class="permission-category-title">
+                    ${getCategoryIcon(category)} ${category}
+                    <span class="permission-count">(${perms.length})</span>
+                </div>
+                <svg class="category-arrow" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="transform: rotate(-90deg);">
+                    <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z"/>
+                </svg>
+            </div>
+            <div class="permission-category-content" style="max-height: 0;">
+                <div class="permission-list">
+                    ${perms.map(perm => `
+                        <label class="permission-item">
+                            <input type="checkbox" value="${perm.key}">
+                            <span>${perm.description}</span>
+                        </label>
+                    `).join('')}
+                </div>
             </div>
         </div>
     `).join('');
@@ -63,21 +143,213 @@ export function renderRoles() {
         };
     }
     
-    // Birinchi rolni default tanlash
-    if (state.roles.length > 0) {
-        // console.log('🔍 Roles module: Selecting first role...', state.roles[0]);
-        const firstRole = state.roles[0];
-        const firstRoleElement = DOM.rolesList.querySelector(`[data-role="${firstRole.role_name}"]`);
-        // console.log('🔍 First role element found:', firstRoleElement);
-        if (firstRoleElement) {
-            // Click o'rniga to'g'ridan-to'g'ri handleRoleSelection ni chaqiramiz
+    // Rolni tanlash: avval joriy tanlangan rolni, keyin yangi yaratilgan rolni, oxirida birinchi rolni
+    if (filteredRoles.length > 0) {
+        let roleToSelect = null;
+        
+        // 1. Agar autoSelectRole berilgan bo'lsa, uni tanlash
+        if (autoSelectRole) {
+            roleToSelect = filteredRoles.find(r => r.role_name === autoSelectRole);
+        }
+        
+        // 2. Agar joriy tanlangan rol mavjud bo'lsa va hali tanlanmagan bo'lsa, uni tanlash
+        if (!roleToSelect && currentSelectedRole) {
+            roleToSelect = filteredRoles.find(r => r.role_name === currentSelectedRole);
+        }
+        
+        // 3. Agar hech narsa topilmasa, birinchi rolni tanlash
+        if (!roleToSelect) {
+            roleToSelect = filteredRoles[0];
+        }
+        
+        const roleElement = DOM.rolesList.querySelector(`[data-role="${roleToSelect.role_name}"]`);
+        if (roleElement) {
             setTimeout(() => {
-                // console.log('🔍 Simulating click on first role');
-                handleRoleSelection({ target: firstRoleElement });
+                handleRoleSelection({ target: roleElement });
             }, 100);
         }
+    } else {
+        // Agar hech qanday rol bo'lmasa (faqat superadmin bo'lsa), hech narsa ko'rsatmaslik
+        DOM.currentRoleTitle.textContent = 'Rol tanlang';
+        DOM.saveRolePermissionsBtn.classList.add('hidden');
     }
 }
+
+// Role list item click handler
+window.handleRoleItemClick = function(event, roleName) {
+    const li = event.target.closest('li');
+    if (!li) return;
+    handleRoleSelection({ target: li });
+};
+
+// Setup role list event listeners
+function setupRoleListEventListeners() {
+    // Click handlers are already set via onclick in HTML
+}
+
+// Edit role function
+window.editRole = async function(roleName) {
+    if (!state.roles || !Array.isArray(state.roles)) {
+        console.warn('[ROLES] state.roles mavjud emas yoki array emas');
+        showToast('Rollar yuklanmagan. Iltimos, sahifani yangilang.', 'error');
+        return;
+    }
+    
+    const roleData = state.roles.find(r => r.role_name === roleName);
+    if (!roleData) {
+        showToast('Rol topilmadi!', 'error');
+        return;
+    }
+    
+    // Open edit modal (reuse create modal structure)
+    const modal = document.createElement('div');
+    modal.className = 'modal fade show';
+    modal.style.display = 'block';
+    modal.innerHTML = `
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/>
+                            <path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5v11z"/>
+                        </svg>
+                        Rolni Tahrirlash: ${roleName}
+                    </h5>
+                    <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
+                </div>
+                <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                    <div class="form-group">
+                        <label>Filiallar belgilanishi shart</label>
+                        <label style="display: flex; align-items: center; margin-top: 8px;">
+                            <input type="checkbox" id="edit-role-requires-locations" style="margin-right: 8px;" ${roleData.requires_locations ? 'checked' : ''}>
+                            <span>Filiallar belgilanishi shart</span>
+                        </label>
+                        <small class="form-text text-muted" style="display: block; margin-top: 5px;">
+                            Bu rol uchun foydalanuvchi tasdiqlanganda filiallar tanlanishi majburiy bo'ladi
+                        </small>
+                    </div>
+                    <div class="form-group">
+                        <label>Brendlar belgilanishi shart</label>
+                        <label style="display: flex; align-items: center; margin-top: 8px;">
+                            <input type="checkbox" id="edit-role-requires-brands" style="margin-right: 8px;" ${roleData.requires_brands ? 'checked' : ''}>
+                            <span>Brendlar belgilanishi shart</span>
+                        </label>
+                        <small class="form-text text-muted" style="display: block; margin-top: 5px;">
+                            Bu rol uchun foydalanuvchi tasdiqlanganda brendlar tanlanishi majburiy bo'ladi
+                        </small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">Bekor qilish</button>
+                    <button type="button" class="btn btn-primary" id="update-role-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
+                        </svg>
+                        Saqlash
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Feather icons
+    if (window.feather) {
+        window.feather.replace();
+    }
+    
+    // Update button handler
+    document.getElementById('update-role-btn').addEventListener('click', async () => {
+        const requiresLocations = document.getElementById('edit-role-requires-locations').checked;
+        const requiresBrands = document.getElementById('edit-role-requires-brands').checked;
+        
+        const btn = document.getElementById('update-role-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saqlanmoqda...';
+        
+        try {
+            const response = await safeFetch(`/api/roles/${roleName}/requirements`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    requires_locations: requiresLocations,
+                    requires_brands: requiresBrands
+                })
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to update role');
+            }
+            
+            showToast('Rol muvaffaqiyatli yangilandi!', 'success');
+            modal.remove();
+            
+            // Reload roles
+            const rolesData = await safeFetch('/api/roles');
+            state.roles = rolesData.roles;
+            state.allPermissions = rolesData.all_permissions;
+            renderRoles();
+            
+            // Re-select the role
+            setTimeout(() => {
+                const roleElement = DOM.rolesList.querySelector(`[data-role="${roleName}"]`);
+                if (roleElement) {
+                    handleRoleSelection({ target: roleElement });
+                }
+            }, 100);
+            
+        } catch (error) {
+            console.error('Update role error:', error);
+            showToast(error.message || 'Rolni yangilashda xatolik!', 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/></svg> Saqlash';
+        }
+    });
+};
+
+// Delete role function
+window.deleteRole = async function(roleName) {
+    const confirmed = await showConfirmDialog({
+        title: '⚠️ Rolni O\'chirish',
+        message: `"${roleName}" rolini o'chirishni xohlaysizmi? Bu amalni qaytarib bo'lmaydi.`,
+        confirmText: 'Ha, o\'chirish',
+        cancelText: 'Bekor qilish',
+        type: 'danger',
+        icon: 'alert-triangle'
+    });
+    
+    if (!confirmed) return;
+    
+    try {
+        const response = await safeFetch(`/api/roles/${roleName}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to delete role');
+        }
+        
+        showToast('Rol muvaffaqiyatli o\'chirildi!', 'success');
+        
+        // Reload roles
+        const rolesData = await safeFetch('/api/roles');
+        state.roles = rolesData.roles;
+        state.allPermissions = rolesData.all_permissions;
+        renderRoles();
+        
+        // Clear selection
+        DOM.currentRoleTitle.textContent = 'Rol tanlang';
+        DOM.saveRolePermissionsBtn.classList.add('hidden');
+        DOM.permissionsGrid.innerHTML = '';
+        
+    } catch (error) {
+        console.error('Delete role error:', error);
+        showToast(error.message || 'Rolni o\'chirishda xatolik!', 'error');
+    }
+};
 
 export function handleRoleSelection(e) {
     // console.log('🎯 handleRoleSelection called', e);
@@ -95,6 +367,31 @@ export function handleRoleSelection(e) {
     DOM.currentRoleTitle.textContent = `"${roleName}" roli uchun huquqlar`;
     DOM.saveRolePermissionsBtn.classList.remove('hidden');
     
+    // state.roles mavjudligini tekshirish
+    if (!state.roles || !Array.isArray(state.roles)) {
+        console.warn('[ROLES] state.roles mavjud emas yoki array emas, roleData olinmadi');
+        const rolePermissions = [];
+        const roleData = null;
+        
+        // Checkboxlarni tozalash
+        const checkboxes = DOM.permissionsGrid.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+            cb.checked = false;
+        });
+        
+        applyAllPermissionExclusions();
+        showRoleRequirements(roleData);
+        
+        // Faqat superadmin roli uchun huquqlarni o'zgartirish mumkin emas
+        if (roleName === 'superadmin' || roleName === 'super_admin') {
+            DOM.permissionsPanel.classList.add('disabled');
+            DOM.saveRolePermissionsBtn.classList.add('hidden');
+        } else {
+            DOM.permissionsPanel.classList.remove('disabled');
+        }
+        return;
+    }
+    
     const roleData = state.roles.find(r => r.role_name === roleName);
     const rolePermissions = roleData ? roleData.permissions : [];
     // console.log('🎯 Role permissions:', rolePermissions);
@@ -110,22 +407,22 @@ export function handleRoleSelection(e) {
     // Rol talablarini ko'rsatish va tahrirlash imkoniyatini qo'shish
     showRoleRequirements(roleData);
     
-    // Faqat super_admin roli uchun huquqlarni o'zgartirish mumkin emas
-    if (roleName === 'super_admin') {
+    // Faqat superadmin roli uchun huquqlarni o'zgartirish mumkin emas
+    if (roleName === 'superadmin' || roleName === 'super_admin') {
         DOM.permissionsPanel.classList.add('disabled');
         DOM.saveRolePermissionsBtn.classList.add('hidden');
         // Xabar ko'rsatish
         const warningMsg = document.createElement('div');
         warningMsg.className = 'alert alert-warning';
         warningMsg.style.marginTop = '10px';
-        warningMsg.textContent = 'Super admin rolining huquqlarini o\'zgartirish mumkin emas.';
+        warningMsg.textContent = 'Superadmin rolining huquqlarini o\'zgartirish mumkin emas.';
         // Eski xabarni olib tashlash
         const oldWarning = DOM.permissionsPanel.querySelector('.alert-warning');
         if (oldWarning) oldWarning.remove();
         DOM.permissionsPanel.appendChild(warningMsg);
     } else {
-        // Admin va boshqa barcha rollar uchun huquqlarni o'zgartirish mumkin
-    DOM.permissionsPanel.classList.remove('disabled');
+        // Boshqa barcha rollar uchun huquqlarni o'zgartirish mumkin
+        DOM.permissionsPanel.classList.remove('disabled');
         DOM.saveRolePermissionsBtn.classList.remove('hidden');
         // Xabarni olib tashlash
         const warningMsg = DOM.permissionsPanel.querySelector('.alert-warning');
@@ -135,8 +432,8 @@ export function handleRoleSelection(e) {
 }
 
 function showRoleRequirements(roleData) {
-    // Super admin uchun shartlarni ko'rsatmaslik (to'liq dotup)
-    if (!roleData || roleData.role_name === 'super_admin') {
+    // Superadmin uchun shartlarni ko'rsatmaslik (to'liq dostup)
+    if (!roleData || roleData.role_name === 'superadmin' || roleData.role_name === 'super_admin') {
         const existingPanel = document.getElementById('role-requirements-panel');
         if (existingPanel) {
             existingPanel.remove();
@@ -240,14 +537,16 @@ async function saveRoleRequirements() {
         showToast(result.message);
         
         // State'ni yangilash
-        const roleIndex = state.roles.findIndex(r => r.role_name === state.currentEditingRole);
-        if (roleIndex > -1) {
-            state.roles[roleIndex].requires_locations = requiresLocations;
-            state.roles[roleIndex].requires_brands = requiresBrands;
+        if (state.roles && Array.isArray(state.roles)) {
+            const roleIndex = state.roles.findIndex(r => r.role_name === state.currentEditingRole);
+            if (roleIndex > -1) {
+                state.roles[roleIndex].requires_locations = requiresLocations;
+                state.roles[roleIndex].requires_brands = requiresBrands;
+                
+                // UI'ni yangilash
+                showRoleRequirements(state.roles[roleIndex]);
+            }
         }
-        
-        // UI'ni yangilash
-        showRoleRequirements(state.roles[roleIndex]);
         
     } catch (error) {
         showToast(error.message, 'error');
@@ -260,9 +559,9 @@ async function saveRoleRequirements() {
 export async function saveRolePermissions() {
     if (!state.currentEditingRole) return;
     
-    // Faqat super_admin roli uchun huquqlarni o'zgartirish mumkin emas
-    if (state.currentEditingRole === 'super_admin') {
-        showToast('Super admin rolining huquqlarini o\'zgartirish mumkin emas.', true);
+    // Faqat superadmin roli uchun huquqlarni o'zgartirish mumkin emas
+    if (state.currentEditingRole === 'superadmin' || state.currentEditingRole === 'super_admin') {
+        showToast('Superadmin rolining huquqlarini o\'zgartirish mumkin emas.', true);
         return;
     }
     
@@ -280,9 +579,11 @@ export async function saveRolePermissions() {
         const result = await res.json();
         showToast(result.message);
         
-        const roleIndex = state.roles.findIndex(r => r.role_name === state.currentEditingRole);
-        if (roleIndex > -1) {
-            state.roles[roleIndex].permissions = checkedPermissions;
+        if (state.roles && Array.isArray(state.roles)) {
+            const roleIndex = state.roles.findIndex(r => r.role_name === state.currentEditingRole);
+            if (roleIndex > -1) {
+                state.roles[roleIndex].permissions = checkedPermissions;
+            }
         }
     } catch (error) {
         showToast(error.message, true);
@@ -956,15 +1257,23 @@ export function initExportImport() {
 
 // Add New Role Functionality
 export function setupAddNewRole() {
+    // Header'dagi tugma (eski)
     const addRoleBtn = document.getElementById('add-new-role-btn');
     if (addRoleBtn) {
         addRoleBtn.addEventListener('click', openAddRoleModal);
+    }
+    
+    // Inline tugma (yangi - roles list panel ichida)
+    const addRoleInlineBtn = document.getElementById('add-new-role-inline-btn');
+    if (addRoleInlineBtn) {
+        addRoleInlineBtn.addEventListener('click', openAddRoleModal);
     }
 }
 
 function openAddRoleModal() {
     const modal = document.createElement('div');
     modal.className = 'modal fade show';
+    modal.id = 'add-role-modal';
     modal.style.display = 'block';
     modal.innerHTML = `
         <div class="modal-dialog modal-dialog-centered">
@@ -979,7 +1288,7 @@ function openAddRoleModal() {
                     </h5>
                     <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
                     <div class="form-group">
                         <label for="new-role-name">Rol Nomi</label>
                         <input type="text" class="form-control" id="new-role-name" placeholder="masalan: viewer, editor">
@@ -1003,6 +1312,21 @@ function openAddRoleModal() {
                             Bu rol uchun foydalanuvchi tasdiqlanganda brendlar tanlanishi majburiy bo'ladi
                         </small>
                     </div>
+                    <hr style="margin: 20px 0; border-color: rgba(255,255,255,0.1);">
+                    <div class="form-group">
+                        <label style="font-weight: 600; margin-bottom: 10px; display: block;">
+                            <i data-feather="shield"></i>
+                            Huquqlar (Ixtiyoriy)
+                        </label>
+                        <small class="form-text text-muted" style="display: block; margin-bottom: 15px;">
+                            Rol yaratilgandan keyin huquqlarni biriktirishingiz mumkin. Yoki keyinroq huquqlarni sozlashingiz mumkin.
+                        </small>
+                        <div id="new-role-permissions-container" style="max-height: 300px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; background: rgba(255,255,255,0.02);">
+                            <div style="text-align: center; color: rgba(255,255,255,0.5); padding: 20px;">
+                                Huquqlar yuklanmoqda...
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">Bekor qilish</button>
@@ -1018,6 +1342,14 @@ function openAddRoleModal() {
     `;
     document.body.appendChild(modal);
     
+    // Feather icons
+    if (window.feather) {
+        window.feather.replace();
+    }
+    
+    // Load permissions for selection
+    loadPermissionsForNewRole();
+    
     // Focus input
     setTimeout(() => {
         document.getElementById('new-role-name').focus();
@@ -1027,11 +1359,50 @@ function openAddRoleModal() {
     document.getElementById('create-role-btn').addEventListener('click', createNewRole);
 }
 
+// Load permissions for new role modal
+function loadPermissionsForNewRole() {
+    const container = document.getElementById('new-role-permissions-container');
+    if (!container || !state.allPermissions) {
+        if (container) {
+            container.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.5); padding: 20px;">Huquqlar mavjud emas</div>';
+        }
+        return;
+    }
+    
+    container.innerHTML = Object.entries(state.allPermissions).map(([category, perms]) => `
+        <div class="permission-category-group collapsed" style="margin-bottom: 12px;">
+            <div class="permission-category-header" onclick="toggleRoleCategory(this)" style="cursor: pointer;">
+                <div class="permission-category-title">
+                    ${getCategoryIcon(category)} ${category}
+                    <span class="permission-count">(${perms.length})</span>
+                </div>
+                <svg class="category-arrow" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="transform: rotate(-90deg);">
+                    <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z"/>
+                </svg>
+            </div>
+            <div class="permission-category-content" style="max-height: 0;">
+                <div class="permission-list" style="padding: 10px 0;">
+                    ${perms.map(perm => `
+                        <label class="permission-item" style="display: flex; align-items: center; gap: 8px; padding: 8px; cursor: pointer;">
+                            <input type="checkbox" class="new-role-permission-checkbox" value="${perm.key}" style="cursor: pointer;">
+                            <span style="font-size: 13px;">${perm.description}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
 async function createNewRole() {
     const input = document.getElementById('new-role-name');
     const roleName = input.value.trim().toLowerCase();
     const requiresLocations = document.getElementById('new-role-requires-locations').checked;
     const requiresBrands = document.getElementById('new-role-requires-brands').checked;
+    
+    // Get selected permissions
+    const selectedPermissions = Array.from(document.querySelectorAll('.new-role-permission-checkbox:checked'))
+        .map(cb => cb.value);
     
     // Validation
     if (!roleName) {
@@ -1045,6 +1416,9 @@ async function createNewRole() {
         input.focus();
         return;
     }
+    
+    // Shartlar ixtiyoriy - null, true yoki false bo'lishi mumkin
+    // Backend null qiymatni qo'llab-quvvatlaydi
     
     // state.roles mavjudligini tekshirish
     if (!state.roles || !Array.isArray(state.roles)) {
@@ -1060,32 +1434,61 @@ async function createNewRole() {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Yaratilmoqda...';
     
     try {
+        // Create role
+        // null, true yoki false qiymatlarni yuborish
         const response = await safeFetch('/api/roles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 role_name: roleName,
-                requires_locations: requiresLocations,
-                requires_brands: requiresBrands
+                requires_locations: requiresLocations ? true : null,
+                requires_brands: requiresBrands ? true : null
             })
         });
         
-        if (!response.ok) throw new Error('Failed to create role');
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to create role');
+        }
+        
+        // If permissions are selected, assign them
+        if (selectedPermissions.length > 0) {
+            const permissionsResponse = await safeFetch(`/api/roles/${roleName}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ permissions: selectedPermissions })
+            });
+            
+            if (!permissionsResponse.ok) {
+                console.warn('Rol yaratildi, lekin huquqlarni biriktirishda xatolik');
+            }
+        }
         
         showToast('Yangi rol muvaffaqiyatli yaratildi!', 'success');
         
-        // Close modal
-        document.querySelector('.modal').remove();
+        // Close modal - aniq modalni topish
+        const modal = document.getElementById('add-role-modal') || input.closest('.modal');
+        if (modal) {
+            modal.remove();
+        }
         
-        // Reload roles
-        const rolesData = await safeFetch('/api/roles');
-        state.roles = rolesData.roles;
-        state.allPermissions = rolesData.all_permissions;
-        renderRoles();
+        // Reload roles va yangi yaratilgan rolni tanlash
+        const rolesResponse = await safeFetch('/api/roles');
+        if (rolesResponse && rolesResponse.ok) {
+            const rolesData = await rolesResponse.json();
+            if (rolesData && rolesData.roles && Array.isArray(rolesData.roles)) {
+                state.roles = rolesData.roles;
+                state.allPermissions = rolesData.all_permissions || [];
+                // Yangi yaratilgan rolni avtomatik tanlash
+                renderRoles(roleName);
+            } else {
+                console.warn('[ROLES] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
+            }
+        }
         
     } catch (error) {
-        // console.error('Create role error:', error);
-        showToast('Rol yaratishda xatolik!', 'error');
+        console.error('Create role error:', error);
+        showToast(error.message || 'Rol yaratishda xatolik!', 'error');
         btn.disabled = false;
         btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/></svg> Yaratish';
     }

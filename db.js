@@ -66,8 +66,9 @@ const initializeDB = async () => {
     console.log('Migratsiyalar muvaffaqiyatli yakunlandi.');
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
+    // YANGI LOGIKA: Faqat superadmin standart rol bo'ladi, boshqa rollar superadmin tomonidan yaratiladi
 
-    const initialRoles = ['super_admin', 'admin', 'manager', 'operator'];
+    const initialRoles = ['superadmin']; // Faqat superadmin standart rol
     
     const initialPermissions = [
         { permission_key: 'reports:view_all', description: 'Barcha hisobotlarni ko\'rish (Pivot uchun ham)', category: 'Hisobotlar' },
@@ -100,62 +101,45 @@ const initializeDB = async () => {
         { permission_key: 'comparison:notify', description: 'Farqlar haqida operatorlarga bildirishnoma yuborish', category: 'Qiymatlarni Solishtirish' }
     ];
 
-    // === MUAMMO TUZATILGAN JOY ===
-    // Har bir rol uchun standart huquqlar to'plami kengaytirildi
+    // Superadmin uchun barcha huquqlar
     const rolePerms = {
-        super_admin: initialPermissions.map(p => p.permission_key), // Super admin barcha huquqlarga ega va cheklovsiz
-        admin: initialPermissions.map(p => p.permission_key), // Admin barcha huquqlarga ega, lekin cheklovlar bilan
-        manager: [
-            'dashboard:view', 
-            'reports:view_all', // Barcha hisobotlarni ko'rish
-            'reports:create',
-            'reports:edit_assigned', // Biriktirilganlarni tahrirlash
-            'reports:edit_own',
-            'comparison:view', // Qiymatlarni solishtirish
-            'comparison:edit', // Solishtirish summalarini kiritish
-            'comparison:export' // Excel export
-        ],
-        operator: [
-            'reports:view_own', // Faqat o'z hisobotlarini ko'rish
-            'reports:create', 
-            'reports:edit_own'
-        ]
+        superadmin: initialPermissions.map(p => p.permission_key) // Superadmin barcha huquqlarga ega va cheklovsiz
     };
-    // ============================
 
     // Tranzaksiya ichida boshlang'ich ma'lumotlarni kiritish
     await db.transaction(async trx => {
+        // Faqat superadmin rolini yaratish
         await trx('roles')
             .insert(initialRoles.map(r => ({ role_name: r })))
             .onConflict('role_name')
             .ignore();
         
+        // Permissions yaratish
         await trx('permissions')
             .insert(initialPermissions)
             .onConflict('permission_key')
             .ignore();
 
-        for (const role in rolePerms) {
-            await trx('role_permissions').where({ role_name: role }).del();
-            const permsToInsert = rolePerms[role].map(pKey => ({
-                role_name: role,
-                permission_key: pKey
-            }));
-            if (permsToInsert.length > 0) {
-                await trx('role_permissions').insert(permsToInsert);
-            }
+        // Superadmin uchun barcha huquqlarni biriktirish
+        await trx('role_permissions').where({ role_name: 'superadmin' }).del();
+        const permsToInsert = rolePerms.superadmin.map(pKey => ({
+            role_name: 'superadmin',
+            permission_key: pKey
+        }));
+        if (permsToInsert.length > 0) {
+            await trx('role_permissions').insert(permsToInsert);
         }
         
-        // Rollar uchun shartlarni o'rnatish
-        // Super admin: hech qanday shartlar yo'q (to'liq dotup) - null
+        // Superadmin uchun shartlar null (cheksiz dostup)
         await trx('roles')
-            .where('role_name', 'super_admin')
+            .where('role_name', 'superadmin')
             .update({ requires_locations: null, requires_brands: null });
         
-        // Admin: shartlar ixtiyoriy (null) - istalgan dotup yoki chegaralangan
+        // Eski standart rollarni o'chirish (admin, manager, operator)
         await trx('roles')
-            .where('role_name', 'admin')
-            .update({ requires_locations: null, requires_brands: null });
+            .whereIn('role_name', ['admin', 'manager', 'operator', 'super_admin'])
+            .whereNot('role_name', 'superadmin')
+            .del();
     });
 
     // Seeds faylini ishga tushirish (kengaytirilgan permission'lar)
@@ -168,18 +152,23 @@ const initializeDB = async () => {
         // Xatolik bo'lsa ham davom etamiz
     }
 
-    // Super admin yaratish (agar mavjud bo'lmasa)
-    const superAdminUser = await db('users').where({ role: 'super_admin' }).first();
+    // Superadmin yaratish (agar mavjud bo'lmasa)
+    // Eski super_admin va yangi superadmin ni tekshirish
+    const superAdminUser = await db('users').whereIn('role', ['super_admin', 'superadmin']).first();
     if (!superAdminUser) {
         const hashedPassword = await bcrypt.hash('superadmin123', saltRounds);
         await db('users').insert({ 
             username: 'superadmin', 
             password: hashedPassword, 
-            role: 'super_admin',
+            role: 'superadmin',
             status: 'active',
-            device_limit: 999 // Super admin uchun cheksiz device limit
+            device_limit: 999 // Superadmin uchun cheksiz device limit
         });
-        console.log("Boshlang'ich super admin yaratildi. Login: 'superadmin', Parol: 'superadmin123'");
+        console.log("Boshlang'ich superadmin yaratildi. Login: 'superadmin', Parol: 'superadmin123'");
+    } else if (superAdminUser.role === 'super_admin') {
+        // Eski super_admin ni superadmin ga o'zgartirish
+        await db('users').where({ id: superAdminUser.id }).update({ role: 'superadmin' });
+        console.log("Eski super_admin roli superadmin ga o'zgartirildi.");
     }
     
     // Telegram sozlamalarini tekshirish va qo'yish (agar mavjud bo'lmasa)

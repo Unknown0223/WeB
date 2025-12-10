@@ -2,6 +2,7 @@ const express = require('express');
 const { db, logAction } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { sendToTelegram } = require('../utils/bot.js');
+const { filterReportsByRole, getVisibleLocations, getVisibleBrands } = require('../utils/roleFiltering.js');
 
 const router = express.Router();
 
@@ -9,6 +10,18 @@ const router = express.Router();
 router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:view_assigned', 'reports:view_all']), async (req, res) => {
     try {
         const user = req.session.user;
+        if (!user) {
+            return res.status(401).json({ message: "Foydalanuvchi ma'lumotlari topilmadi" });
+        }
+        
+        // Permissions va locations ni tekshirish
+        if (!user.permissions || !Array.isArray(user.permissions)) {
+            user.permissions = [];
+        }
+        if (!user.locations || !Array.isArray(user.locations)) {
+            user.locations = [];
+        }
+        
         const page = parseInt(req.query.page) || 1;
         
         const limitSetting = await db('settings').where({ key: 'pagination_limit' }).first();
@@ -17,28 +30,43 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
 
         const { startDate, endDate, searchTerm, filter } = req.query;
         
-        const query = db('reports as r')
+        let query = db('reports as r')
             .leftJoin('users as u', 'r.created_by', 'u.id')
             .leftJoin('brands as b', 'r.brand_id', 'b.id');
 
         // Foydalanuvchining huquqlariga qarab so'rovni filtrlash
         if (user.permissions.includes('reports:view_all')) {
-            // Admin/Menejer barcha hisobotlarni ko'radi
-            // Lekin agar admin uchun filiallar belgilangan bo'lsa, faqat shu filiallar bo'yicha cheklanadi
-            if (user.role === 'admin' && user.locations && user.locations.length > 0) {
-                query.whereIn('r.location', user.locations);
-            }
-            // Super admin uchun hech qanday cheklov yo'q
+            // Barcha hisobotlarni ko'rish huquqi bor
+            // Rol shartlari bo'yicha filtrlash
+            query = await filterReportsByRole(query, user);
         } else if (user.permissions.includes('reports:view_assigned')) {
-            // Menejer o'ziga biriktirilgan filiallar hisobotlarini ko'radi.
-            if (user.locations.length === 0) {
-                // Agar biriktirilgan filial bo'lmasa, bo'sh ro'yxat qaytaramiz.
-                return res.json({ reports: {}, total: 0, pages: 0, currentPage: 1 });
-            }
-            query.whereIn('r.location', user.locations);
+            // Biriktirilgan filiallar hisobotlarini ko'rish
+            // Rol shartlari bo'yicha filtrlash
+            query = await filterReportsByRole(query, user);
         } else if (user.permissions.includes('reports:view_own')) {
-            // Operator faqat o'zi yaratgan hisobotlarni ko'radi.
+            // Faqat o'zi yaratgan hisobotlarni ko'rish
             query.where('r.created_by', user.id);
+            // reports:view_own uchun rol shartlarini qo'llamaymiz, chunki foydalanuvchi o'zi yaratgan barcha hisobotlarni ko'rish huquqiga ega
+            // Lekin agar rol shartlari belgilangan bo'lsa, ularni ham hisobga olishimiz mumkin
+            // Bu holda, faqat o'zi yaratgan va rol shartlariga mos keladigan hisobotlarni ko'rsatamiz
+            try {
+                const visibleLocations = await getVisibleLocations(user);
+                const visibleBrands = await getVisibleBrands(user);
+                
+                // Agar rol shartlari belgilangan bo'lsa, ularni qo'llash
+                if (visibleLocations.length > 0 || visibleBrands.length > 0) {
+                    if (visibleLocations.length > 0) {
+                        query.whereIn('r.location', visibleLocations);
+                    }
+                    if (visibleBrands.length > 0) {
+                        query.whereIn('r.brand_id', visibleBrands);
+                    }
+                }
+                // Agar rol shartlari belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
+            } catch (roleFilterError) {
+                console.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own):', roleFilterError);
+                // Xatolik bo'lsa ham, o'zi yaratgan hisobotlarni ko'rsatamiz
+            }
         } else {
             // Agar hech qanday ko'rish huquqi bo'lmasa, bo'sh ro'yxat qaytaramiz.
             return res.json({ reports: {}, total: 0, pages: 0, currentPage: 1 });
@@ -53,66 +81,171 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
             });
         }
         
-        const totalResult = await query.clone().count('* as total').first();
-        const total = totalResult.total;
+        // Avval reports'ni olish
+        let reports = [];
+        try {
+            reports = await query
+                .select('r.*', 'u.username as created_by_username', 'b.name as brand_name')
+                .orderBy('r.id', 'desc')
+                .limit(limit)
+                .offset(offset);
+        } catch (queryError) {
+            console.error('[reports] Query xatolik:', queryError);
+            console.error('[reports] Query error message:', queryError.message);
+            console.error('[reports] Query error stack:', queryError.stack);
+            // Agar query xatolik bo'lsa, bo'sh ro'yxat qaytaramiz
+            reports = [];
+        }
 
-        const reports = await query
-            .select('r.*', 'u.username as created_by_username', 'b.name as brand_name')
-            .orderBy('r.id', 'desc')
-            .limit(limit)
-            .offset(offset);
+        // Total sonini olish - yangi query yaratish
+        let total = 0;
+        try {
+            // Agar hech qanday ko'rish huquqi bo'lmasa, total = 0
+            if (!user.permissions.includes('reports:view_all') && 
+                !user.permissions.includes('reports:view_assigned') && 
+                !user.permissions.includes('reports:view_own')) {
+                total = 0;
+            } else {
+                // Asosiy query'dagi barcha shartlarni qayta yaratish
+                const countQuery = db('reports as r')
+                    .leftJoin('users as u', 'r.created_by', 'u.id')
+                    .leftJoin('brands as b', 'r.brand_id', 'b.id');
+                
+            // Foydalanuvchining huquqlariga qarab so'rovni filtrlash
+            if (user.permissions.includes('reports:view_all')) {
+                await filterReportsByRole(countQuery, user);
+            } else if (user.permissions.includes('reports:view_assigned')) {
+                await filterReportsByRole(countQuery, user);
+            } else if (user.permissions.includes('reports:view_own')) {
+                countQuery.where('r.created_by', user.id);
+                // reports:view_own uchun rol shartlarini qo'llamaymiz, chunki foydalanuvchi o'zi yaratgan barcha hisobotlarni ko'rish huquqiga ega
+                try {
+                    const visibleLocations = await getVisibleLocations(user);
+                    const visibleBrands = await getVisibleBrands(user);
+                    
+                    // Agar rol shartlari belgilangan bo'lsa, ularni qo'llash
+                    if (visibleLocations.length > 0 || visibleBrands.length > 0) {
+                        if (visibleLocations.length > 0) {
+                            countQuery.whereIn('r.location', visibleLocations);
+                        }
+                        if (visibleBrands.length > 0) {
+                            countQuery.whereIn('r.brand_id', visibleBrands);
+                        }
+                    }
+                    // Agar rol shartlari belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
+                } catch (roleFilterError) {
+                    console.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own count):', roleFilterError);
+                    // Xatolik bo'lsa ham, o'zi yaratgan hisobotlarni ko'rsatamiz
+                }
+            }
+                
+                // Qo'shimcha filtrlarni qo'llash
+                if (startDate) countQuery.where('r.report_date', '>=', startDate);
+                if (endDate) countQuery.where('r.report_date', '<=', endDate);
+                if (searchTerm) {
+                    countQuery.where(function() {
+                        this.where('r.id', 'like', `%${searchTerm}%`)
+                            .orWhere('r.location', 'like', `%${searchTerm}%`);
+                    });
+                }
+                
+                const totalResult = await countQuery.count('* as total').first();
+                
+                if (totalResult) {
+                    total = totalResult.total || totalResult['count(*)'] || 0;
+                    // SQLite uchun total sonini to'g'ri olish
+                    if (typeof total === 'string') {
+                        total = parseInt(total) || 0;
+                    } else if (typeof total === 'object' && total !== null) {
+                        // Agar object bo'lsa, birinchi qiymatni olish
+                        total = Object.values(total)[0] || 0;
+                    }
+                }
+            }
+        } catch (countError) {
+            console.error('[reports] Count xatolik:', countError);
+            console.error('[reports] Count error message:', countError.message);
+            console.error('[reports] Count error stack:', countError.stack);
+            // Agar count xatolik bo'lsa, reports sonini total sifatida ishlatamiz
+            total = reports.length;
+        }
 
-        const reportIds = reports.map(r => r.id);
+        const reportIds = reports.map(r => r.id).filter(id => id != null);
         let editCountMap = {};
         if (reportIds.length > 0) {
-            const editCounts = await db('report_history')
-                .select('report_id')
-                .count('* as edit_count')
-                .whereIn('report_id', reportIds)
-                .groupBy('report_id');
-            
-            editCountMap = editCounts.reduce((acc, item) => {
-                acc[item.report_id] = item.edit_count;
-                return acc;
-            }, {});
+            try {
+                const editCounts = await db('report_history')
+                    .select('report_id')
+                    .count('* as edit_count')
+                    .whereIn('report_id', reportIds)
+                    .groupBy('report_id');
+                
+                editCountMap = editCounts.reduce((acc, item) => {
+                    acc[item.report_id] = item.edit_count;
+                    return acc;
+                }, {});
+            } catch (editCountError) {
+                console.error('[reports] Edit count xatolik:', editCountError);
+                editCountMap = {};
+            }
         }
 
         const filteredReports = reports.filter(report => {
+            if (!report || !report.id) return false;
             const edit_count = editCountMap[report.id] || 0;
             if (filter === 'edited') return edit_count > 0;
             if (filter === 'unedited') return edit_count === 0;
             return true;
         });
 
-        const pages = Math.ceil(total / limit);
+        const pages = Math.ceil(total / limit) || 1;
 
         const formattedReports = {};
         filteredReports.forEach(report => {
-            const parsedData = JSON.parse(report.data);
-            const parsedSettings = JSON.parse(report.settings);
+            try {
+                if (!report || !report.data || !report.settings) {
+                    console.warn('[reports] Noto\'g\'ri report formati:', report);
+                    return;
+                }
+                const parsedData = JSON.parse(report.data);
+                const parsedSettings = JSON.parse(report.settings);
             
-            formattedReports[report.id] = {
-                id: report.id,
-                date: report.report_date,
-                location: report.location,
-                brand_id: report.brand_id,
-                brand_name: report.brand_name,
-                data: parsedData,
-                settings: parsedSettings,
-                edit_count: editCountMap[report.id] || 0,
-                created_by: report.created_by,
-                created_by_username: report.created_by_username,
-                late_comment: report.late_comment,
-                currency: report.currency || null,
-                created_at: report.created_at,
-                updated_at: report.updated_at
-            };
+                formattedReports[report.id] = {
+                    id: report.id,
+                    date: report.report_date,
+                    location: report.location,
+                    brand_id: report.brand_id,
+                    brand_name: report.brand_name,
+                    data: parsedData,
+                    settings: parsedSettings,
+                    edit_count: editCountMap[report.id] || 0,
+                    created_by: report.created_by,
+                    created_by_username: report.created_by_username,
+                    late_comment: report.late_comment,
+                    currency: report.currency || null,
+                    created_at: report.created_at,
+                    updated_at: report.updated_at
+                };
+            } catch (parseError) {
+                console.error(`[reports] Report ${report?.id || 'unknown'} parse xatolik:`, parseError);
+                // Xatolik bo'lsa, bu report'ni o'tkazib yuboramiz
+            }
         });
 
         res.json({ reports: formattedReports, total, pages, currentPage: page });
     } catch (error) {
         console.error("/api/reports GET xatoligi:", error);
-        res.status(500).json({ message: "Hisobotlarni yuklashda xatolik" });
+        console.error("Error message:", error.message);
+        console.error("Error stack:", error.stack);
+        console.error("Error name:", error.name);
+        if (error.sql) {
+            console.error("SQL query:", error.sql);
+        }
+        res.status(500).json({ 
+            message: "Hisobotlarni yuklashda xatolik",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 
@@ -339,6 +472,19 @@ router.delete('/:id', isAuthenticated, hasPermission('reports:delete'), async (r
         }
 
         await logAction(user.id, 'delete_report', 'report', reportId, { date: report.report_date, location: report.location, ip: req.session.ip_address, userAgent: req.session.user_agent });
+
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [REPORTS] Hisobot o'chirildi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('report_deleted', {
+                reportId: reportId,
+                date: report.report_date,
+                location: report.location,
+                deleted_by: user.id,
+                deleted_by_username: user.username
+            });
+            console.log(`✅ [REPORTS] WebSocket yuborildi: report_deleted`);
+        }
 
         res.json({ message: `Hisobot #${reportId} muvaffaqiyatli o'chirildi.` });
 

@@ -8,7 +8,8 @@ import { showToast } from './utils.js';
 import { fetchUsers } from './api.js';
 
 let ws = null;
-let reconnectInterval = null;
+let reconnectTimeout = null;
+let reconnectAttempts = 0;
 let autoRefreshInterval = null;
 
 export function initRealTime() {
@@ -23,6 +24,26 @@ export function initRealTime() {
 }
 
 function connectWebSocket() {
+    // Agar allaqachon ulanish mavjud bo'lsa, uni yopish
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log('ℹ️ [WEBSOCKET] Ulanish allaqachon mavjud');
+        return;
+    }
+    
+    if (ws && ws.readyState === WebSocket.CONNECTING) {
+        console.log('ℹ️ [WEBSOCKET] Ulanish allaqachon amalga oshirilmoqda');
+        return;
+    }
+    
+    // Eski ulanishni yopish
+    if (ws) {
+        try {
+            ws.close();
+        } catch (e) {
+            // Ignore
+        }
+    }
+    
     // WebSocket server manzili
     // Railway va boshqa cloud platformalar uchun WebSocket protokoli
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -45,10 +66,11 @@ function connectWebSocket() {
         
         ws.onopen = () => {
             console.log('✅ [WEBSOCKET] Ulanish muvaffaqiyatli');
-            if (reconnectInterval) {
-                showToast('Real-time rejim yoqildi');
+            if (reconnectAttempts > 0) {
+                showToast('Real-time rejim yoqildi', 'success');
             }
             stopReconnecting();
+            reconnectAttempts = 0;
         };
         
         ws.onmessage = (event) => {
@@ -63,14 +85,25 @@ function connectWebSocket() {
         ws.onerror = (error) => {
             console.error('❌ [WEBSOCKET] Xatolik:', error);
             console.error('❌ [WEBSOCKET] URL:', wsUrl);
+            // Xatolikda qayta ulanishni rejalashtirish
+            if (ws.readyState === WebSocket.CLOSED) {
+                scheduleReconnect();
+            }
         };
         
         ws.onclose = (event) => {
-            console.log('❌ [WEBSOCKET] Ulanish yopildi. Code:', event.code, 'Reason:', event.reason);
-            scheduleReconnect();
+            console.log('❌ [WEBSOCKET] Ulanish yopildi. Code:', event.code, 'Reason:', event.reason || 'N/A');
+            
+            // Faqat noqonuniy yopilish holatlarida qayta ulanish
+            // 1000 - normal closure (qayta ulanish kerak emas)
+            // 1001 - going away (qayta ulanish kerak emas)
+            // 1006 - abnormal closure (qayta ulanish kerak)
+            if (event.code !== 1000 && event.code !== 1001) {
+                scheduleReconnect();
+            }
         };
     } catch (error) {
-        // console.error('WebSocket connection failed:', error);
+        console.error('❌ [WEBSOCKET] Ulanish yaratishda xatolik:', error);
         scheduleReconnect();
     }
 }
@@ -456,16 +489,42 @@ function handleWebSocketMessage(data) {
             break;
             
         case 'role_updated':
-            // Rol yangilandi
-            console.log('🔔 [REALTIME] Rol yangilandi:', payload);
+        case 'role_deleted':
+            // Rol yangilandi yoki o'chirildi
+            console.log(`🔔 [REALTIME] Rol ${type === 'role_deleted' ? 'o\'chirildi' : 'yangilandi'}:`, payload);
             
             // Roles sahifasini yangilash
             const rolesPage = document.getElementById('roles');
             if (rolesPage && rolesPage.classList.contains('active')) {
                 console.log('🔄 [REALTIME] Roles sahifasi aktiv, yangilanmoqda...');
-                import('./roles.js').then(module => {
-                    if (module.renderRoles) {
-                        module.renderRoles();
+                Promise.all([
+                    import('./api.js'),
+                    import('./state.js'),
+                    import('./roles.js')
+                ]).then(([apiModule, stateModule, rolesModule]) => {
+                    // Joriy tanlangan rolni saqlash
+                    const currentRole = stateModule.state.currentEditingRole;
+                    const roleNameFromPayload = payload?.role_name;
+                    
+                    if (apiModule.fetchRoles) {
+                        apiModule.fetchRoles().then(rolesData => {
+                            if (rolesData && rolesData.roles && Array.isArray(rolesData.roles)) {
+                                stateModule.state.roles = rolesData.roles;
+                                stateModule.state.allPermissions = rolesData.all_permissions || [];
+                                if (rolesModule.renderRoles) {
+                                    // Agar yangi rol yaratilgan bo'lsa (role_updated va action: 'created'), uni tanlash
+                                    // Aks holda joriy tanlangan rolni saqlash
+                                    const roleToSelect = (type === 'role_updated' && payload?.action === 'created' && roleNameFromPayload) 
+                                        ? roleNameFromPayload 
+                                        : currentRole;
+                                    rolesModule.renderRoles(roleToSelect);
+                                }
+                            } else {
+                                console.warn('[REALTIME] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
+                            }
+                        }).catch(error => {
+                            console.error('[REALTIME] Roles yuklashda xatolik:', error);
+                        });
                     }
                 });
             }
@@ -564,6 +623,178 @@ function handleWebSocketMessage(data) {
             }
             break;
             
+        case 'report_deleted':
+            // Hisobot o'chirildi
+            console.log('🔔 [REALTIME] Hisobot o\'chirildi:', payload);
+            
+            // Dashboard yangilash
+            const dashboardPageDelete = document.getElementById('dashboard');
+            if (dashboardPageDelete && dashboardPageDelete.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Dashboard aktiv, yangilanmoqda...');
+                refreshCurrentDashboard();
+            }
+            
+            // Reports sahifasini yangilash
+            const reportsPage = document.getElementById('reports');
+            if (reportsPage && reportsPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Reports sahifasi aktiv, yangilanmoqda...');
+                import('./reports.js').then(module => {
+                    if (module.fetchAndRenderReports) {
+                        module.fetchAndRenderReports();
+                    }
+                });
+            }
+            
+            // KPI sahifasini yangilash
+            const kpiPageDelete = document.getElementById('employee-statistics');
+            if (kpiPageDelete && kpiPageDelete.classList.contains('active')) {
+                console.log('🔄 [REALTIME] KPI sahifasi aktiv, yangilanmoqda...');
+                import('./kpi.js').then(module => {
+                    if (module.refreshKpiData) {
+                        module.refreshKpiData();
+                    }
+                });
+            }
+            
+            // Pivot sahifasini yangilash
+            const pivotPageDelete = document.getElementById('pivot-reports');
+            if (pivotPageDelete && pivotPageDelete.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Pivot sahifasi aktiv, yangilanmoqda...');
+                if (state.pivotGrid && typeof state.pivotGrid.refresh === 'function') {
+                    state.pivotGrid.refresh();
+                }
+            }
+            break;
+            
+        case 'user_created':
+            // Yangi foydalanuvchi yaratildi
+            console.log('🔔 [REALTIME] Yangi foydalanuvchi yaratildi:', payload);
+            
+            // Users sahifasini yangilash
+            const usersPageCreate = document.getElementById('users');
+            if (usersPageCreate && usersPageCreate.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
+                if (typeof fetchUsers === 'function') {
+                    fetchUsers().then(users => {
+                        if (users) {
+                            state.users = users;
+                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                            renderUsersByStatus(activeTab);
+                        }
+                    });
+                }
+            }
+            break;
+            
+        case 'user_updated':
+            // Foydalanuvchi yangilandi
+            console.log('🔔 [REALTIME] Foydalanuvchi yangilandi:', payload);
+            
+            // Users sahifasini yangilash
+            const usersPageUpdate = document.getElementById('users');
+            if (usersPageUpdate && usersPageUpdate.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
+                if (typeof fetchUsers === 'function') {
+                    fetchUsers().then(users => {
+                        if (users) {
+                            state.users = users;
+                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                            renderUsersByStatus(activeTab);
+                        }
+                    });
+                }
+            }
+            break;
+            
+        case 'user_password_changed':
+        case 'user_secret_word_changed':
+            // Parol yoki maxfiy so'z o'zgartirildi
+            console.log(`🔔 [REALTIME] ${type === 'user_password_changed' ? 'Parol' : 'Maxfiy so\'z'} o'zgartirildi:`, payload);
+            
+            // Users sahifasini yangilash (agar kerak bo'lsa)
+            const usersPagePassword = document.getElementById('users');
+            if (usersPagePassword && usersPagePassword.classList.contains('active')) {
+                if (typeof fetchUsers === 'function') {
+                    fetchUsers().then(users => {
+                        if (users) {
+                            state.users = users;
+                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                            renderUsersByStatus(activeTab);
+                        }
+                    });
+                }
+            }
+            break;
+            
+        case 'user_permissions_updated':
+        case 'user_permissions_reset':
+            // Foydalanuvchi huquqlari o'zgartirildi
+            console.log(`🔔 [REALTIME] Foydalanuvchi huquqlari ${type === 'user_permissions_reset' ? 'tiklandi' : 'yangilandi'}:`, payload);
+            
+            // Users sahifasini yangilash
+            const usersPagePerms = document.getElementById('users');
+            if (usersPagePerms && usersPagePerms.classList.contains('active')) {
+                if (typeof fetchUsers === 'function') {
+                    fetchUsers().then(users => {
+                        if (users) {
+                            state.users = users;
+                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
+                            renderUsersByStatus(activeTab);
+                        }
+                    });
+                }
+            }
+            break;
+            
+        case 'pivot_template_created':
+        case 'pivot_template_updated':
+        case 'pivot_template_deleted':
+            // Pivot template yaratildi/yangilandi/o'chirildi
+            console.log(`🔔 [REALTIME] Pivot template ${type === 'pivot_template_created' ? 'yaratildi' : type === 'pivot_template_updated' ? 'yangilandi' : 'o\'chirildi'}:`, payload);
+            
+            // Pivot sahifasini yangilash
+            const pivotPageTemplate = document.getElementById('pivot-reports');
+            if (pivotPageTemplate && pivotPageTemplate.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Pivot sahifasi aktiv, template ro\'yxati yangilanmoqda...');
+                import('./pivot.js').then(module => {
+                    if (module.loadTemplates) {
+                        module.loadTemplates();
+                    }
+                });
+            }
+            break;
+            
+        case 'notification_read':
+        case 'notifications_read_all':
+            // Bildirishnoma o'qilgan deb belgilandi
+            console.log(`🔔 [REALTIME] Bildirishnoma ${type === 'notifications_read_all' ? 'barchasi' : ''} o'qilgan deb belgilandi:`, payload);
+            
+            // Notification count'ni yangilash
+            if (typeof window.checkUnreadNotifications === 'function') {
+                window.checkUnreadNotifications();
+            }
+            
+            // Notification modal ochiq bo'lsa, ro'yxatni yangilash
+            const notificationModal = document.getElementById('notifications-modal');
+            if (notificationModal && !notificationModal.classList.contains('hidden')) {
+                if (typeof window.loadNotifications === 'function') {
+                    window.loadNotifications();
+                }
+            }
+            break;
+            
+        case 'exchange_rates_updated':
+            // Valyuta kurslari yangilandi
+            console.log('🔔 [REALTIME] Valyuta kurslari yangilandi:', payload);
+            
+            // Settings sahifasini yangilash (agar exchange rates ko'rsatilsa)
+            const settingsPageRates = document.getElementById('settings');
+            if (settingsPageRates && settingsPageRates.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Settings sahifasi aktiv, kurslar yangilanmoqda...');
+                // Exchange rates yangilanishi kerak bo'lsa, bu yerda qo'shiladi
+            }
+            break;
+            
         case 'comparison_difference':
             // Solishtirishda farqlar aniqlandi
             console.log('🔔 [REALTIME] Comparison difference notification qabul qilindi:', payload);
@@ -624,35 +855,49 @@ function handleWebSocketMessage(data) {
 }
 
 function scheduleReconnect() {
-    if (reconnectInterval) return;
+    if (reconnectTimeout) {
+        console.log('ℹ️ [WEBSOCKET] Qayta ulanish allaqachon rejalashtirilgan');
+        return;
+    }
     
-    let attempts = 0;
-    const maxAttempts = 5;
-    const reconnectDelay = 3000; // 3 sekund
+    const maxAttempts = 10; // 10 marta urinish
+    const initialDelay = 1000; // 1 sekunddan boshlash
+    const maxDelay = 10000; // Maksimal 10 sekund
     
-    reconnectInterval = setInterval(() => {
-        attempts++;
+    reconnectAttempts++;
+    
+    if (reconnectAttempts > maxAttempts) {
+        console.log('⚠️ [WEBSOCKET] Qayta ulanish urinishlari tugadi. Auto-refresh rejimiga o\'tildi.');
+        stopReconnecting();
+        return;
+    }
+    
+    // Exponential backoff - har bir urinishda kechikish oshadi
+    const delay = Math.min(initialDelay * Math.pow(2, reconnectAttempts - 1), maxDelay);
+    
+    console.log(`🔄 [WEBSOCKET] Qayta ulanish urinishi ${reconnectAttempts}/${maxAttempts} (${delay}ms keyin)`);
+    
+    reconnectTimeout = setTimeout(() => {
+        reconnectTimeout = null;
         
-        if (attempts > maxAttempts) {
-            // console.log('Reconnect attempts exceeded. Switching to auto-refresh mode.');
+        // Agar allaqachon ulanish mavjud bo'lsa, to'xtatish
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            console.log('✅ [WEBSOCKET] Ulanish allaqachon mavjud');
             stopReconnecting();
             return;
         }
         
-        // console.log(`Reconnecting... attempt ${attempts}`);
         connectWebSocket();
-        
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            stopReconnecting();
-        }
-    }, reconnectDelay);
+    }, delay);
 }
 
 function stopReconnecting() {
-    if (reconnectInterval) {
-        clearInterval(reconnectInterval);
-        reconnectInterval = null;
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+        console.log('✅ [WEBSOCKET] Qayta ulanish to\'xtatildi');
     }
+    reconnectAttempts = 0;
 }
 
 function startAutoRefresh() {

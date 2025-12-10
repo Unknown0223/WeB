@@ -101,6 +101,17 @@ router.put('/:id/read', isAuthenticated, async (req, res) => {
                 read_at: db.fn.now()
             });
 
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [NOTIFICATIONS] Bildirishnoma o'qilgan deb belgilandi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('notification_read', {
+                notificationId: parseInt(notificationId),
+                userId: userId,
+                is_read: true
+            });
+            console.log(`✅ [NOTIFICATIONS] WebSocket yuborildi: notification_read`);
+        }
+
         res.json({
             success: true,
             message: 'Bildirishnoma o\'qilgan deb belgilandi'
@@ -121,13 +132,23 @@ router.put('/read-all', isAuthenticated, async (req, res) => {
     try {
         const userId = req.session.user.id;
 
-        await db('notifications')
+        const updatedCount = await db('notifications')
             .where('user_id', userId)
             .where('is_read', false)
             .update({
                 is_read: true,
                 read_at: db.fn.now()
             });
+
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket && updatedCount > 0) {
+            console.log(`📡 [NOTIFICATIONS] Barcha bildirishnomalar o'qilgan deb belgilandi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('notifications_read_all', {
+                userId: userId,
+                count: updatedCount
+            });
+            console.log(`✅ [NOTIFICATIONS] WebSocket yuborildi: notifications_read_all`);
+        }
 
         res.json({
             success: true,

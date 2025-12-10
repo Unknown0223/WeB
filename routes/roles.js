@@ -10,10 +10,12 @@ const router = express.Router();
 // Barcha rollar va ularning huquqlarini olish
 router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     try {
-        const [roles, permissions, rolePermissions] = await Promise.all([
+        const [roles, permissions, rolePermissions, roleLocations, roleBrands] = await Promise.all([
             db('roles').select('role_name', 'requires_brands', 'requires_locations').orderBy('role_name'),
             db('permissions').select('*').orderBy('category', 'permission_key'),
-            db('role_permissions').select('*')
+            db('role_permissions').select('*'),
+            db('role_locations').select('*'),
+            db('role_brands').select('*')
         ]);
 
         const permissionsByCategory = permissions.reduce((acc, p) => {
@@ -30,8 +32,6 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
                 .map(rp => rp.permission_key);
             
             // SQLite'da 0 (false) va null o'rtasidagi farqni to'g'ri aniqlash
-            // Agar qiymat null yoki undefined bo'lsa, null qaytarish
-            // Agar qiymat 0 (false) yoki 1 (true) bo'lsa, boolean qaytarish
             const requiresBrands = (role.requires_brands === null || role.requires_brands === undefined) 
                 ? null 
                 : Boolean(role.requires_brands);
@@ -39,11 +39,21 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
                 ? null 
                 : Boolean(role.requires_locations);
             
+            // Rol uchun belgilangan filiallar va brendlar
+            const locations = roleLocations
+                .filter(rl => rl.role_name === role.role_name)
+                .map(rl => rl.location_name);
+            const brands = roleBrands
+                .filter(rb => rb.role_name === role.role_name)
+                .map(rb => rb.brand_id);
+            
             return {
                 role_name: role.role_name,
                 permissions: assignedPermissions,
                 requires_brands: requiresBrands,
-                requires_locations: requiresLocations
+                requires_locations: requiresLocations,
+                locations: locations,
+                brands: brands
             };
         });
 
@@ -55,7 +65,54 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
     }
 });
 
+// Rol ma'lumotlarini olish (GET /api/roles/:role_name)
+router.get('/:role_name', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    const { role_name } = req.params;
+    
+    try {
+        // Superadmin roli uchun ma'lumotlarni olishga ruxsat berilmaydi
+        if (role_name === 'superadmin' || role_name === 'super_admin') {
+            return res.status(403).json({ message: "Superadmin roli ma'lumotlarini olish mumkin emas." });
+        }
+        
+        const [role, rolePermissions, roleLocations, roleBrands] = await Promise.all([
+            db('roles').where('role_name', role_name).first(),
+            db('role_permissions').where('role_name', role_name).select('permission_key'),
+            db('role_locations').where('role_name', role_name).select('location_name'),
+            db('role_brands').where('role_name', role_name).select('brand_id')
+        ]);
+        
+        if (!role) {
+            return res.status(404).json({ message: "Rol topilmadi." });
+        }
+        
+        const assignedPermissions = rolePermissions.map(rp => rp.permission_key);
+        const locations = roleLocations.map(rl => rl.location_name);
+        const brands = roleBrands.map(rb => rb.brand_id);
+        
+        const requiresBrands = (role.requires_brands === null || role.requires_brands === undefined) 
+            ? null 
+            : Boolean(role.requires_brands);
+        const requiresLocations = (role.requires_locations === null || role.requires_locations === undefined) 
+            ? null 
+            : Boolean(role.requires_locations);
+        
+        res.json({
+            role_name: role.role_name,
+            permissions: assignedPermissions,
+            requires_brands: requiresBrands,
+            requires_locations: requiresLocations,
+            locations: locations,
+            brands: brands
+        });
+    } catch (error) {
+        console.error(`/api/roles/${role_name} GET xatoligi:`, error);
+        res.status(500).json({ message: "Rol ma'lumotlarini yuklashda xatolik." });
+    }
+});
+
 // Admin rolining ma'lumotlarini olish (404 xatosini oldini olish uchun)
+// Bu endpoint /api/roles/:role_name dan oldin bo'lishi kerak
 router.get('/admin', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     try {
         console.log('📋 [ROLES] /api/roles/admin endpointiga so\'rov keldi');
@@ -103,9 +160,9 @@ router.put('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
         return res.status(400).json({ message: "Huquqlar massiv formatida yuborilishi kerak." });
     }
     
-    // Faqat super_admin roli uchun huquqlarni o'zgartirish mumkin emas
-    if (role_name === 'super_admin') {
-        return res.status(403).json({ message: "Super admin rolini huquqlarini o'zgartirish mumkin emas." });
+    // Faqat superadmin roli uchun huquqlarni o'zgartirish mumkin emas
+    if (role_name === 'superadmin' || role_name === 'super_admin') {
+        return res.status(403).json({ message: "Superadmin rolini huquqlarini o'zgartirish mumkin emas." });
     }
 
     try {
@@ -174,10 +231,15 @@ router.get('/permissions/overview', isAuthenticated, hasPermission('roles:manage
 
 // Create new role
 router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
-    const { role_name, requires_brands = false, requires_locations = false } = req.body;
+    const { role_name, requires_brands = null, requires_locations = null, locations = [], brands = [], permissions = [] } = req.body;
     
-    if (!role_name || !/^[a-z_]+$/.test(role_name)) {
-        return res.status(400).json({ message: 'Noto\'g\'ri rol nomi formati' });
+    if (!role_name || !/^[a-z0-9_]+$/.test(role_name)) {
+        return res.status(400).json({ message: 'Noto\'g\'ri rol nomi formati. Faqat kichik harflar, raqamlar va _ belgisi ishlatilishi mumkin.' });
+    }
+    
+    // superadmin rolini yaratishga ruxsat berilmaydi
+    if (role_name === 'superadmin' || role_name === 'super_admin') {
+        return res.status(403).json({ message: 'Superadmin roli yaratib bo\'lmaydi. Bu standart rol.' });
     }
     
     try {
@@ -191,13 +253,44 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
         const adminId = req.session.user.id;
         const username = req.session.user?.username || 'admin';
         
-        console.log(`📝 [ROLES] Yangi rol yaratilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}, Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
+        console.log(`📝 [ROLES] Yangi rol yaratilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
+        console.log(`   - Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
+        console.log(`   - Locations: ${locations.length} ta, Brands: ${brands.length} ta, Permissions: ${permissions.length} ta`);
         
-        // Create new role - null qiymatni qo'llab-quvvatlash
-        await db('roles').insert({ 
-            role_name,
-            requires_brands: requires_brands === null || requires_brands === undefined ? null : Boolean(requires_brands),
-            requires_locations: requires_locations === null || requires_locations === undefined ? null : Boolean(requires_locations)
+        await db.transaction(async trx => {
+            // Create new role - null qiymatni qo'llab-quvvatlash
+            await trx('roles').insert({ 
+                role_name,
+                requires_brands: requires_brands === null || requires_brands === undefined ? null : Boolean(requires_brands),
+                requires_locations: requires_locations === null || requires_locations === undefined ? null : Boolean(requires_locations)
+            });
+            
+            // Filiallarni saqlash
+            if (locations && locations.length > 0) {
+                const locationRecords = locations.map(loc => ({
+                    role_name: role_name,
+                    location_name: loc
+                }));
+                await trx('role_locations').insert(locationRecords);
+            }
+            
+            // Brendlarni saqlash
+            if (brands && brands.length > 0) {
+                const brandRecords = brands.map(brandId => ({
+                    role_name: role_name,
+                    brand_id: parseInt(brandId)
+                }));
+                await trx('role_brands').insert(brandRecords);
+            }
+            
+            // Huquqlarni saqlash
+            if (permissions && permissions.length > 0) {
+                const permissionRecords = permissions.map(permKey => ({
+                    role_name: role_name,
+                    permission_key: permKey
+                }));
+                await trx('role_permissions').insert(permissionRecords);
+            }
         });
         
         console.log(`✅ [ROLES] Rol muvaffaqiyatli yaratildi: ${role_name}`);
@@ -210,8 +303,11 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
             target_id: role_name,
             details: JSON.stringify({ 
                 role_name, 
-                requires_brands: Boolean(requires_brands), 
-                requires_locations: Boolean(requires_locations) 
+                requires_brands: requires_brands,
+                requires_locations: requires_locations,
+                locations_count: locations.length,
+                brands_count: brands.length,
+                permissions_count: permissions.length
             }),
             ip_address: req.session.ip_address,
             user_agent: req.session.user_agent
@@ -238,16 +334,18 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
     }
 });
 
-// Update role requirements
+// Update role requirements (filiallar va brendlar)
 router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     const { role_name } = req.params;
-    const { requires_brands, requires_locations } = req.body;
+    const { requires_brands, requires_locations, locations = [], brands = [] } = req.body;
     
     try {
         const adminId = req.session.user.id;
         const username = req.session.user?.username || 'admin';
         
-        console.log(`📝 [ROLES] Rol talablari yangilanmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}, Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
+        console.log(`📝 [ROLES] Rol talablari yangilanmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
+        console.log(`   - Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
+        console.log(`   - Locations: ${locations.length} ta, Brands: ${brands.length} ta`);
         
         const role = await db('roles').where('role_name', role_name).first();
         if (!role) {
@@ -255,13 +353,43 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
             return res.status(404).json({ message: 'Rol topilmadi' });
         }
         
-        // null qiymatni qo'llab-quvvatlash
-        await db('roles').where('role_name', role_name).update({
-            requires_brands: requires_brands === null || requires_brands === undefined ? null : Boolean(requires_brands),
-            requires_locations: requires_locations === null || requires_locations === undefined ? null : Boolean(requires_locations)
+        // superadmin rolini o'zgartirishga ruxsat berilmaydi
+        if (role_name === 'superadmin' || role_name === 'super_admin') {
+            return res.status(403).json({ message: 'Superadmin rolini o\'zgartirish mumkin emas.' });
+        }
+        
+        await db.transaction(async trx => {
+            // null qiymatni qo'llab-quvvatlash
+            await trx('roles').where('role_name', role_name).update({
+                requires_brands: requires_brands === null || requires_brands === undefined ? null : Boolean(requires_brands),
+                requires_locations: requires_locations === null || requires_locations === undefined ? null : Boolean(requires_locations)
+            });
+            
+            // Eski filiallarni o'chirish va yangilarini qo'shish
+            await trx('role_locations').where('role_name', role_name).del();
+            if (locations && locations.length > 0) {
+                const locationRecords = locations.map(loc => ({
+                    role_name: role_name,
+                    location_name: loc
+                }));
+                await trx('role_locations').insert(locationRecords);
+            }
+            
+            // Eski brendlarni o'chirish va yangilarini qo'shish
+            await trx('role_brands').where('role_name', role_name).del();
+            if (brands && brands.length > 0) {
+                const brandRecords = brands.map(brandId => ({
+                    role_name: role_name,
+                    brand_id: parseInt(brandId)
+                }));
+                await trx('role_brands').insert(brandRecords);
+            }
         });
         
         console.log(`✅ [ROLES] Rol talablari yangilandi: ${role_name}`);
+        
+        // Rol o'zgargani uchun shu roldagi barcha foydalanuvchilarning sessiyalarini yangilash
+        await refreshSessionsByRole(role_name);
         
         // Log to audit
         await db('audit_logs').insert({
@@ -270,8 +398,10 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
             target_type: 'role',
             target_id: role_name,
             details: JSON.stringify({ 
-                requires_brands: Boolean(requires_brands), 
-                requires_locations: Boolean(requires_locations) 
+                requires_brands: requires_brands,
+                requires_locations: requires_locations,
+                locations_count: locations.length,
+                brands_count: brands.length
             }),
             ip_address: req.session.ip_address,
             user_agent: req.session.user_agent
@@ -283,6 +413,75 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
     } catch (error) {
         console.error('Update role requirements error:', error);
         res.status(500).json({ message: 'Rol talablarini yangilashda xatolik' });
+    }
+});
+
+// Delete role
+router.delete('/:role_name', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    const { role_name } = req.params;
+    
+    try {
+        // Superadmin roli o'chirilmaydi
+        if (role_name === 'superadmin' || role_name === 'super_admin') {
+            return res.status(403).json({ message: "Superadmin roli o'chirilmaydi." });
+        }
+        
+        const role = await db('roles').where('role_name', role_name).first();
+        if (!role) {
+            return res.status(404).json({ message: 'Rol topilmadi' });
+        }
+        
+        // Bu roldagi foydalanuvchilar borligini tekshirish
+        const usersWithRole = await db('users').where('role', role_name).count('* as count').first();
+        if (usersWithRole && parseInt(usersWithRole.count) > 0) {
+            return res.status(400).json({ 
+                message: `Bu rolda ${usersWithRole.count} ta foydalanuvchi mavjud. Avval foydalanuvchilarning rolini o'zgartiring.` 
+            });
+        }
+        
+        const adminId = req.session.user.id;
+        const username = req.session.user?.username || 'admin';
+        
+        console.log(`📝 [ROLES] Rol o'chirilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
+        
+        await db.transaction(async trx => {
+            // Rol bilan bog'liq barcha ma'lumotlarni o'chirish
+            await trx('role_permissions').where('role_name', role_name).del();
+            await trx('role_locations').where('role_name', role_name).del();
+            await trx('role_brands').where('role_name', role_name).del();
+            await trx('roles').where('role_name', role_name).del();
+        });
+        
+        console.log(`✅ [ROLES] Rol muvaffaqiyatli o'chirildi: ${role_name}`);
+        
+        // Log to audit
+        await db('audit_logs').insert({
+            user_id: adminId,
+            action: 'delete_role',
+            target_type: 'role',
+            target_id: role_name,
+            details: JSON.stringify({ role_name }),
+            ip_address: req.session.ip_address,
+            user_agent: req.session.user_agent
+        });
+        
+        console.log(`📋 [ROLES] Audit log yozildi. Action: delete_role, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
+        
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [ROLES] Rol o'chirildi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('role_deleted', {
+                role_name: role_name,
+                deleted_by: adminId,
+                deleted_by_username: username
+            });
+            console.log(`✅ [ROLES] WebSocket yuborildi: role_deleted`);
+        }
+        
+        res.json({ message: 'Rol muvaffaqiyatli o\'chirildi' });
+    } catch (error) {
+        console.error('Delete role error:', error);
+        res.status(500).json({ message: 'Rolni o\'chirishda xatolik' });
     }
 });
 

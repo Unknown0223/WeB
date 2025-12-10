@@ -57,7 +57,8 @@ document.addEventListener('DOMContentLoaded', () => {
         pagination: {
             currentPage: 1,
             pages: 1
-        }
+        },
+        existingDates: {} // Boshlang'ich qiymat
     };
     
     // Global o'zgaruvchilar
@@ -350,10 +351,15 @@ const renderKpiCards = (stats) => {
 
         if (DOM.savedReportsList) DOM.savedReportsList.innerHTML = Array(5).fill('<div class="skeleton-item"></div>').join('');
         try {
-            const params = new URLSearchParams(state.filters);
+            const params = new URLSearchParams(state.filters || {});
             const res = await fetch(`/api/reports?${params.toString()}`);
             if (!res.ok) {
-                const errorData = await res.json();
+                let errorData;
+                try {
+                    errorData = await res.json();
+                } catch (e) {
+                    errorData = { message: `Server xatolik: ${res.status} ${res.statusText}` };
+                }
                 throw new Error(errorData.message || "Hisobotlarni yuklashda xatolik.");
             }
             
@@ -431,6 +437,11 @@ const renderKpiCards = (stats) => {
         const formattedDate = datePickerFP.selectedDates.length > 0
             ? flatpickr.formatDate(datePickerFP.selectedDates[0], 'Y-m-d')
             : null;
+
+        // existingDates ni tekshirish va boshlang'ich qiymatni o'rnatish
+        if (!state.existingDates) {
+            state.existingDates = {};
+        }
 
         if (state.existingDates[location] && state.existingDates[location].has(formattedDate)) {
             DOM.datePickerWrapper.classList.add('date-invalid');
@@ -692,10 +703,10 @@ const renderKpiCards = (stats) => {
 
     function updateUIForReportState() {
         const isNew = state.currentReportId === null;
-        const report = state.savedReports[state.currentReportId];
-        const canEdit = report && (state.currentUser.permissions.includes('reports:edit_all') ||
-                        (state.currentUser.permissions.includes('reports:edit_assigned') && state.currentUser.locations.includes(report.location)) ||
-                        (state.currentUser.permissions.includes('reports:edit_own') && report.created_by === state.currentUser.id));
+        const report = state.currentReportId !== null ? state.savedReports?.[state.currentReportId] : null;
+        const canEdit = report && (state.currentUser?.permissions?.includes('reports:edit_all') ||
+                        (state.currentUser?.permissions?.includes('reports:edit_assigned') && state.currentUser?.locations?.includes(report.location)) ||
+                        (state.currentUser?.permissions?.includes('reports:edit_own') && report.created_by === state.currentUser?.id));
         
         if (DOM.confirmBtn) DOM.confirmBtn.classList.toggle('hidden', !state.isEditMode);
         if (DOM.editBtn) DOM.editBtn.classList.toggle('hidden', isNew || state.isEditMode || !canEdit);
@@ -743,7 +754,7 @@ const renderKpiCards = (stats) => {
     }
 
     async function loadReport(reportId) {
-        const report = state.savedReports[reportId];
+        const report = state.savedReports?.[reportId];
         if (!report) {
             console.error('❌ Hisobot topilmadi:', reportId);
             return;
@@ -842,6 +853,11 @@ const renderKpiCards = (stats) => {
         const formattedDate = flatpickr.formatDate(selectedDate, 'Y-m-d');
         const location = DOM.locationSelect.value;
         const isUpdating = state.currentReportId && state.isEditMode;
+
+        // existingDates ni tekshirish va boshlang'ich qiymatni o'rnatish
+        if (!state.existingDates) {
+            state.existingDates = {};
+        }
 
         if (!isUpdating && state.existingDates[location] && state.existingDates[location].has(formattedDate)) {
             showToast(`"${location}" filiali uchun bu sanada hisobot mavjud!`, true);

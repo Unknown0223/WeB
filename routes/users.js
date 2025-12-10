@@ -58,10 +58,12 @@ function getCountryName(countryCode) {
 router.get('/', isAuthenticated, hasPermission('users:view'), async (req, res) => {
     try {
         const users = await userRepository.getAllUsersWithDetails();
-        // Super admin'ni faqat super admin o'zi ko'rsin
+        // Superadmin'ni faqat superadmin o'zi ko'rsin
         const currentUserRole = req.session.user?.role;
         const filteredUsers = users.filter(user => {
-            if (user.role === 'super_admin' && currentUserRole !== 'super_admin') {
+            // Eski super_admin va yangi superadmin ni tekshirish
+            if ((user.role === 'super_admin' || user.role === 'superadmin') && 
+                currentUserRole !== 'superadmin' && currentUserRole !== 'super_admin') {
                 return false;
             }
             return true;
@@ -209,33 +211,52 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
         return res.status(400).json({ message: "Parol kamida 8 belgidan iborat bo'lishi kerak." });
     }
     
-    // Super admin yaratish faqat super admin tomonidan mumkin
-    if (role === 'super_admin' && currentUserRole !== 'super_admin') {
-        return res.status(403).json({ message: "Super admin yaratish faqat super admin tomonidan mumkin." });
+    // Superadmin yaratish faqat superadmin tomonidan mumkin
+    if ((role === 'superadmin' || role === 'super_admin') && 
+        currentUserRole !== 'superadmin' && currentUserRole !== 'super_admin') {
+        return res.status(403).json({ message: "Superadmin yaratish faqat superadmin tomonidan mumkin." });
     }
     
-    // Super admin faqat bitta bo'lishi kerak
-    if (role === 'super_admin') {
-        const existingSuperAdmin = await db('users').where({ role: 'super_admin' }).first();
+    // Superadmin faqat bitta bo'lishi kerak
+    if (role === 'superadmin' || role === 'super_admin') {
+        const existingSuperAdmin = await db('users')
+            .whereIn('role', ['superadmin', 'super_admin'])
+            .first();
         if (existingSuperAdmin) {
-            return res.status(403).json({ message: "Super admin faqat bitta bo'lishi mumkin. Mavjud super admin: " + existingSuperAdmin.username });
+            return res.status(403).json({ message: "Superadmin faqat bitta bo'lishi mumkin. Mavjud superadmin: " + existingSuperAdmin.username });
         }
     }
     
-    // Admin roli uchun shartlar ixtiyoriy (istalgan dotup yoki chegaralangan)
-    // Super admin uchun hech qanday shartlar yo'q (to'liq dotup)
-    if (role === 'super_admin' || role === 'admin') {
-        // Super admin va Admin uchun filiallar va brendlar shart emas (ixtiyoriy)
-    }
-    
-    // Operator yoki Manager uchun filiallar majburiy
-    if ((role === 'operator' || role === 'manager') && locations.length === 0) {
-        return res.status(400).json({ message: "Operator yoki Menejer uchun kamida bitta filial tanlanishi shart." });
-    }
-    
-    // Manager uchun brend belgilash majburiy
-    if (role === 'manager' && brands.length === 0) {
-        return res.status(400).json({ message: "Manager uchun kamida bitta brend tanlanishi shart." });
+    // Superadmin uchun hech qanday shartlar yo'q (to'liq dostup)
+    if (role === 'superadmin' || role === 'super_admin') {
+        // Superadmin uchun filiallar va brendlar shart emas
+    } else {
+        // Boshqa rollar uchun rol shartlarini tekshirish
+        const roleData = await db('roles').where('role_name', role).first();
+        if (roleData) {
+            const requiresLocations = roleData.requires_locations !== null && roleData.requires_locations !== undefined 
+                ? Boolean(roleData.requires_locations) 
+                : null;
+            const requiresBrands = roleData.requires_brands !== null && roleData.requires_brands !== undefined 
+                ? Boolean(roleData.requires_brands) 
+                : null;
+            
+            // Agar shartlar belgilanmagan bo'lsa (null), hech narsa ko'rinmaydi
+            // Shuning uchun kamida bitta filial yoki brend tanlanishi kerak
+            if (requiresLocations === null && requiresBrands === null) {
+                // Hech qanday shart belgilanmagan - hech narsa ko'rinmaydi
+                // Lekin foydalanuvchi yaratishda bu ruxsat beriladi (keyin rol shartlari belgilanadi)
+            } else {
+                // Agar filiallar majburiy bo'lsa
+                if (requiresLocations === true && locations.length === 0) {
+                    return res.status(400).json({ message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.` });
+                }
+                // Agar brendlar majburiy bo'lsa
+                if (requiresBrands === true && brands.length === 0) {
+                    return res.status(400).json({ message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.` });
+                }
+            }
+        }
     }
 
     try {
@@ -272,11 +293,25 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
                 });
         }
         
-        // Super admin yaratilganda avtomatik login qilish imkoniyati
-        // Super admin yaratilganda, login ma'lumotlarini qaytarish (faqat bir marta)
-        if (role === 'super_admin') {
+        // Superadmin yaratilganda avtomatik login qilish imkoniyati
+        // Superadmin yaratilganda, login ma'lumotlarini qaytarish (faqat bir marta)
+        if (role === 'superadmin' || role === 'super_admin') {
+            // WebSocket orqali realtime yuborish
+            if (global.broadcastWebSocket) {
+                console.log(`📡 [USERS] Yangi superadmin yaratildi, WebSocket orqali yuborilmoqda...`);
+                const newUser = await db('users').where('id', userId).first();
+                global.broadcastWebSocket('user_created', {
+                    userId: userId,
+                    username: username,
+                    fullname: fullname,
+                    role: role,
+                    created_by: adminId
+                });
+                console.log(`✅ [USERS] WebSocket yuborildi: user_created`);
+            }
+            
             return res.status(201).json({ 
-                message: "Super admin muvaffaqiyatli yaratildi.",
+                message: "Superadmin muvaffaqiyatli yaratildi.",
                 autoLogin: true,
                 loginData: {
                     username: username,
@@ -284,6 +319,21 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
                 },
                 redirectUrl: '/admin'
             });
+        }
+        
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Yangi foydalanuvchi yaratildi, WebSocket orqali yuborilmoqda...`);
+            const newUser = await db('users').where('id', userId).first();
+            global.broadcastWebSocket('user_created', {
+                userId: userId,
+                username: username,
+                fullname: fullname,
+                role: role,
+                status: 'active',
+                created_by: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: user_created`);
         }
         
         res.status(201).json({ 
@@ -311,32 +361,44 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
         return res.status(400).json({ message: "Rol kiritilishi shart." });
     }
     
-    // Super admin yaratish faqat super admin tomonidan mumkin
-    if (role === 'super_admin' && currentUserRole !== 'super_admin') {
-        return res.status(403).json({ message: "Super admin yaratish faqat super admin tomonidan mumkin." });
+    // Superadmin yaratish faqat superadmin tomonidan mumkin
+    if ((role === 'superadmin' || role === 'super_admin') && 
+        currentUserRole !== 'superadmin' && currentUserRole !== 'super_admin') {
+        return res.status(403).json({ message: "Superadmin yaratish faqat superadmin tomonidan mumkin." });
     }
     
-    // Admin role'ni yaratish mumkin emas - faqat super admin yaratiladi
-    if (role === 'admin') {
-        return res.status(403).json({ message: "Admin role'ni yaratish mumkin emas. Faqat super admin yaratiladi." });
-    }
-    
-    if ((role === 'operator' || role === 'manager') && locations.length === 0) {
-        return res.status(400).json({ message: "Operator yoki Menejer uchun kamida bitta filial tanlanishi shart." });
-    }
-    
-    // Manager uchun brend belgilash majburiy
-    if (role === 'manager' && brands.length === 0) {
-        return res.status(400).json({ message: "Manager uchun kamida bitta brend tanlanishi shart." });
+    // Superadmin uchun hech qanday shartlar yo'q
+    if (role === 'superadmin' || role === 'super_admin') {
+        // Superadmin uchun filiallar va brendlar shart emas
+    } else {
+        // Boshqa rollar uchun rol shartlarini tekshirish
+        const roleData = await db('roles').where('role_name', role).first();
+        if (roleData) {
+            const requiresLocations = roleData.requires_locations !== null && roleData.requires_locations !== undefined 
+                ? Boolean(roleData.requires_locations) 
+                : null;
+            const requiresBrands = roleData.requires_brands !== null && roleData.requires_brands !== undefined 
+                ? Boolean(roleData.requires_brands) 
+                : null;
+            
+            // Agar filiallar majburiy bo'lsa
+            if (requiresLocations === true && locations.length === 0) {
+                return res.status(400).json({ message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.` });
+            }
+            // Agar brendlar majburiy bo'lsa
+            if (requiresBrands === true && brands.length === 0) {
+                return res.status(400).json({ message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.` });
+            }
+        }
     }
 
     try {
         await userRepository.updateUser(adminId, userId, role, device_limit, fullname, ipAddress, userAgent);
         await userRepository.updateUserLocations(adminId, userId, locations, ipAddress, userAgent);
         
-        // Manager uchun brendlarni yangilash
+        // Brendlarni yangilash
         await db('user_brands').where('user_id', userId).del();
-        if (role === 'manager' && brands.length > 0) {
+        if (brands && brands.length > 0) {
             const brandRecords = brands.map(brandId => ({
                 user_id: userId,
                 brand_id: brandId
@@ -362,6 +424,21 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
         }
 
         await refreshUserSessions(parseInt(userId, 10));
+
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Foydalanuvchi yangilandi, WebSocket orqali yuborilmoqda...`);
+            const updatedUser = await db('users').where('id', userId).first();
+            global.broadcastWebSocket('user_updated', {
+                userId: parseInt(userId),
+                username: updatedUser?.username,
+                fullname: updatedUser?.fullname,
+                role: updatedUser?.role,
+                status: updatedUser?.status,
+                updated_by: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: user_updated`);
+        }
 
         res.json({ message: "Foydalanuvchi ma'lumotlari muvaffaqiyatli yangilandi." });
     } catch (error) {
@@ -453,12 +530,13 @@ router.put('/:id/approve', (req, res, next) => {
         return res.status(400).json({ message: "Rol tanlanishi shart." });
     }
     
-    // Super admin yaratish faqat super admin tomonidan mumkin
-    if (role === 'super_admin' && currentUserRole !== 'super_admin') {
-        console.error(`❌ [BACKEND] 2. XATOLIK: Super admin yaratishga urinish!`);
+    // Superadmin yaratish faqat superadmin tomonidan mumkin
+    if ((role === 'superadmin' || role === 'super_admin') && 
+        currentUserRole !== 'superadmin' && currentUserRole !== 'super_admin') {
+        console.error(`❌ [BACKEND] 2. XATOLIK: Superadmin yaratishga urinish!`);
         console.error(`   - Requested role: ${role}`);
         console.error(`   - Current user role: ${currentUserRole}`);
-        return res.status(403).json({ message: "Super admin yaratish faqat super admin tomonidan mumkin." });
+        return res.status(403).json({ message: "Superadmin yaratish faqat superadmin tomonidan mumkin." });
     }
     
     // Rol bazada mavjudligini tekshirish va talablarini olish
@@ -619,10 +697,10 @@ router.put('/:id/approve', (req, res, next) => {
                 console.log(`   - Filiallar qo'shilmadi (bo'sh)`);
             }
             
-            // Manager va Admin uchun brendlarni saqlash
+            // Brendlarni saqlash (agar rol shartlari bo'yicha kerak bo'lsa)
             console.log(`   - Eski brendlarni o'chirish...`);
             await trx('user_brands').where({ user_id: userId }).del();
-            if ((role === 'manager' || role === 'admin') && brands && brands.length > 0) {
+            if (brands && brands.length > 0) {
                 console.log(`   - Yangi brendlarni qo'shish: ${brands.length} ta`);
                 const brandRecords = brands.map(brandId => ({
                     user_id: userId,
@@ -631,7 +709,7 @@ router.put('/:id/approve', (req, res, next) => {
                 await trx('user_brands').insert(brandRecords);
                 console.log(`   ✅ Brendlar saqlandi:`, brands);
             } else {
-                console.log(`   - Brendlar qo'shilmadi (bo'sh yoki rol mos emas)`);
+                console.log(`   - Brendlar qo'shilmadi (bo'sh)`);
             }
         });
         console.log(`✅ [BACKEND] 7. Ma'lumotlar muvaffaqiyatli saqlandi`);
@@ -780,6 +858,19 @@ router.put('/:id/password', isAuthenticated, hasPermission('users:change_passwor
     }
     try {
         await userRepository.updateUserPassword(adminId, req.params.id, newPassword, ipAddress, userAgent);
+        
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Parol o'zgartirildi, WebSocket orqali yuborilmoqda...`);
+            const user = await db('users').where('id', req.params.id).first();
+            global.broadcastWebSocket('user_password_changed', {
+                userId: parseInt(req.params.id),
+                username: user?.username,
+                changed_by: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: user_password_changed`);
+        }
+        
         res.json({ message: "Parol muvaffaqiyatli yangilandi." });
     } catch (error) {
         console.error(`/api/users/${req.params.id}/password PUT xatoligi:`, error);
@@ -799,6 +890,19 @@ router.put('/:id/secret-word', isAuthenticated, hasPermission('users:set_secret_
     }
     try {
         await userRepository.updateUserSecretWord(adminId, req.params.id, secretWord, ipAddress, userAgent);
+        
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Maxfiy so'z o'zgartirildi, WebSocket orqali yuborilmoqda...`);
+            const user = await db('users').where('id', req.params.id).first();
+            global.broadcastWebSocket('user_secret_word_changed', {
+                userId: parseInt(req.params.id),
+                username: user?.username,
+                changed_by: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: user_secret_word_changed`);
+        }
+        
         res.json({ message: "Maxfiy so'z muvaffaqiyatli o'rnatildi/yangilandi." });
     } catch (error) {
         console.error(`/api/users/${req.params.id}/secret-word PUT xatoligi:`, error);
@@ -875,6 +979,20 @@ router.post('/:id/permissions', isAuthenticated, hasPermission('roles:manage'), 
         const { refreshUserSessions } = require('../utils/sessionManager.js');
         await refreshUserSessions(parseInt(userId));
 
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Foydalanuvchi huquqlari yangilandi, WebSocket orqali yuborilmoqda...`);
+            const user = await db('users').where('id', userId).first();
+            global.broadcastWebSocket('user_permissions_updated', {
+                userId: parseInt(userId),
+                username: user?.username,
+                type: type,
+                permissions_count: permissions.length,
+                updated_by: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: user_permissions_updated`);
+        }
+
         res.json({ message: 'Huquqlar muvaffaqiyatli saqlandi' });
     } catch (error) {
         console.error('Save user permissions error:', error);
@@ -905,6 +1023,18 @@ router.delete('/:id/permissions', isAuthenticated, hasPermission('roles:manage')
         // Foydalanuvchining sessiyasini yangilash
         const { refreshUserSessions } = require('../utils/sessionManager.js');
         await refreshUserSessions(parseInt(userId));
+
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Foydalanuvchi huquqlari tiklandi, WebSocket orqali yuborilmoqda...`);
+            const user = await db('users').where('id', userId).first();
+            global.broadcastWebSocket('user_permissions_reset', {
+                userId: parseInt(userId),
+                username: user?.username,
+                reset_by: adminId
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: user_permissions_reset`);
+        }
 
         res.json({ message: 'Barcha maxsus huquqlar o\'chirildi' });
     } catch (error) {
