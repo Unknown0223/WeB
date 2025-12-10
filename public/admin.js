@@ -123,7 +123,7 @@ async function init() {
         }
         
         // Komponentlarni render qilish
-        renderAllComponents();
+        await renderAllComponents();
         
         // Event listener'larni o'rnatish
         setupEventListeners();
@@ -147,7 +147,7 @@ async function init() {
     }
 }
 
-function renderAllComponents() {
+async function renderAllComponents() {
     if (hasPermission(state.currentUser, 'dashboard:view')) {
         setupDashboard();
         if (DOM.employeeStatisticsPage) {
@@ -180,7 +180,7 @@ function renderAllComponents() {
     }
     
     if (hasPermission(state.currentUser, 'comparison:view')) {
-        setupComparison();
+        await setupComparison();
     }
     
     if (hasPermission(state.currentUser, 'roles:manage')) {

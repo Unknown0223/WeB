@@ -17,27 +17,75 @@ let isLoadingData = false; // Ma'lumotlar yuklanayotganini kuzatish
 /**
  * Comparison bo'limini sozlash
  */
-export function setupComparison() {
+export async function setupComparison() {
     if (!hasPermission(state.currentUser, 'comparison:view')) {
         return;
     }
 
     // Agar allaqachon sozlangan bo'lsa, faqat ma'lumotlarni yangilash
     if (isComparisonSetup) {
-        loadBrands();
+        await loadBrands();
         return;
     }
 
-    // Bugungi sanani default qilib o'rnatish
+    // Kalendar sozlash (Flatpickr)
     const dateFilter = document.getElementById('comparison-date-filter');
+    let datePickerInstance = null;
     if (dateFilter) {
-        const today = new Date().toISOString().split('T')[0];
-        dateFilter.value = today;
-        currentDate = today;
+        // Feather iconlarni yangilash
+        if (window.feather) {
+            window.feather.replace();
+        }
+        
+        // Flatpickr sozlash
+        if (window.flatpickr) {
+            const today = new Date();
+            datePickerInstance = flatpickr(dateFilter, {
+                locale: 'uz',
+                dateFormat: 'd.m.Y',
+                defaultDate: today,
+                altInput: false,
+                static: false,
+                allowInput: false,
+                onChange: (selectedDates) => {
+                    if (selectedDates.length > 0) {
+                        currentDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
+                    } else {
+                        currentDate = null;
+                    }
+                }
+            });
+            
+            // Bugungi sanani default qilib o'rnatish
+            currentDate = flatpickr.formatDate(today, 'Y-m-d');
+        } else {
+            // Fallback: oddiy date input
+            const today = new Date().toISOString().split('T')[0];
+            dateFilter.value = today;
+            currentDate = today;
+            dateFilter.addEventListener('change', (e) => {
+                currentDate = e.target.value;
+            });
+        }
     }
 
     // Brendlar ro'yxatini yuklash
-    loadBrands();
+    await loadBrands();
+
+    // Brend tanlash tugmasi
+    const selectBrandBtn = document.getElementById('comparison-select-brand-btn');
+    if (selectBrandBtn) {
+        selectBrandBtn.addEventListener('click', () => {
+            openComparisonBrandSelectModal();
+        });
+    }
+
+    // Agar brend tanlangan bo'lsa, display'ni yangilash
+    if (currentBrandId && currentBrandName) {
+        updateComparisonBrandDisplay(currentBrandId, currentBrandName);
+    } else {
+        updateComparisonBrandDisplay(null, null);
+    }
 
     // Event listener'lar
     const loadBtn = document.getElementById('comparison-load-btn');
@@ -83,35 +131,6 @@ export function setupComparison() {
         });
     }
 
-    // Sana o'zgarganda
-    if (dateFilter) {
-        dateFilter.addEventListener('change', (e) => {
-            currentDate = e.target.value;
-        });
-    }
-
-    // Brend o'zgarganda
-    const brandSelect = document.getElementById('comparison-brand-select');
-    if (brandSelect) {
-        brandSelect.addEventListener('change', (e) => {
-            currentBrandId = e.target.value;
-            const selectedOption = brandSelect.options[brandSelect.selectedIndex];
-            currentBrandName = selectedOption.text;
-            
-            // Tanlangan brendni ko'rsatish
-            const selectedBrandDiv = document.getElementById('comparison-selected-brand');
-            const brandNameSpan = document.getElementById('comparison-brand-name');
-            if (selectedBrandDiv && brandNameSpan) {
-                if (currentBrandId) {
-                    brandNameSpan.textContent = currentBrandName;
-                    selectedBrandDiv.classList.add('show');
-                } else {
-                    selectedBrandDiv.classList.remove('show');
-                }
-            }
-        });
-    }
-
     // Setup tugallandi
     isComparisonSetup = true;
 }
@@ -147,6 +166,180 @@ async function loadBrands() {
 }
 
 /**
+ * Comparison brend tanlash modalini ochish
+ */
+async function openComparisonBrandSelectModal() {
+    const modal = document.getElementById('comparison-brand-select-modal');
+    if (!modal) return;
+
+    try {
+        const res = await safeFetch('/api/brands');
+        if (!res || !res.ok) {
+            showToast('Brendlarni yuklashda xatolik', true);
+            return;
+        }
+
+        const brands = await res.json();
+        const list = document.getElementById('comparison-brand-modal-list');
+        if (!list) return;
+
+        // Tanlangan brendni aniqlash
+        const selectedBrandId = currentBrandId ? parseInt(currentBrandId) : null;
+
+        // Brendlarni list ko'rinishida render qilish (ixcham va chiroyli)
+        list.innerHTML = brands.map(brand => {
+            const isSelected = selectedBrandId === brand.id;
+            return `
+                <div class="modal-list-item ${isSelected ? 'selected' : ''}" 
+                     onclick="window.toggleComparisonBrandSelection(${brand.id}, this)"
+                     style="cursor: pointer; padding: 12px 15px; border: 2px solid ${isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.1)'}; border-radius: 8px; background: ${isSelected ? 'linear-gradient(135deg, rgba(0, 123, 255, 0.15), rgba(138, 43, 226, 0.1))' : 'rgba(0,0,0,0.2)'}; transition: all 0.2s; position: relative; display: flex; align-items: center; gap: 12px;"
+                     onmouseover="if(!this.classList.contains('selected')) { this.style.borderColor='rgba(0, 123, 255, 0.5)'; this.style.background='rgba(0, 123, 255, 0.05)'; }"
+                     onmouseout="if(!this.classList.contains('selected')) { this.style.borderColor='rgba(255,255,255,0.1)'; this.style.background='rgba(0,0,0,0.2)'; }">
+                    <div style="font-size: 24px; filter: ${isSelected ? 'drop-shadow(0 0 8px rgba(0, 123, 255, 0.5))' : 'none'}; transition: all 0.2s;">🏷️</div>
+                    <div class="item-name" style="flex: 1; font-weight: 500; font-size: 14px; color: ${isSelected ? 'var(--primary)' : 'var(--text-primary)'};">
+                        ${brand.name}
+                    </div>
+                    ${isSelected ? '<div style="width: 24px; height: 24px; background: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; color: white; font-weight: bold;">✓</div>' : '<div style="width: 24px; height: 24px;"></div>'}
+                </div>
+            `;
+        }).join('');
+
+        // Qidiruv funksiyasi
+        const searchInput = document.getElementById('comparison-brand-search-input');
+        if (searchInput) {
+            searchInput.value = '';
+            searchInput.oninput = (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                const items = list.querySelectorAll('.modal-list-item');
+                items.forEach(item => {
+                    const brandName = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
+                    item.style.display = brandName.includes(searchTerm) ? 'block' : 'none';
+                });
+            };
+        }
+
+        // Saqlash tugmasi
+        const saveBtn = document.getElementById('save-comparison-brand-btn');
+        if (saveBtn) {
+            saveBtn.onclick = () => {
+                const selectedItem = list.querySelector('.modal-list-item.selected');
+                if (!selectedItem) {
+                    showToast('Iltimos, brendni tanlang', true);
+                    return;
+                }
+
+                const brandId = selectedItem.getAttribute('onclick')?.match(/\((\d+)/)?.[1];
+                const brandName = selectedItem.querySelector('.item-name')?.textContent;
+
+                if (brandId && brandName) {
+                    currentBrandId = brandId;
+                    currentBrandName = brandName;
+                    
+                    // Hidden select'ni yangilash
+                    const select = document.getElementById('comparison-brand-select');
+                    if (select) {
+                        select.value = brandId;
+                    }
+
+                    // Display'ni yangilash
+                    updateComparisonBrandDisplay(brandId, brandName);
+
+                    // Modalni yopish
+                    modal.classList.add('hidden');
+                }
+            };
+        }
+
+        // Modalni ochish
+        modal.classList.remove('hidden');
+    } catch (error) {
+        showToast('Brendlarni yuklashda xatolik', true);
+    }
+}
+
+/**
+ * Comparison brend tanlashini toggle qilish
+ */
+window.toggleComparisonBrandSelection = function(brandId, element) {
+    const list = document.getElementById('comparison-brand-modal-list');
+    if (!list) return;
+
+    // Barcha itemlardan selected class'ni olib tashlash
+    list.querySelectorAll('.modal-list-item').forEach(item => {
+        item.classList.remove('selected');
+        item.style.borderColor = 'rgba(255,255,255,0.1)';
+        item.style.background = 'rgba(0,0,0,0.2)';
+        const radio = item.querySelector('input[type="radio"]');
+        if (radio) radio.checked = false;
+    });
+
+    // Tanlangan itemni belgilash
+    element.classList.add('selected');
+    element.style.borderColor = 'var(--primary)';
+    element.style.background = 'rgba(0, 123, 255, 0.1)';
+    const radio = element.querySelector('input[type="radio"]');
+    if (radio) radio.checked = true;
+};
+
+/**
+ * Comparison brend display'ni yangilash
+ */
+function updateComparisonBrandDisplay(brandId, brandName) {
+    const btn = document.getElementById('comparison-select-brand-btn');
+    const btnText = document.getElementById('comparison-brand-btn-text');
+    const removeBtn = document.getElementById('comparison-brand-remove-btn');
+    
+    if (!btn || !btnText || !removeBtn) return;
+
+    if (brandId && brandName) {
+        // Brend tanlangan - tugma o'rniga brend nomini ko'rsatish
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-primary');
+        btn.style.background = 'linear-gradient(135deg, rgba(0, 123, 255, 0.15), rgba(138, 43, 226, 0.1))';
+        btn.style.border = '2px solid var(--primary)';
+        btn.style.height = '42px'; // Bir xil balandlik
+        
+        btnText.innerHTML = `
+            <span style="font-size: 18px; margin-right: 8px;">🏷️</span>
+            <span style="font-weight: 500; font-size: 14px;">${brandName}</span>
+        `;
+        
+        removeBtn.style.display = 'flex';
+    } else {
+        // Brend tanlanmagan - "Brendni tanlash" tugmasi
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline-primary');
+        btn.style.background = '';
+        btn.style.border = '';
+        btn.style.height = '42px'; // Bir xil balandlik
+        
+        btnText.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+            </svg>
+            <span>Brendni tanlash</span>
+        `;
+        
+        removeBtn.style.display = 'none';
+    }
+}
+
+/**
+ * Comparison brendni olib tashlash
+ */
+window.removeComparisonBrand = function() {
+    currentBrandId = null;
+    currentBrandName = null;
+    
+    const select = document.getElementById('comparison-brand-select');
+    if (select) {
+        select.value = '';
+    }
+
+    updateComparisonBrandDisplay(null, null);
+};
+
+/**
  * Solishtirish ma'lumotlarini yuklash
  */
 async function loadComparisonData() {
@@ -163,10 +356,20 @@ async function loadComparisonData() {
     const saveBtn = document.getElementById('comparison-save-btn');
     const exportBtn = document.getElementById('comparison-export-btn');
 
-    if (!dateFilter || !brandSelect) return;
+    if (!dateFilter) return;
 
-    const date = dateFilter.value;
-    const brandId = brandSelect.value;
+    // Sana olish (flatpickr yoki oddiy input)
+    let date = currentDate;
+    if (!date && window.flatpickr && dateFilter._flatpickr) {
+        const selectedDates = dateFilter._flatpickr.selectedDates;
+        if (selectedDates.length > 0) {
+            date = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
+        }
+    } else if (!date) {
+        date = dateFilter.value;
+    }
+
+    const brandId = currentBrandId || (brandSelect ? brandSelect.value : null);
 
     // Loading flag'ni o'rnatish
     isLoadingData = true;
@@ -185,8 +388,16 @@ async function loadComparisonData() {
 
     currentDate = date;
     currentBrandId = brandId;
-    const selectedOption = brandSelect.options[brandSelect.selectedIndex];
-    currentBrandName = selectedOption.text;
+    
+    // Brend nomini olish
+    if (brandSelect && brandSelect.value) {
+        const selectedOption = brandSelect.options[brandSelect.selectedIndex];
+        currentBrandName = selectedOption ? selectedOption.text : null;
+    } else if (currentBrandName) {
+        // currentBrandName allaqachon o'rnatilgan
+    } else {
+        currentBrandName = null;
+    }
 
     try {
         if (loadBtn) {

@@ -81,7 +81,9 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
         const allReports = await allReportsQuery;
         
         // Endi data ichidan brand_id ni tekshirib, faqat tanlangan brand_id uchun filtrlash
+        // BrandId'ni to'g'ri formatlash - string va number variantlarini tekshirish
         const targetBrandId = String(parseInt(brandId));
+        const targetBrandIdNum = parseInt(brandId);
         const reports = [];
         
         for (const report of allReports) {
@@ -136,9 +138,18 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 for (const key in reportData) {
                     // Key format: {brandId}_{columnName}
                     const parts = key.split('_');
-                    if (parts.length >= 2 && parts[0] === targetBrandId) {
-                        const value = parseFloat(reportData[key]) || 0;
-                        reportTotal += value;
+                    if (parts.length >= 2) {
+                        const keyBrandId = parts[0];
+                        // BrandId'ni string va number formatida tekshirish
+                        const isMatch = keyBrandId === targetBrandId || 
+                                      keyBrandId === String(targetBrandIdNum) || 
+                                      parseInt(keyBrandId) === targetBrandIdNum ||
+                                      String(keyBrandId) === String(targetBrandId);
+                        
+                        if (isMatch) {
+                            const value = parseFloat(reportData[key]) || 0;
+                            reportTotal += value;
+                        }
                     }
                 }
                 
@@ -277,27 +288,89 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             if (!location) continue;
 
             // Operator summasini olish
-            const reports = await db('reports as r')
-                .select('r.data', 'r.currency')
+            // Avval brand_id bilan qidirish
+            let reports = await db('reports as r')
+                .select('r.data', 'r.currency', 'r.brand_id', 'r.location', 'r.report_date')
                 .where('r.report_date', date)
                 .where('r.brand_id', brandId)
                 .where('r.location', location);
+            
+            // Agar brand_id bilan topilmasa, barcha reports'ni olish va data ichidan tekshirish
+            if (reports.length === 0) {
+                const allReports = await db('reports as r')
+                    .select('r.data', 'r.currency', 'r.brand_id', 'r.location', 'r.report_date')
+                    .where('r.report_date', date)
+                    .where('r.location', location);
+                
+                // Data ichidan brandId'ni tekshirish
+                const targetBrandIdStr = String(brandId);
+                const targetBrandIdNum = parseInt(brandId);
+                
+                for (const report of allReports) {
+                    try {
+                        const reportData = JSON.parse(report.data || '{}');
+                        let hasBrandId = false;
+                        
+                        for (const key in reportData) {
+                            const parts = key.split('_');
+                            if (parts.length >= 2) {
+                                const keyBrandId = parts[0];
+                                const isMatch = keyBrandId === targetBrandIdStr || 
+                                              keyBrandId === String(targetBrandIdNum) || 
+                                              parseInt(keyBrandId) === targetBrandIdNum ||
+                                              String(keyBrandId) === String(targetBrandIdStr);
+                                
+                                if (isMatch) {
+                                    hasBrandId = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (hasBrandId) {
+                            reports.push(report);
+                        }
+                    } catch (error) {
+                        // Silent error handling
+                    }
+                }
+            }
 
             let operatorAmount = 0;
             const targetBrandIdStr = String(brandId);
+            const targetBrandIdNum = parseInt(brandId);
+            
+            if (reports.length === 0) {
+                console.warn(`⚠️ [COMPARISON] Report topilmadi: date=${date}, brand_id=${brandId}, location=${location}`);
+            }
+            
             for (const report of reports) {
                 try {
                     const reportData = JSON.parse(report.data || '{}');
+                    let reportTotal = 0;
+                    
                     for (const key in reportData) {
                         // Key format: {brandId}_{columnName}
                         const parts = key.split('_');
-                        if (parts.length >= 2 && parts[0] === targetBrandIdStr) {
+                        if (parts.length >= 2) {
+                            const keyBrandId = parts[0];
                             const value = parseFloat(reportData[key]) || 0;
-                            operatorAmount += value;
+                            
+                            // BrandId'ni string va number formatida tekshirish
+                            const isMatch = keyBrandId === targetBrandIdStr || 
+                                          keyBrandId === String(targetBrandIdNum) || 
+                                          parseInt(keyBrandId) === targetBrandIdNum ||
+                                          String(keyBrandId) === String(targetBrandIdStr);
+                            
+                            if (isMatch) {
+                                reportTotal += value;
+                            }
                         }
                     }
+                    
+                    operatorAmount += reportTotal;
                 } catch (error) {
-                    // Silent error handling
+                    console.error(`❌ [COMPARISON] Report parse xatolik (location: ${location}):`, error.message);
                 }
             }
 
@@ -315,6 +388,11 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 .where('brand_id', brandId)
                 .where('location', location)
                 .first();
+
+            // Oldingi farqni saqlash (yangi farqlarni aniqlash uchun)
+            const oldDifference = existing ? existing.difference : null;
+            const oldOperatorAmount = existing ? existing.operator_amount : null;
+            const oldComparisonAmount = existing ? existing.comparison_amount : null;
 
             if (existing) {
                 // Yangilash
@@ -345,8 +423,27 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 savedCount++;
             }
 
-            // Farq bo'lsa, ro'yxatga qo'shish
-            if (difference !== null && difference !== 0) {
+            // Faqat yangi farqlarni ko'rsatish:
+            // 1. Agar oldingi saqlashda farq bo'lmagan (null yoki 0) va hozir farq bo'lsa - yangi farq
+            // 2. Agar oldingi saqlashda farq bo'lgan va hozir farq o'zgarganda - yangi farq
+            // 3. Agar oldingi saqlashda farq bo'lgan va hozir tuzatilgan (farq 0 ga teng) - farqni ko'rsatmaslik
+            // 4. Agar oldingi saqlashda farq bo'lgan va hozir ham farq bo'lsa, lekin farq o'zgarmagan - farqni ko'rsatmaslik
+            
+            const isNewDifference = difference !== null && difference !== 0 && (
+                // Yangi farq (oldingi saqlashda farq bo'lmagan)
+                (oldDifference === null || oldDifference === 0) ||
+                // Farq o'zgarganda (oldingi farqdan farq qiladi)
+                (oldDifference !== difference) ||
+                // Operator yoki comparison summa o'zgarganda
+                (oldOperatorAmount !== operatorAmount) ||
+                (oldComparisonAmount !== comparison_amount)
+            );
+
+            // Agar farq tuzatilgan bo'lsa (oldingi farq bo'lgan, hozir 0 ga teng) - ko'rsatmaslik
+            const isFixed = oldDifference !== null && oldDifference !== 0 && difference === 0;
+
+            // Faqat yangi farqlarni qo'shish
+            if (isNewDifference && !isFixed) {
                 differences.push({
                     location,
                     operator_amount: operatorAmount,
@@ -359,109 +456,63 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
 
         // Agar farqlar bo'lsa, barcha operatorlarga notification yaratish
         if (differences.length > 0) {
-            console.log(`🔔 [COMPARISON] ========================================`);
-            console.log(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial`);
-            console.log(`🔔 [COMPARISON] Brand: ${brandName}, Date: ${date}`);
-            console.log(`🔔 [COMPARISON] Farqlar ro'yxati:`, JSON.stringify(differences, null, 2));
+            console.log(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial, Brand: ${brandName}, Date: ${date}`);
             
             try {
-                // Barcha operatorlarni olish - barcha variantlarni tekshirish
-                console.log(`🔔 [COMPARISON] Operatorlarni qidirish boshlandi...`);
-                
-                // Avval barcha rollarni ko'rish
-                const allRoles = await db('users').distinct('role').pluck('role');
-                console.log(`🔔 [COMPARISON] Bazadagi barcha rollar:`, allRoles);
-                
-                // Barcha aktiv foydalanuvchilarni ko'rish
-                const allActiveUsers = await db('users')
-                    .where('status', 'active')
-                    .select('id', 'username', 'role', 'status');
-                console.log(`🔔 [COMPARISON] Barcha aktiv foydalanuvchilar:`, allActiveUsers);
-                
-                // Operatorlarni qidirish - turli variantlar
+                // Operatorlarni qidirish
                 let operators = await db('users')
                     .where('role', 'operator')
                     .where('status', 'active')
                     .select('id', 'username', 'role');
                 
-                console.log(`🔔 [COMPARISON] 'operator' roli bilan topilganlar: ${operators.length}`, operators);
-                
                 // Agar 'operator' bilan topilmasa, 'kassir' yoki boshqa variantlarni tekshirish
                 if (operators.length === 0) {
-                    console.log(`⚠️ [COMPARISON] 'operator' roli bilan topilmadi, boshqa variantlarni tekshirish...`);
-                    
-                    // 'kassir' roli bilan qidirish
                     const kassirUsers = await db('users')
                         .where('role', 'kassir')
                         .where('status', 'active')
                         .select('id', 'username', 'role');
-                    console.log(`🔔 [COMPARISON] 'kassir' roli bilan topilganlar: ${kassirUsers.length}`, kassirUsers);
                     
-                    // Barcha aktiv foydalanuvchilarni operator sifatida qabul qilish (test uchun)
                     if (kassirUsers.length === 0) {
-                        console.log(`⚠️ [COMPARISON] 'kassir' roli bilan ham topilmadi`);
-                        console.log(`⚠️ [COMPARISON] Test rejimida: barcha aktiv foydalanuvchilar operator sifatida qabul qilinadi`);
+                        const allActiveUsers = await db('users')
+                            .where('status', 'active')
+                            .select('id', 'username', 'role');
                         operators = allActiveUsers.map(u => ({ id: u.id, username: u.username, role: u.role }));
                     } else {
                         operators = kassirUsers;
                     }
                 }
-
-                console.log(`🔔 [COMPARISON] Yakuniy topilgan operatorlar soni: ${operators.length}`);
-                console.log(`🔔 [COMPARISON] Operatorlar ro'yxati:`, operators);
                 
                 if (operators.length === 0) {
-                    console.log(`⚠️ [COMPARISON] Hech qanday aktiv operator topilmadi`);
-                    console.log(`⚠️ [COMPARISON] Notification yuborilmaydi`);
-                }
-
-                // Har bir operator uchun notification yaratish
-                const notificationData = operators.map(operator => ({
-                    user_id: operator.id,
-                    type: 'comparison_difference',
-                    title: `Solishtirishda farqlar aniqlandi`,
-                    message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
-                    details: JSON.stringify({
-                        date,
-                        brand_id: brandId,
-                        brand_name: brandName,
-                        differences: differences,
-                        total_differences: differences.length
-                    }),
-                    is_read: false,
-                    created_at: db.fn.now()
-                }));
+                    console.warn(`⚠️ [COMPARISON] Hech qanday aktiv operator topilmadi, notification yuborilmaydi`);
+                } else {
+                    // Har bir operator uchun notification yaratish
+                    const notificationData = operators.map(operator => ({
+                        user_id: operator.id,
+                        type: 'comparison_difference',
+                        title: `Solishtirishda farqlar aniqlandi`,
+                        message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
+                        details: JSON.stringify({
+                            date,
+                            brand_id: brandId,
+                            brand_name: brandName,
+                            differences: differences,
+                            total_differences: differences.length
+                        }),
+                        is_read: false,
+                        created_at: db.fn.now()
+                    }));
 
                 if (notificationData.length > 0) {
-                    console.log(`💾 [COMPARISON] ${notificationData.length} ta notification yaratilmoqda...`);
-                    // Circular structure xatolikni oldini olish uchun faqat kerakli ma'lumotlarni ko'rsatish
-                    const notificationDataForLog = notificationData.map(n => ({
-                        user_id: n.user_id,
-                        type: n.type,
-                        title: n.title,
-                        message: n.message,
-                        details: n.details,
-                        is_read: n.is_read
-                    }));
-                    console.log(`💾 [COMPARISON] Notification data:`, JSON.stringify(notificationDataForLog, null, 2));
-                    
                     try {
                         await db('notifications').insert(notificationData);
-                        console.log(`✅ [COMPARISON] Notification'lar muvaffaqiyatli bazaga yozildi`);
+                        console.log(`✅ [COMPARISON] ${notificationData.length} ta notification yaratildi`);
                     } catch (insertError) {
-                        console.error(`❌ [COMPARISON] Notification'lar bazaga yozishda xatolik:`, insertError);
-                        console.error(`❌ [COMPARISON] Error message:`, insertError.message);
-                        console.error(`❌ [COMPARISON] Error stack:`, insertError.stack);
+                        console.error(`❌ [COMPARISON] Notification'lar bazaga yozishda xatolik:`, insertError.message);
                     }
                     
                     // WebSocket orqali realtime yuborish
                     try {
-                        console.log(`📡 [COMPARISON] WebSocket yuborishga harakat qilinmoqda...`);
-                        console.log(`📡 [COMPARISON] global.broadcastWebSocket mavjudligi:`, typeof global.broadcastWebSocket);
-                        
                         if (global.broadcastWebSocket) {
-                            console.log(`📡 [COMPARISON] WebSocket orqali realtime yuborilmoqda...`);
-                            
                             let successCount = 0;
                             let errorCount = 0;
                             
@@ -484,41 +535,25 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                                         }
                                     };
                                     
-                                    console.log(`📡 [COMPARISON] Operator ${operator.id} (${operator.username}) uchun yuborilmoqda...`);
-                                    console.log(`📡 [COMPARISON] Payload:`, JSON.stringify(wsPayload, null, 2));
-                                    
                                     global.broadcastWebSocket('comparison_difference', wsPayload);
                                     successCount++;
-                                    console.log(`✅ [COMPARISON] Operator ${operator.id} ga muvaffaqiyatli yuborildi`);
                                 } catch (operatorError) {
                                     errorCount++;
-                                    console.error(`❌ [COMPARISON] Operator ${operator.id} ga yuborishda xatolik:`, operatorError);
+                                    console.error(`❌ [COMPARISON] Operator ${operator.id} ga yuborishda xatolik:`, operatorError.message);
                                 }
                             }
                             
-                            console.log(`✅ [COMPARISON] WebSocket yuborish yakunlandi:`);
-                            console.log(`   - Muvaffaqiyatli: ${successCount} ta`);
-                            console.log(`   - Xatoliklar: ${errorCount} ta`);
-                        } else {
-                            console.log(`⚠️ [COMPARISON] global.broadcastWebSocket funksiyasi mavjud emas`);
-                            console.log(`⚠️ [COMPARISON] global obyekti:`, Object.keys(global));
+                            if (errorCount > 0) {
+                                console.warn(`⚠️ [COMPARISON] WebSocket yuborish: ${successCount} muvaffaqiyatli, ${errorCount} xatolik`);
+                            }
                         }
                     } catch (wsError) {
-                        console.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError);
-                        console.error(`❌ [COMPARISON] Error message:`, wsError.message);
-                        console.error(`❌ [COMPARISON] Error stack:`, wsError.stack);
+                        console.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError.message);
                     }
-                } else {
-                    console.log(`⚠️ [COMPARISON] Notification data bo'sh, yuborilmaydi`);
-                    console.log(`⚠️ [COMPARISON] Operators length: ${operators.length}`);
-                    console.log(`⚠️ [COMPARISON] Operators:`, operators);
                 }
             } catch (error) {
-                console.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error);
-                // Notification yaratishda xatolik bo'lsa ham, asosiy javob qaytariladi
+                console.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error.message);
             }
-        } else {
-            console.log(`ℹ️ [COMPARISON] Farqlar topilmadi, notification yuborilmaydi`);
         }
 
         res.json({
@@ -975,3 +1010,5 @@ router.get('/template', isAuthenticated, hasPermission('comparison:view'), async
 });
 
 module.exports = router;
+
+

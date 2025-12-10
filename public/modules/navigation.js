@@ -81,7 +81,7 @@ export async function navigateTo(pageId, hideLoaderAfter = false) {
                 (async () => {
                     try {
                         const { setupComparison } = await import('./comparison.js');
-                        setupComparison();
+                        await setupComparison();
                     } catch (error) {
                         console.error('Comparison modulini yuklashda xatolik:', error);
                     }

@@ -4,18 +4,30 @@
  * @param { import("knex").Knex } knex
  * @returns { Promise<void> }
  */
-exports.up = function(knex) {
-  return knex.schema
-    .createTable('role_locations', function (table) {
+exports.up = async function(knex) {
+  // Jadval mavjudligini tekshirish
+  const hasRoleLocations = await knex.schema.hasTable('role_locations');
+  const hasRoleBrands = await knex.schema.hasTable('role_brands');
+  
+  const schema = knex.schema;
+  
+  // Rol-Filial bog'lanish jadvali
+  if (!hasRoleLocations) {
+    await schema.createTable('role_locations', function (table) {
       table.string('role_name').references('role_name').inTable('roles').onDelete('CASCADE');
       table.string('location_name').notNullable();
       table.primary(['role_name', 'location_name']);
-    })
-    .createTable('role_brands', function (table) {
+    });
+  }
+  
+  // Rol-Brend bog'lanish jadvali
+  if (!hasRoleBrands) {
+    await schema.createTable('role_brands', function (table) {
       table.string('role_name').references('role_name').inTable('roles').onDelete('CASCADE');
       table.integer('brand_id').references('id').inTable('brands').onDelete('CASCADE');
       table.primary(['role_name', 'brand_id']);
     });
+  }
 };
 
 /**

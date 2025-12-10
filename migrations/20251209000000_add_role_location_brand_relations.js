@@ -4,22 +4,32 @@
  * @param { import("knex").Knex } knex
  * @returns { Promise<void> }
  */
-exports.up = function(knex) {
-  return knex.schema
-    // Rol-Filial bog'lanish jadvali (by_location uchun)
-    .createTable('role_locations', function(table) {
+exports.up = async function(knex) {
+  // Jadval mavjudligini tekshirish
+  const hasRoleLocations = await knex.schema.hasTable('role_locations');
+  const hasRoleBrands = await knex.schema.hasTable('role_brands');
+  
+  const schema = knex.schema;
+  
+  // Rol-Filial bog'lanish jadvali (by_location uchun)
+  if (!hasRoleLocations) {
+    await schema.createTable('role_locations', function(table) {
       table.increments('id').primary();
       table.string('role_name').notNullable().references('role_name').inTable('roles').onDelete('CASCADE');
       table.string('location_name').notNullable();
       table.unique(['role_name', 'location_name']);
-    })
-    // Rol-Brend bog'lanish jadvali (by_brand uchun)
-    .createTable('role_brands', function(table) {
+    });
+  }
+  
+  // Rol-Brend bog'lanish jadvali (by_brand uchun)
+  if (!hasRoleBrands) {
+    await schema.createTable('role_brands', function(table) {
       table.increments('id').primary();
       table.string('role_name').notNullable().references('role_name').inTable('roles').onDelete('CASCADE');
       table.integer('brand_id').notNullable().references('id').inTable('brands').onDelete('CASCADE');
       table.unique(['role_name', 'brand_id']);
     });
+  }
 };
 
 /**
