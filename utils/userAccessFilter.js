@@ -12,6 +12,22 @@ const { db } = require('../db.js');
  * @param {Object} user - Foydalanuvchi ma'lumotlari (req.session.user)
  * @returns {Object} { allowedLocations: [], allowedBrandIds: [] }
  */
+// Cache mexanizmi - tez-tez ishlatiladigan ma'lumotlar
+const accessFilterCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 daqiqa
+
+function getCacheKey(user) {
+    return `access_filter_${user.id}_${user.role}`;
+}
+
+function clearUserCache(userId) {
+    for (const [key] of accessFilterCache.entries()) {
+        if (key.includes(`_${userId}_`)) {
+            accessFilterCache.delete(key);
+        }
+    }
+}
+
 async function getUserAccessFilter(user) {
     // Super admin uchun cheklov yo'q
     if (user.role === 'super_admin') {
@@ -21,46 +37,43 @@ async function getUserAccessFilter(user) {
         };
     }
 
-    // Foydalanuvchining filiallarini olish
-    const userLocations = await db('user_locations')
-        .where('user_id', user.id)
-        .pluck('location_name');
-    
-    // Foydalanuvchining brendlarini olish
-    const userBrands = await db('user_brands')
-        .where('user_id', user.id)
-        .pluck('brand_id');
+    // Cache tekshirish
+    const cacheKey = getCacheKey(user);
+    const cached = accessFilterCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+        return cached.data;
+    }
 
-    // Rol shartlarini olish
-    const roleData = await db('roles')
-        .where('role_name', user.role)
-        .first();
+    // Barcha so'rovlarni parallel qilish (tezlashtirish)
+    const [
+        userLocations,
+        userBrands,
+        roleData,
+        roleLocations,
+        roleBrands,
+        userSettings
+    ] = await Promise.all([
+        db('user_locations').where('user_id', user.id).pluck('location_name'),
+        db('user_brands').where('user_id', user.id).pluck('brand_id'),
+        db('roles').where('role_name', user.role).first(),
+        db('role_locations').where('role_name', user.role).pluck('location_name'),
+        db('role_brands').where('role_name', user.role).pluck('brand_id'),
+        db('user_specific_settings').where('user_id', user.id).where('role', user.role).first()
+    ]);
     
     if (!roleData) {
         // Agar rol topilmasa, hech narsa ko'rsatilmaydi
-        return {
+        const result = {
             allowedLocations: [],
             allowedBrandIds: []
         };
+        // Cache'ga saqlash
+        accessFilterCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        return result;
     }
 
     const roleRequiresLocations = roleData.requires_locations;
     const roleRequiresBrands = roleData.requires_brands;
-
-    // Rol uchun belgilangan filial va brendlarni olish
-    const roleLocations = await db('role_locations')
-        .where('role_name', user.role)
-        .pluck('location_name');
-    
-    const roleBrands = await db('role_brands')
-        .where('role_name', user.role)
-        .pluck('brand_id');
-
-    // User-specific sozlamalarni olish (agar mavjud bo'lsa)
-    const userSettings = await db('user_specific_settings')
-        .where('user_id', user.id)
-        .where('role', user.role)
-        .first();
 
     // Qaysi shartlar ishlatiladi: user-specific yoki role-specific
     const effectiveRequiresLocations = userSettings?.requires_locations !== null && userSettings?.requires_locations !== undefined
@@ -122,8 +135,23 @@ async function getUserAccessFilter(user) {
     // === LOGIKA 4: Hech narsa belgilanmagan ===
     else {
         // Agar hech narsa belgilanmagan bo'lsa, rol shartlariga qarab
-        if (effectiveRequiresLocations === 'by_location' && roleLocations.length > 0) {
-            // Rol uchun filial belgilangan
+        // Agar rol sozlamalarida ham filial, ham brend tanlanmagan bo'lsa (ikkalasi ham false/null),
+        // foydalanuvchi hech narsa ko'ra olmaydi
+        const isLocationsFalse = effectiveRequiresLocations === false || effectiveRequiresLocations === null || effectiveRequiresLocations === undefined;
+        const isBrandsFalse = effectiveRequiresBrands === false || effectiveRequiresBrands === null || effectiveRequiresBrands === undefined;
+        
+        // Agar ikkalasi ham false/null bo'lsa, hech narsa ko'rsatilmaydi
+        if (isLocationsFalse && isBrandsFalse) {
+            console.log(`⚠️ [USER_ACCESS] Foydalanuvchi ${user.id} uchun hech narsa ko'rsatilmaydi (filial va brend ikkalasi ham tanlanmagan)`);
+            return {
+                allowedLocations: [], // Bo'sh ro'yxat = hech narsa ko'rsatilmaydi
+                allowedBrandIds: []   // Bo'sh ro'yxat = hech narsa ko'rsatilmaydi
+            };
+        }
+        
+        // Agar faqat bitta shart belgilangan bo'lsa
+        if (effectiveRequiresLocations === true && roleLocations.length > 0) {
+            // Rol uchun filial belgilangan (majburiy)
             allowedLocations = roleLocations;
             
             // Shu filiallardagi barcha brendlarni olish
@@ -133,8 +161,30 @@ async function getUserAccessFilter(user) {
                 .pluck('brand_id');
             
             allowedBrandIds = brandsInRoleLocations;
-        } else if (effectiveRequiresBrands === 'by_brand' && roleBrands.length > 0) {
-            // Rol uchun brendlar belgilangan
+        } else if (effectiveRequiresBrands === true && roleBrands.length > 0) {
+            // Rol uchun brendlar belgilangan (majburiy)
+            allowedBrandIds = roleBrands;
+            
+            // Shu brendlar mavjud bo'lgan filiallarni olish
+            const locationsForRoleBrands = await db('brand_locations')
+                .whereIn('brand_id', roleBrands)
+                .distinct('location_name')
+                .pluck('location_name');
+            
+            allowedLocations = locationsForRoleBrands;
+        } else if (effectiveRequiresLocations === null && roleLocations.length > 0) {
+            // Rol uchun filial belgilangan (ixtiyoriy)
+            allowedLocations = roleLocations;
+            
+            // Shu filiallardagi barcha brendlarni olish
+            const brandsInRoleLocations = await db('brand_locations')
+                .whereIn('location_name', roleLocations)
+                .distinct('brand_id')
+                .pluck('brand_id');
+            
+            allowedBrandIds = brandsInRoleLocations;
+        } else if (effectiveRequiresBrands === null && roleBrands.length > 0) {
+            // Rol uchun brendlar belgilangan (ixtiyoriy)
             allowedBrandIds = roleBrands;
             
             // Shu brendlar mavjud bo'lgan filiallarni olish
@@ -232,6 +282,7 @@ module.exports = {
     getUserAccessFilter,
     applyReportsFilter,
     applyBrandsFilter,
-    getFilteredLocations
+    getFilteredLocations,
+    clearUserCache // Cache'ni tozalash funksiyasi
 };
 

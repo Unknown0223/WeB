@@ -173,6 +173,25 @@ router.delete('/:sid', isAuthenticated, async (req, res) => {
             return res.status(404).json({ message: "Sessiyani o'chirib bo'lmadi." });
         }
 
+        // Online statusni real-time yangilash
+        // Foydalanuvchining boshqa sessiyalari bor-yo'qligini tekshirish
+        const remainingSessions = await db('sessions')
+            .where('sess', 'like', `%"id":${sessionOwnerId}%`)
+            .where('sid', '!=', sidToDelete);
+        
+        const isStillOnline = remainingSessions.length > 0;
+        
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [SESSIONS] Sessiya tugatildi, online status yangilanmoqda...`);
+            const user = await db('users').where('id', sessionOwnerId).first();
+            global.broadcastWebSocket('user_status_changed', {
+                userId: sessionOwnerId,
+                username: user?.username || 'Unknown',
+                isOnline: isStillOnline
+            });
+            console.log(`✅ [SESSIONS] WebSocket yuborildi: user_status_changed (${isStillOnline ? 'online' : 'offline'})`);
+        }
+
         res.json({ message: "Sessiya muvaffaqiyatli tugatildi." });
     } catch (error) {
         console.error(`/api/sessions/${sidToDelete} DELETE xatoligi:`, error);

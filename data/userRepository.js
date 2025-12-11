@@ -2,6 +2,20 @@ const { db, logAction } = require('../db.js');
 const bcrypt = require('bcrypt');
 const saltRounds = 10;
 
+// Cache mexanizmi - permissions va locations
+const permissionsCache = new Map();
+const locationsCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 daqiqa
+
+function clearUserCache(userId) {
+    // User-specific cache'larni tozalash
+    for (const [key] of locationsCache.entries()) {
+        if (key.startsWith(`user_${userId}_`)) {
+            locationsCache.delete(key);
+        }
+    }
+}
+
 // --- QIDIRISH FUNKSIYALARI (READ) ---
 
 async function findByUsername(username) {
@@ -28,45 +42,110 @@ async function findById(id, withDetails = false) {
 }
 
 
+// Cache - sessions parsing (5 daqiqa)
+let sessionsCache = null;
+let sessionsCacheTime = 0;
+const SESSIONS_CACHE_TTL = 5 * 60 * 1000; // 5 daqiqa
+
 async function getAllUsersWithDetails() {
-    // === MUAMMO TUZATILGAN JOY ===
-    // Bu yerda `whereNot('u.status', 'archived')` sharti olib tashlandi,
-    // chunki endi barcha statusdagi (arxivdan tashqari) foydalanuvchilar kerak.
-    // Filtratsiya frontend (admin.js) tarafida qilinadi.
-    const users = await db('users as u')
-        .leftJoin('user_locations as ul', 'u.id', 'ul.user_id')
-        .select(
-            'u.id', 'u.username', 'u.fullname', 'u.role', 'u.status', 'u.device_limit',
-            'u.telegram_chat_id', 'u.telegram_username'
-        )
-        .groupBy('u.id')
-        .orderBy('u.username')
-        .select(db.raw("GROUP_CONCAT(ul.location_name) as locations"));
+    // Parallel so'rovlar - tezlashtirish
+    const [users, roleRequirements] = await Promise.all([
+        db('users as u')
+            .leftJoin('user_locations as ul', 'u.id', 'ul.user_id')
+            .select(
+                'u.id', 'u.username', 'u.fullname', 'u.role', 'u.status', 'u.device_limit',
+                'u.telegram_chat_id', 'u.telegram_username', 'u.created_at', 'u.updated_at',
+                'u.is_telegram_connected', 'u.avatar_url', 'u.preferred_currency'
+            )
+            .groupBy('u.id')
+            .orderBy('u.username')
+            .select(db.raw("GROUP_CONCAT(ul.location_name) as locations")),
+        db('roles').select('role_name', 'requires_locations', 'requires_brands')
+    ]);
 
-    const sessions = await db('sessions').select('sess');
-    const activeSessions = sessions.map(s => {
-        try { return JSON.parse(s.sess); } catch { return null; }
-    }).filter(Boolean);
-
+    // Sessions cache - faqat kerakli ma'lumotlarni parse qilish
+    const now = Date.now();
+    if (!sessionsCache || (now - sessionsCacheTime) > SESSIONS_CACHE_TTL) {
+        const sessions = await db('sessions').select('sess');
+        // Faqat user ID'larni extract qilish (to'liq parse qilmasdan)
+        sessionsCache = new Map();
+        sessions.forEach(s => {
+            try {
+                // Faqat user ID'ni topish (to'liq parse qilmasdan)
+                const match = s.sess.match(/"id":(\d+)/);
+                if (match) {
+                    const userId = parseInt(match[1]);
+                    sessionsCache.set(userId, (sessionsCache.get(userId) || 0) + 1);
+                }
+            } catch (e) {
+                // Xatolikni e'tiborsiz qoldirish
+            }
+        });
+        sessionsCacheTime = now;
+    }
+    
+    // Role requirements map
+    const roleRequirementsMap = {};
+    roleRequirements.forEach(role => {
+        const isLocationsFalse = role.requires_locations === false || role.requires_locations === null || role.requires_locations === undefined;
+        const isBrandsFalse = role.requires_brands === false || role.requires_brands === null || role.requires_brands === undefined;
+        roleRequirementsMap[role.role_name] = {
+            hasNoAccess: isLocationsFalse && isBrandsFalse,
+            requires_locations: role.requires_locations,
+            requires_brands: role.requires_brands
+        };
+    });
+    
     return users.map(user => {
-        const userSessions = activeSessions.filter(s => s.user && s.user.id === user.id);
+        const sessionCount = sessionsCache.get(user.id) || 0;
+        const roleReq = roleRequirementsMap[user.role] || { hasNoAccess: false };
+        
+        // Superadmin uchun istisno
+        const isSuperadmin = user.role === 'superadmin' || user.role === 'super_admin';
+        const hasNoAccess = isSuperadmin ? false : roleReq.hasNoAccess;
+        
         return {
             ...user,
             locations: user.locations ? user.locations.split(',') : [],
-            is_online: userSessions.length > 0,
-            active_sessions_count: userSessions.length
+            is_online: sessionCount > 0,
+            active_sessions_count: sessionCount,
+            has_no_access: hasNoAccess
         };
     });
 }
 
 async function getPermissionsByRole(role) {
+    // Cache tekshirish
+    const cacheKey = `role_${role}`;
+    const cached = permissionsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+        return cached.data;
+    }
+    
     const permissions = await db('role_permissions').where({ role_name: role }).select('permission_key');
-    return permissions.map(p => p.permission_key);
+    const result = permissions.map(p => p.permission_key);
+    
+    // Cache'ga saqlash
+    permissionsCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    
+    return result;
 }
 
 async function getLocationsByUserId(userId) {
+    // Cache tekshirish
+    const cacheKey = `user_${userId}_locations`;
+    const cached = locationsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+        return cached.data;
+    }
+    
     const locations = await db('user_locations').where({ user_id: userId }).select('location_name');
-    return locations.map(l => l.location_name);
+    const result = locations.map(l => l.location_name);
+    
+    // Cache'ga saqlash
+    locationsCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    
+    return result;
 }
 
 // --- YARATISH VA O'ZGARTIRISH FUNKSIYALARI (WRITE) ---
@@ -142,6 +221,10 @@ async function updateUserLocations(adminId, userId, locations = [], ipAddress, u
         }
     });
     
+    // Cache'ni tozalash
+    const cacheKey = `user_${userId}_locations`;
+    locationsCache.delete(cacheKey);
+    
     await logAction(adminId, 'update_user_locations', 'user', userId, { locations, ip: ipAddress, userAgent });
 }
 
@@ -190,6 +273,7 @@ module.exports = {
     incrementLoginAttempts,
     lockUserForFailedAttempts,
     resetLoginAttempts,
-    logAction
+    logAction,
+    clearUserCache // Cache'ni tozalash funksiyasi
 };
 

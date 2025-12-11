@@ -3,7 +3,7 @@
 
 import { state } from './state.js';
 import { updateDashboard } from './dashboard.js';
-import { renderUsersByStatus } from './users.js';
+import { renderModernUsers } from './users.js';
 import { showToast } from './utils.js';
 import { fetchUsers } from './api.js';
 
@@ -14,6 +14,7 @@ let autoRefreshInterval = null;
 let lastNotificationId = null; // Oxirgi ko'rsatilgan notification ID
 let notificationDebounceTimer = null; // Notification debounce timer
 let isComparisonModalOpen = false; // Comparison modal ochiqligini kuzatish
+let comparisonNotificationsQueue = []; // Bildirishnomalar navbatida
 
 export function initRealTime() {
     // WebSocket ulanish
@@ -112,17 +113,15 @@ function connectWebSocket() {
 }
 
 /**
- * Comparison alert modal'ni ko'rsatish
+ * Comparison alert modal'ni ko'rsatish (yangi versiya - bir nechta bildirishnomalar)
  */
 function showComparisonAlertModal(notification) {
-    // Agar modal allaqachon ochiq bo'lsa, yangi notification'ni ko'rsatmaslik
-    if (isComparisonModalOpen) {
-        return;
-    }
-    
     // Notification ID'sini tekshirish (takrorlanmasligi uchun)
     const notificationId = notification?.details?.date + '_' + notification?.details?.brand_id + '_' + (notification?.details?.total_differences || 0);
-    if (lastNotificationId === notificationId) {
+    
+    // Agar bu bildirishnoma allaqachon navbatda bo'lsa, qo'shmaslik
+    if (comparisonNotificationsQueue.some(n => n.id === notificationId)) {
+        console.log('⚠️ [REALTIME] Bu bildirishnoma allaqachon navbatda');
         return;
     }
     
@@ -131,109 +130,158 @@ function showComparisonAlertModal(notification) {
         return;
     }
     
+    // Bildirishnomani navbatga qo'shish
+    comparisonNotificationsQueue.push({
+        id: notificationId,
+        notification: notification,
+        timestamp: Date.now()
+    });
+    
+    console.log(`📬 [REALTIME] Bildirishnoma navbatga qo'shildi. Navbatda: ${comparisonNotificationsQueue.length} ta`);
+    
+    // Modal'ni ochish va render qilish
+    renderComparisonModal();
+}
+
+/**
+ * Comparison modal'ni render qilish (barcha bildirishnomalarni ko'rsatish)
+ */
+function renderComparisonModal() {
     const modal = document.getElementById('comparison-alert-modal');
-    const messageEl = document.getElementById('comparison-alert-message');
-    const detailsEl = document.getElementById('comparison-alert-details');
+    const container = document.getElementById('comparison-alert-notifications-container');
     const acknowledgeBtn = document.getElementById('comparison-alert-acknowledge-btn');
     
-    if (!modal || !messageEl || !detailsEl || !acknowledgeBtn) {
+    if (!modal || !container || !acknowledgeBtn) {
         console.error('❌ [REALTIME] Comparison alert modal elementlari topilmadi');
+        return;
+    }
+    
+    // Agar navbat bo'sh bo'lsa, modal'ni yopish
+    if (comparisonNotificationsQueue.length === 0) {
+        modal.classList.add('hidden');
+        document.body.classList.remove('comparison-alert-active');
+        isComparisonModalOpen = false;
         return;
     }
     
     // Modal ochiqligini belgilash
     isComparisonModalOpen = true;
-    lastNotificationId = notificationId;
     
-    // Xabarni ko'rsatish
-    const message = notification?.message || 'Solishtirishda farqlar aniqlandi';
-    messageEl.textContent = message;
+    // Barcha bildirishnomalarni render qilish
+    let notificationsHtml = '';
     
-    // Batafsil ma'lumotlarni ko'rsatish
-    const details = notification?.details || {};
-    let detailsHtml = '';
-    
-    if (details.brand_name || details.date) {
-        detailsHtml = `
-            <div class="alert-detail-item">
-                <span class="detail-label">Brend:</span>
-                <span class="detail-value">${details.brand_name || 'Noma\'lum'}</span>
-            </div>
-            <div class="alert-detail-item">
-                <span class="detail-label">Sana:</span>
-                <span class="detail-value">${details.date || 'Noma\'lum'}</span>
-            </div>
-            <div class="alert-detail-item">
-                <span class="detail-label">Farqlar soni:</span>
-                <span class="detail-value highlight">${details.total_differences || 0} ta filial</span>
-            </div>
-        `;
+    comparisonNotificationsQueue.forEach((item, index) => {
+        const notification = item.notification;
+        const details = notification?.details || {};
+        const message = notification?.message || 'Solishtirishda farqlar aniqlandi';
         
-        // Farqlar ro'yxatini ko'rsatish
-        if (details.differences && details.differences.length > 0) {
-            detailsHtml += `
-                <div class="alert-differences-list">
-                    <div class="alert-differences-header">
-                        <i data-feather="map-pin"></i>
-                        <span>Filiallar:</span>
-                    </div>
-                    <div class="alert-differences-items">
-                        ${details.differences.map((diff) => {
-                            const diffValue = diff.difference || 0;
-                            const diffColor = diffValue > 0 ? 'var(--green-color)' : 'var(--red-color)';
-                            const diffSign = diffValue > 0 ? '+' : '';
-                            
-                            // Operator amount va comparison amount'ni to'g'ri formatlash
-                            const operatorAmount = diff.operator_amount !== null && diff.operator_amount !== undefined 
-                                ? Number(diff.operator_amount) 
-                                : 0;
-                            const comparisonAmount = diff.comparison_amount !== null && diff.comparison_amount !== undefined 
-                                ? Number(diff.comparison_amount) 
-                                : 0;
-                            
-                            return `
-                                <div class="alert-difference-item">
-                                    <div class="alert-difference-location">
-                                        <i data-feather="map-pin"></i>
-                                        <span>${diff.location || 'Noma\'lum'}</span>
-                                    </div>
-                                    <div class="alert-difference-details">
-                                        <div class="difference-row">
-                                            <span class="difference-label">Operator summa:</span>
-                                            <span class="difference-value operator-amount">${operatorAmount.toLocaleString('ru-RU')} so'm</span>
-                                        </div>
-                                        <div class="difference-row">
-                                            <span class="difference-label">Solishtirish summa:</span>
-                                            <span class="difference-value comparison-amount">${comparisonAmount.toLocaleString('ru-RU')} so'm</span>
-                                        </div>
-                                        <div class="difference-row">
-                                            <span class="difference-label">Farq:</span>
-                                            <span class="difference-value difference-amount" style="color: ${diffColor};">${diffSign}${Math.abs(diffValue).toLocaleString('ru-RU')} so'm</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
+        let detailsHtml = '';
+        
+        if (details.brand_name || details.date) {
+            detailsHtml = `
+                <div class="alert-detail-item">
+                    <span class="detail-label">Brend:</span>
+                    <span class="detail-value">${details.brand_name || 'Noma\'lum'}</span>
+                </div>
+                <div class="alert-detail-item">
+                    <span class="detail-label">Sana:</span>
+                    <span class="detail-value">${details.date || 'Noma\'lum'}</span>
+                </div>
+                <div class="alert-detail-item">
+                    <span class="detail-label">Farqlar soni:</span>
+                    <span class="detail-value highlight">${details.total_differences || 0} ta filial</span>
                 </div>
             `;
+            
+            // Farqlar ro'yxatini ko'rsatish
+            if (details.differences && details.differences.length > 0) {
+                detailsHtml += `
+                    <div class="alert-differences-list">
+                        <div class="alert-differences-header">
+                            <i data-feather="map-pin"></i>
+                            <span>Filiallar:</span>
+                        </div>
+                        <div class="alert-differences-items">
+                            ${details.differences.map((diff) => {
+                                const diffValue = diff.difference || 0;
+                                const diffColor = diffValue > 0 ? 'var(--green-color)' : 'var(--red-color)';
+                                const diffSign = diffValue > 0 ? '+' : '';
+                                
+                                // Operator amount va comparison amount'ni to'g'ri formatlash
+                                const operatorAmount = diff.operator_amount !== null && diff.operator_amount !== undefined 
+                                    ? Number(diff.operator_amount) 
+                                    : 0;
+                                const comparisonAmount = diff.comparison_amount !== null && diff.comparison_amount !== undefined 
+                                    ? Number(diff.comparison_amount) 
+                                    : 0;
+                                
+                                return `
+                                    <div class="alert-difference-item">
+                                        <div class="alert-difference-location">
+                                            <i data-feather="map-pin"></i>
+                                            <span>${diff.location || 'Noma\'lum'}</span>
+                                        </div>
+                                        <div class="alert-difference-details">
+                                            <div class="difference-row">
+                                                <span class="difference-label">Operator summa:</span>
+                                                <span class="difference-value operator-amount">${operatorAmount.toLocaleString('ru-RU')} so'm</span>
+                                            </div>
+                                            <div class="difference-row">
+                                                <span class="difference-label">Solishtirish summa:</span>
+                                                <span class="difference-value comparison-amount">${comparisonAmount.toLocaleString('ru-RU')} so'm</span>
+                                            </div>
+                                            <div class="difference-row">
+                                                <span class="difference-label">Farq:</span>
+                                                <span class="difference-value difference-amount" style="color: ${diffColor};">${diffSign}${Math.abs(diffValue).toLocaleString('ru-RU')} so'm</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+        } else {
+            detailsHtml = '<div class="empty-state">Batafsil ma\'lumotlar mavjud emas</div>';
         }
-    } else {
-        detailsHtml = '<div class="empty-state">Batafsil ma\'lumotlar mavjud emas</div>';
-    }
+        
+        notificationsHtml += `
+            <div class="comparison-notification-item" data-notification-id="${item.id}">
+                <div class="comparison-notification-header">
+                    <div class="comparison-notification-icon">
+                        <i data-feather="alert-triangle"></i>
+                    </div>
+                    <div class="comparison-notification-title">
+                        <h3>Solishtirishda farqlar aniqlandi #${index + 1}</h3>
+                        <p class="comparison-notification-message">${message}</p>
+                    </div>
+                </div>
+                <div class="comparison-notification-details">
+                    ${detailsHtml}
+                </div>
+            </div>
+        `;
+    });
     
-    detailsEl.innerHTML = detailsHtml;
+    container.innerHTML = notificationsHtml;
     
     // "Tushundim" tugmasi event listener
     acknowledgeBtn.onclick = () => {
+        // Barcha bildirishnomalarni navbatdan olib tashlash
+        comparisonNotificationsQueue = [];
+        lastNotificationId = null;
+        
+        // Modal'ni yopish
         modal.classList.add('hidden');
         document.body.classList.remove('comparison-alert-active');
         isComparisonModalOpen = false;
-        lastNotificationId = null;
         
         if (window.feather) {
             window.feather.replace();
         }
+        
+        console.log('✅ [REALTIME] Barcha bildirishnomalar tushunildi, modal yopildi');
     };
     
     // Modal'ni ochish
@@ -245,7 +293,7 @@ function showComparisonAlertModal(notification) {
         window.feather.replace();
     }
     
-    console.log('✅ [REALTIME] Comparison alert modal ochildi');
+    console.log(`✅ [REALTIME] Comparison alert modal ochildi. ${comparisonNotificationsQueue.length} ta bildirishnoma ko'rsatilmoqda`);
 }
 
 function handleWebSocketMessage(data) {
@@ -267,20 +315,18 @@ function handleWebSocketMessage(data) {
             if (user) {
                 user.is_online = payload.isOnline;
                 
-                // Admin panelda yangilash
+                // Admin panelda yangilash (darhol)
                 const usersPage = document.getElementById('users');
                 if (usersPage && usersPage.classList.contains('active')) {
-                    console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
+                    console.log('🔄 [REALTIME] Users sahifasi aktiv, darhol yangilanmoqda...');
                     
-                    // Modern render funksiyasini chaqirish
-                    if (typeof renderUsersByStatus === 'function') {
-                        const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                        renderUsersByStatus(activeTab);
+                    // Modern render funksiyasini darhol chaqirish (immediate = true)
+                    if (typeof renderModernUsers === 'function') {
+                        renderModernUsers(true); // immediate = true
                     } else {
-                        // Agar renderModernUsers mavjud bo'lsa
                         import('./users.js').then(module => {
                             if (module.renderModernUsers) {
-                                module.renderModernUsers();
+                                module.renderModernUsers(true);
                             }
                         });
                     }
@@ -291,8 +337,9 @@ function handleWebSocketMessage(data) {
                     updateUsersStatistics();
                 } else {
                     import('./users.js').then(module => {
-                        // updateUsersStatistics funksiyasi users.js ichida bo'lishi mumkin
-                        // Lekin u export qilinmagan bo'lishi mumkin
+                        if (module.updateUsersStatistics) {
+                            module.updateUsersStatistics();
+                        }
                     });
                 }
             } else {
@@ -304,8 +351,15 @@ function handleWebSocketMessage(data) {
                             state.users = users;
                             const usersPage = document.getElementById('users');
                             if (usersPage && usersPage.classList.contains('active')) {
-                                const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                                renderUsersByStatus(activeTab);
+                                if (typeof renderModernUsers === 'function') {
+                                    renderModernUsers();
+                                } else {
+                                    import('./users.js').then(module => {
+                                        if (module.renderModernUsers) {
+                                            module.renderModernUsers();
+                                        }
+                                    });
+                                }
                             }
                         }
                     });
@@ -446,9 +500,8 @@ function handleWebSocketMessage(data) {
                         console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
                         
                         // Modern render funksiyasini chaqirish
-                        if (typeof renderUsersByStatus === 'function') {
-                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                            renderUsersByStatus(activeTab);
+                        if (typeof renderModernUsers === 'function') {
+                            renderModernUsers();
                         } else {
                             import('./users.js').then(module => {
                                 if (module.renderModernUsers) {
@@ -471,8 +524,15 @@ function handleWebSocketMessage(data) {
                                 state.users = users;
                                 const usersPage = document.getElementById('users');
                                 if (usersPage && usersPage.classList.contains('active')) {
-                                    const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                                    renderUsersByStatus(activeTab);
+                                    if (typeof renderModernUsers === 'function') {
+                                        renderModernUsers();
+                                    } else {
+                                        import('./users.js').then(module => {
+                                            if (module.renderModernUsers) {
+                                                module.renderModernUsers();
+                                            }
+                                        });
+                                    }
                                 }
                             }
                         });
@@ -535,24 +595,39 @@ function handleWebSocketMessage(data) {
                     const currentRole = stateModule.state.currentEditingRole;
                     const roleNameFromPayload = payload?.role_name;
                     
+                    console.log('🔄 [REALTIME] Role yangilanishi:', {
+                        type,
+                        action: payload?.action,
+                        roleName: roleNameFromPayload,
+                        currentRole
+                    });
+                    
                     if (apiModule.fetchRoles) {
                         apiModule.fetchRoles().then(rolesData => {
+                            console.log('📥 [REALTIME] Roles ma\'lumotlari yuklandi:', {
+                                rolesCount: rolesData?.roles?.length || 0,
+                                hasPermissions: !!rolesData?.all_permissions
+                            });
+                            
                             if (rolesData && rolesData.roles && Array.isArray(rolesData.roles)) {
                                 stateModule.state.roles = rolesData.roles;
                                 stateModule.state.allPermissions = rolesData.all_permissions || [];
+                                
                                 if (rolesModule.renderRoles) {
                                     // Agar yangi rol yaratilgan bo'lsa (role_updated va action: 'created'), uni tanlash
                                     // Aks holda joriy tanlangan rolni saqlash
                                     const roleToSelect = (type === 'role_updated' && payload?.action === 'created' && roleNameFromPayload) 
                                         ? roleNameFromPayload 
                                         : currentRole;
+                                    
+                                    console.log('✅ [REALTIME] Rol tanlash:', roleToSelect);
                                     rolesModule.renderRoles(roleToSelect);
                                 }
                             } else {
-                                console.warn('[REALTIME] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
+                                console.warn('⚠️ [REALTIME] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
                             }
                         }).catch(error => {
-                            console.error('[REALTIME] Roles yuklashda xatolik:', error);
+                            console.error('❌ [REALTIME] Roles yuklashda xatolik:', error);
                         });
                     }
                 });
@@ -621,6 +696,92 @@ function handleWebSocketMessage(data) {
             // Faqat ma'lumotlarni yangilash, toast ko'rsatilmaydi
             break;
             
+        case 'report_deleted':
+            // Hisobot o'chirildi
+            console.log('🔔 [REALTIME] Hisobot o\'chirildi:', payload);
+            
+            // Dashboard yangilash
+            const dashboardPageDelete = document.getElementById('dashboard');
+            if (dashboardPageDelete && dashboardPageDelete.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Dashboard aktiv, yangilanmoqda...');
+                refreshCurrentDashboard();
+            }
+            
+            // Reports sahifasini yangilash
+            const reportsPageDelete = document.getElementById('reports');
+            if (reportsPageDelete && reportsPageDelete.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Reports sahifasi aktiv, yangilanmoqda...');
+                import('./reports.js').then(module => {
+                    if (module.fetchAndRenderReports) {
+                        module.fetchAndRenderReports();
+                    }
+                });
+            }
+            
+            // KPI sahifasini yangilash
+            const kpiPageDelete = document.getElementById('employee-statistics');
+            if (kpiPageDelete && kpiPageDelete.classList.contains('active')) {
+                console.log('🔄 [REALTIME] KPI sahifasi aktiv, yangilanmoqda...');
+                import('./kpi.js').then(module => {
+                    if (module.refreshKpiData) {
+                        module.refreshKpiData();
+                    }
+                });
+            }
+            
+            // Pivot sahifasini yangilash
+            const pivotPageDelete = document.getElementById('pivot-reports');
+            if (pivotPageDelete && pivotPageDelete.classList.contains('active')) {
+                if (state.pivotGrid && typeof state.pivotGrid.refresh === 'function') {
+                    state.pivotGrid.refresh();
+                }
+            }
+            break;
+            
+        case 'user_created':
+            // Yangi foydalanuvchi yaratildi (admin tomonidan)
+            console.log('🔔 [REALTIME] Yangi foydalanuvchi yaratildi:', payload);
+            
+            // Users sahifasini yangilash
+            const usersPageCreate = document.getElementById('users');
+            if (usersPageCreate && usersPageCreate.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
+                import('./users.js').then(module => {
+                    if (module.renderModernUsers) {
+                        // Avval users ro'yxatini yangilash
+                        if (typeof fetchUsers === 'function') {
+                            fetchUsers().then(users => {
+                                if (users) {
+                                    state.users = users;
+                                    module.renderModernUsers();
+                                }
+                            });
+                        } else {
+                            module.renderModernUsers();
+                        }
+                    }
+                });
+            }
+            break;
+            
+        case 'comparison_updated':
+            // Solishtirish yangilandi
+            console.log('🔔 [REALTIME] Solishtirish yangilandi:', payload);
+            
+            // Comparison sahifasini yangilash
+            const comparisonPage = document.getElementById('comparison');
+            if (comparisonPage && comparisonPage.classList.contains('active')) {
+                console.log('🔄 [REALTIME] Comparison sahifasi aktiv, yangilanmoqda...');
+                import('./comparison.js').then(module => {
+                    if (module.loadComparisonData) {
+                        module.loadComparisonData(payload.date, payload.brandId);
+                    } else if (module.refreshComparison) {
+                        module.refreshComparison();
+                    }
+                });
+            }
+            break;
+            
         case 'audit_log_added':
             // Audit log qo'shildi
             console.log('🔔 [REALTIME] Audit log qo\'shildi:', payload);
@@ -652,69 +813,6 @@ function handleWebSocketMessage(data) {
             }
             break;
             
-        case 'report_deleted':
-            // Hisobot o'chirildi
-            console.log('🔔 [REALTIME] Hisobot o\'chirildi:', payload);
-            
-            // Dashboard yangilash
-            const dashboardPageDelete = document.getElementById('dashboard');
-            if (dashboardPageDelete && dashboardPageDelete.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Dashboard aktiv, yangilanmoqda...');
-                refreshCurrentDashboard();
-            }
-            
-            // Reports sahifasini yangilash
-            const reportsPage = document.getElementById('reports');
-            if (reportsPage && reportsPage.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Reports sahifasi aktiv, yangilanmoqda...');
-                import('./reports.js').then(module => {
-                    if (module.fetchAndRenderReports) {
-                        module.fetchAndRenderReports();
-                    }
-                });
-            }
-            
-            // KPI sahifasini yangilash
-            const kpiPageDelete = document.getElementById('employee-statistics');
-            if (kpiPageDelete && kpiPageDelete.classList.contains('active')) {
-                console.log('🔄 [REALTIME] KPI sahifasi aktiv, yangilanmoqda...');
-                import('./kpi.js').then(module => {
-                    if (module.refreshKpiData) {
-                        module.refreshKpiData();
-                    }
-                });
-            }
-            
-            // Pivot sahifasini yangilash
-            const pivotPageDelete = document.getElementById('pivot-reports');
-            if (pivotPageDelete && pivotPageDelete.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Pivot sahifasi aktiv, yangilanmoqda...');
-                if (state.pivotGrid && typeof state.pivotGrid.refresh === 'function') {
-                    state.pivotGrid.refresh();
-                }
-            }
-            break;
-            
-        case 'user_created':
-            // Yangi foydalanuvchi yaratildi
-            console.log('🔔 [REALTIME] Yangi foydalanuvchi yaratildi:', payload);
-            
-            // Users sahifasini yangilash
-            const usersPageCreate = document.getElementById('users');
-            if (usersPageCreate && usersPageCreate.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
-                if (typeof fetchUsers === 'function') {
-                    fetchUsers().then(users => {
-                        if (users) {
-                            state.users = users;
-                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                            renderUsersByStatus(activeTab);
-                        }
-                    });
-                }
-            }
-            break;
-            
         case 'user_updated':
             // Foydalanuvchi yangilandi
             console.log('🔔 [REALTIME] Foydalanuvchi yangilandi:', payload);
@@ -723,14 +821,55 @@ function handleWebSocketMessage(data) {
             const usersPageUpdate = document.getElementById('users');
             if (usersPageUpdate && usersPageUpdate.classList.contains('active')) {
                 console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
-                if (typeof fetchUsers === 'function') {
-                    fetchUsers().then(users => {
-                        if (users) {
-                            state.users = users;
-                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                            renderUsersByStatus(activeTab);
+                
+                // Agar user state'da mavjud bo'lsa, uni yangilash (tezkor)
+                if (state.users) {
+                    const userIndex = state.users.findIndex(u => u.id === payload.userId);
+                    if (userIndex !== -1) {
+                        // User ma'lumotlarini yangilash
+                        state.users[userIndex] = {
+                            ...state.users[userIndex],
+                            username: payload.username || state.users[userIndex].username,
+                            fullname: payload.fullname || state.users[userIndex].fullname,
+                            role: payload.role || state.users[userIndex].role,
+                            status: payload.status || state.users[userIndex].status
+                        };
+                        
+                        // Darhol render qilish (tezkor)
+                        if (typeof renderModernUsers === 'function') {
+                            renderModernUsers(true); // immediate = true
+                        } else {
+                            import('./users.js').then(module => {
+                                if (module.renderModernUsers) {
+                                    module.renderModernUsers(true);
+                                }
+                            });
                         }
-                    });
+                    } else {
+                        // Agar user topilmasa, to'liq yuklash
+                        if (typeof fetchUsers === 'function') {
+                            fetchUsers().then(users => {
+                                if (users) {
+                                    state.users = users;
+                                    if (typeof renderModernUsers === 'function') {
+                                        renderModernUsers(true);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    // Agar state.users yo'q bo'lsa, yuklash
+                    if (typeof fetchUsers === 'function') {
+                        fetchUsers().then(users => {
+                            if (users) {
+                                state.users = users;
+                                if (typeof renderModernUsers === 'function') {
+                                    renderModernUsers(true);
+                                }
+                            }
+                        });
+                    }
                 }
             }
             break;
@@ -747,8 +886,15 @@ function handleWebSocketMessage(data) {
                     fetchUsers().then(users => {
                         if (users) {
                             state.users = users;
-                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                            renderUsersByStatus(activeTab);
+                            if (typeof renderModernUsers === 'function') {
+                                renderModernUsers();
+                            } else {
+                                import('./users.js').then(module => {
+                                    if (module.renderModernUsers) {
+                                        module.renderModernUsers();
+                                    }
+                                });
+                            }
                         }
                     });
                 }
@@ -767,8 +913,15 @@ function handleWebSocketMessage(data) {
                     fetchUsers().then(users => {
                         if (users) {
                             state.users = users;
-                            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status || 'all';
-                            renderUsersByStatus(activeTab);
+                            if (typeof renderModernUsers === 'function') {
+                                renderModernUsers();
+                            } else {
+                                import('./users.js').then(module => {
+                                    if (module.renderModernUsers) {
+                                        module.renderModernUsers();
+                                    }
+                                });
+                            }
                         }
                     });
                 }
@@ -928,8 +1081,15 @@ function refreshCurrentPage() {
             refreshCurrentDashboard();
             break;
         case 'users':
-            const activeTab = document.querySelector('#user-tabs .active')?.dataset.status;
-            if (activeTab) renderUsersByStatus(activeTab);
+            if (typeof renderModernUsers === 'function') {
+                renderModernUsers();
+            } else {
+                import('./users.js').then(module => {
+                    if (module.renderModernUsers) {
+                        module.renderModernUsers();
+                    }
+                });
+            }
             break;
         // Boshqa sahifalar uchun ham qo'shiladi
     }

@@ -17,6 +17,105 @@ let currentFilters = {
     onlineStatus: ''     // online, offline
 };
 
+// View mode (grid or list)
+let currentViewMode = localStorage.getItem('usersViewMode') || 'grid';
+
+// Pagination settings
+let currentPage = 1;
+let usersPerPage = parseInt(localStorage.getItem('usersPerPage')) || 10;
+
+// Performance optimization: Cache and debounce
+let renderDebounceTimer = null;
+let filteredUsersCache = null;
+let lastFiltersHash = '';
+
+// ==================== HELPER FUNCTIONS (DRY Principle) ====================
+
+/**
+ * Modal yopish/ochish helper funksiyalari
+ */
+const ModalHelper = {
+    show: (element) => {
+        if (element) {
+            element.classList.remove('hidden');
+            if (element.style) element.style.display = '';
+        }
+    },
+    hide: (element) => {
+        if (element) {
+            element.classList.add('hidden');
+            if (element.style) element.style.display = 'none';
+        }
+    },
+    toggle: (element) => {
+        if (element) {
+            element.classList.toggle('hidden');
+        }
+    }
+};
+
+/**
+ * Element visibility helper funksiyalari
+ */
+const VisibilityHelper = {
+    show: (element) => {
+        if (element && element.style) {
+            element.style.display = 'block';
+        }
+    },
+    hide: (element) => {
+        if (element && element.style) {
+            element.style.display = 'none';
+        }
+    },
+    toggle: (element, show = true) => {
+        if (element && element.style) {
+            element.style.display = show ? 'block' : 'none';
+        }
+    }
+};
+
+/**
+ * API so'rovlar uchun helper funksiya (error handling bilan)
+ */
+async function safeApiCall(url, options = {}) {
+    try {
+        const res = await safeFetch(url, options);
+        if (!res || !res.ok) {
+            const errorData = res ? await res.json().catch(() => ({})) : {};
+            throw new Error(errorData.message || 'API so\'rovida xatolik');
+        }
+        return await res.json();
+    } catch (error) {
+        console.error(`❌ [API] ${url} xatolik:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Foydalanuvchilar ro'yxatini yangilash helper funksiyasi
+ */
+async function refreshUsersList() {
+    try {
+        const usersRes = await fetchUsers();
+        if (usersRes) {
+            state.users = usersRes;
+            filteredUsersCache = null; // Clear cache on data update
+            lastFiltersHash = ''; // Reset hash
+            const activeTab = DOM.userTabs?.querySelector('.active')?.dataset.status || 'active';
+            if (activeTab) {
+                currentFilters.accountStatus = activeTab === 'active' ? 'active' : 
+                                               activeTab === 'pending' ? 'pending' : 
+                                               activeTab === 'inactive' ? 'inactive' : '';
+            }
+            renderModernUsers(true); // Immediate render after data fetch
+        }
+    } catch (error) {
+        console.error('❌ [USERS] Ro\'yxatni yangilashda xatolik:', error);
+        showToast('Ro\'yxatni yangilashda xatolik', 'error');
+    }
+}
+
 // Brendlarni yuklash va render qilish
 async function loadBrandsForUser(userId = null) {
     try {
@@ -41,8 +140,10 @@ async function loadBrandsForUser(userId = null) {
         }
         
         // Approval modal uchun (approval-brands-list)
+        // Approval uchun barcha brendlar kerak (admin uchun)
         const approvalContainer = document.getElementById('approval-brands-list');
         if (approvalContainer) {
+            // Approval uchun barcha brendlarni olish (admin uchun)
             const res = await safeFetch('/api/brands');
             if (!res.ok) throw new Error('Brendlarni yuklashda xatolik');
             const allBrands = await res.json();
@@ -76,76 +177,552 @@ async function loadBrandsForUser(userId = null) {
         
         // user-brands-list ni doim yashirib qo'yish (faqat modal orqali tanlash)
         const userBrandsList = document.getElementById('user-brands-list');
-        if (userBrandsList) {
-            userBrandsList.classList.add('hidden');
-            userBrandsList.style.display = 'none';
-        }
+        ModalHelper.hide(userBrandsList);
     } catch (error) {
         // console.error('Brendlarni yuklash xatosi:', error);
         showToast('Brendlarni yuklashda xatolik', 'error');
     }
 }
 
-// Modern render function with filters
-export function renderModernUsers() {
+// Get filters hash for cache
+function getFiltersHash() {
+    return JSON.stringify(currentFilters);
+}
+
+// Modern render function with filters (optimized)
+export function renderModernUsers(immediate = false) {
     if (!state.users || !DOM.userListContainer) return;
 
-    // Apply filters
-    let filteredUsers = state.users.filter(user => {
-        // Superadmin'ni faqat superadmin o'zi ko'rsin
-        if ((user.role === 'superadmin' || user.role === 'super_admin') && 
-            state.currentUser?.role !== 'superadmin' && state.currentUser?.role !== 'super_admin') {
-            return false;
-        }
-        
-        // Role filter
-        if (currentFilters.role && user.role !== currentFilters.role) return false;
-
-        // Account Status filter
-        if (currentFilters.accountStatus) {
-            if (currentFilters.accountStatus === 'active' && user.status !== 'active') return false;
-            if (currentFilters.accountStatus === 'pending' && !user.status.startsWith('pending')) return false;
-            if (currentFilters.accountStatus === 'inactive' && user.status !== 'blocked' && user.status !== 'archived') return false;
-        }
-
-        // Online Status filter
-        if (currentFilters.onlineStatus) {
-            if (currentFilters.onlineStatus === 'online' && !user.is_online) return false;
-            if (currentFilters.onlineStatus === 'offline' && user.is_online) return false;
-        }
-
-        return true;
-    });
-
-    // Update statistics
-    updateUsersStatistics();
-
-    // Render
-    if (filteredUsers.length === 0) {
-        DOM.userListContainer.innerHTML = '<div class="empty-state"><i data-feather="users"></i><p>Foydalanuvchilar topilmadi</p></div>';
-        feather.replace();
-        return;
+    // Debounce for better performance (except immediate calls)
+    if (!immediate && renderDebounceTimer) {
+        clearTimeout(renderDebounceTimer);
     }
 
-    DOM.userListContainer.innerHTML = filteredUsers.map(user => renderModernUserCard(user)).join('');
-    feather.replace();
+    const doRender = () => {
+        const filtersHash = getFiltersHash();
+        
+        // Use cache if filters haven't changed
+        let filteredUsers;
+        if (filteredUsersCache && lastFiltersHash === filtersHash) {
+            filteredUsers = filteredUsersCache;
+        } else {
+            // Apply filters
+            filteredUsers = state.users.filter(user => {
+                // Superadmin'ni faqat superadmin o'zi ko'rsin
+                if ((user.role === 'superadmin' || user.role === 'super_admin') && 
+                    state.currentUser?.role !== 'superadmin' && state.currentUser?.role !== 'super_admin') {
+                    return false;
+                }
+                
+                // Search filter
+                if (currentFilters.search && currentFilters.search.trim()) {
+                    const searchTerm = currentFilters.search.toLowerCase().trim();
+                    const fullname = (user.fullname || '').toLowerCase();
+                    const username = (user.username || '').toLowerCase();
+                    const email = (user.email || '').toLowerCase();
+                    const phone = (user.phone || '').toLowerCase();
+                    const role = (user.role || '').toLowerCase();
+                    
+                    const matchesSearch = fullname.includes(searchTerm) || 
+                                         username.includes(searchTerm) || 
+                                         email.includes(searchTerm) || 
+                                         phone.includes(searchTerm) ||
+                                         role.includes(searchTerm);
+                    
+                    if (!matchesSearch) return false;
+                }
+                
+                // Role filter
+                if (currentFilters.role && user.role !== currentFilters.role) return false;
+
+                // Account Status filter
+                if (currentFilters.accountStatus) {
+                    if (currentFilters.accountStatus === 'active' && user.status !== 'active') return false;
+                    if (currentFilters.accountStatus === 'pending' && !user.status.startsWith('pending')) return false;
+                    if (currentFilters.accountStatus === 'inactive' && user.status !== 'blocked' && user.status !== 'archived') return false;
+                }
+
+                // Online Status filter
+                if (currentFilters.onlineStatus) {
+                    if (currentFilters.onlineStatus === 'online' && !user.is_online) return false;
+                    if (currentFilters.onlineStatus === 'offline' && user.is_online) return false;
+                }
+
+                return true;
+            });
+            
+            // Cache results
+            filteredUsersCache = filteredUsers;
+            lastFiltersHash = filtersHash;
+        }
+
+        // Update statistics (only if needed)
+        updateUsersStatistics();
+
+        // Apply view mode
+        applyViewMode();
+
+        // Calculate pagination
+        const totalUsers = filteredUsers.length;
+        const totalPages = Math.ceil(totalUsers / usersPerPage);
+        
+        console.log('📊 [PAGINATION] Calculation:', {
+            totalUsers,
+            usersPerPage,
+            totalPages,
+            currentPage
+        });
+        
+        // Ensure current page is valid
+        if (currentPage > totalPages && totalPages > 0) {
+            currentPage = totalPages;
+        }
+        if (currentPage < 1) {
+            currentPage = 1;
+        }
+        
+        // Get users for current page
+        const startIndex = (currentPage - 1) * usersPerPage;
+        const endIndex = startIndex + usersPerPage;
+        const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+        
+        console.log('📄 [PAGINATION] Paginated:', {
+            startIndex,
+            endIndex,
+            paginatedUsersCount: paginatedUsers.length
+        });
+
+        // Use requestAnimationFrame for smooth rendering
+        requestAnimationFrame(() => {
+            // Render using DocumentFragment for better performance
+            if (filteredUsers.length === 0) {
+                DOM.userListContainer.innerHTML = '<div class="empty-state"><i data-feather="users"></i><p>Foydalanuvchilar topilmadi</p></div>';
+                feather.replace();
+                renderPaginationControls(0, 0, 0);
+                return;
+            }
+
+            // Use DocumentFragment for batch DOM operations
+            const fragment = document.createDocumentFragment();
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = paginatedUsers.map(user => renderModernUserCard(user)).join('');
+            
+            while (tempDiv.firstChild) {
+                fragment.appendChild(tempDiv.firstChild);
+            }
+            
+            DOM.userListContainer.innerHTML = '';
+            DOM.userListContainer.appendChild(fragment);
+            
+            // Only replace icons for new elements (optimized)
+            feather.replace({ root: DOM.userListContainer });
+            
+            // Event delegation - barcha user card action buttonlar uchun
+            setupUserCardEventListeners();
+            
+            // Render pagination controls
+            renderPaginationControls(totalUsers, totalPages, currentPage);
+        });
+    };
+
+    if (immediate) {
+        doRender();
+    } else {
+        renderDebounceTimer = setTimeout(doRender, 50); // 50ms debounce
+    }
+}
+
+// Apply view mode (grid or list)
+function applyViewMode() {
+    if (!DOM.userListContainer) return;
     
-    // Event delegation - barcha user card action buttonlar uchun
-    setupUserCardEventListeners();
+    // Remove existing classes
+    DOM.userListContainer.classList.remove('users-grid', 'users-list');
+    
+    // Add appropriate class
+    if (currentViewMode === 'list') {
+        DOM.userListContainer.classList.add('users-list');
+    } else {
+        DOM.userListContainer.classList.add('users-grid');
+    }
+    
+    // Update toggle buttons
+    const gridBtn = document.getElementById('view-toggle-grid');
+    const listBtn = document.getElementById('view-toggle-list');
+    
+    if (gridBtn && listBtn) {
+        if (currentViewMode === 'list') {
+            gridBtn.classList.remove('active');
+            listBtn.classList.add('active');
+        } else {
+            gridBtn.classList.add('active');
+            listBtn.classList.remove('active');
+        }
+        
+        // Replace icons after class change
+        if (window.feather) {
+            setTimeout(() => {
+                const viewToggleContainer = document.querySelector('.view-toggle-buttons');
+                if (viewToggleContainer) {
+                    feather.replace({ root: viewToggleContainer });
+                }
+            }, 10);
+        }
+    }
+}
+
+// Render pagination controls
+function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
+    const paginationContainer = document.getElementById('users-pagination');
+    if (!paginationContainer) {
+        console.warn('⚠️ [PAGINATION] Pagination container topilmadi: #users-pagination');
+        return;
+    }
+    
+    // Pagination har doim ko'rsatiladi (agar foydalanuvchilar bo'lsa)
+    if (totalUsers === 0) {
+        paginationContainer.style.display = 'none';
+        return;
+    }
+    
+    // Har doim ko'rsatish
+    paginationContainer.style.display = 'flex';
+    
+    console.log('📄 [PAGINATION] Rendering:', { totalUsers, totalPages, currentPageNum, usersPerPage });
+    
+    // Calculate page numbers to show (har doim ko'rsatish)
+    const maxVisiblePages = 7;
+    let startPage = Math.max(1, currentPageNum - Math.floor(maxVisiblePages / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+    
+    if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+    
+    // Agar faqat 1 sahifa bo'lsa ham ko'rsatish
+    if (totalPages === 1) {
+        startPage = 1;
+        endPage = 1;
+    }
+    
+    // Calculate showing range
+    const startRange = totalUsers === 0 ? 0 : (currentPageNum - 1) * usersPerPage + 1;
+    const endRange = Math.min(currentPageNum * usersPerPage, totalUsers);
+    
+    let paginationHTML = `
+        <div class="pagination-left-section">
+            <!-- Search Input -->
+            <div class="search-input-wrapper" style="position: relative; min-width: 300px; max-width: 400px;">
+                <input 
+                    type="text" 
+                    id="users-search-input" 
+                    class="form-control search-input" 
+                    placeholder="Foydalanuvchi qidirish (ism, login, email, telefon...)"
+                    value="${currentFilters.search || ''}"
+                    style="padding-right: 40px;"
+                >
+                <i data-feather="search" class="search-input-icon" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); pointer-events: none;"></i>
+                <button type="button" class="clear-search-btn" id="clear-search-btn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: rgba(255,255,255,0.5); cursor: pointer; padding: 4px; display: ${currentFilters.search ? 'flex' : 'none'}; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 4px; transition: all 0.2s ease;" title="Tozalash">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            
+            <!-- View Toggle Buttons -->
+            <div class="flex-center gap-10" style="margin-left: 15px;">
+                <span class="text-white-70 font-14">Ko'rinish:</span>
+                <div class="view-toggle-buttons">
+                    <button class="view-toggle-btn ${currentViewMode === 'grid' ? 'active' : ''}" data-view="grid" id="view-toggle-grid" title="Grid ko'rinish">
+                        <i data-feather="grid"></i>
+                    </button>
+                    <button class="view-toggle-btn ${currentViewMode === 'list' ? 'active' : ''}" data-view="list" id="view-toggle-list" title="List ko'rinish">
+                        <i data-feather="list"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="pagination-center-section">
+            <div class="pagination-info">
+                <span>Jami: <strong>${totalUsers}</strong> foydalanuvchi</span>
+                <span style="margin: 0 15px;">|</span>
+                <span>Ko'rsatilmoqda: <strong>${startRange}</strong> - <strong>${endRange}</strong></span>
+                <span style="margin: 0 15px;">|</span>
+                <span>Sahifa: <strong>${currentPageNum}</strong> / <strong>${totalPages}</strong></span>
+            </div>
+            
+            <div class="pagination-controls">
+                <button class="pagination-btn" data-page="first" ${currentPageNum === 1 ? 'disabled' : ''} title="Birinchi sahifa">
+                    <i data-feather="chevrons-left"></i>
+                </button>
+                <button class="pagination-btn" data-page="prev" ${currentPageNum === 1 ? 'disabled' : ''} title="Oldingi sahifa">
+                    <i data-feather="chevron-left"></i>
+                </button>
+                
+                ${startPage > 1 ? `<button class="pagination-btn" data-page="1">1</button>${startPage > 2 ? '<span class="pagination-dots">...</span>' : ''}` : ''}
+                
+                ${Array.from({ length: endPage - startPage + 1 }, (_, i) => {
+                    const page = startPage + i;
+                    return `<button class="pagination-btn ${page === currentPageNum ? 'active' : ''}" data-page="${page}">${page}</button>`;
+                }).join('')}
+                
+                ${endPage < totalPages ? `${endPage < totalPages - 1 ? '<span class="pagination-dots">...</span>' : ''}<button class="pagination-btn" data-page="${totalPages}">${totalPages}</button>` : ''}
+                
+                <button class="pagination-btn" data-page="next" ${currentPageNum === totalPages ? 'disabled' : ''} title="Keyingi sahifa">
+                    <i data-feather="chevron-right"></i>
+                </button>
+                <button class="pagination-btn" data-page="last" ${currentPageNum === totalPages ? 'disabled' : ''} title="Oxirgi sahifa">
+                    <i data-feather="chevrons-right"></i>
+                </button>
+            </div>
+        </div>
+        
+        <div class="pagination-right-section">
+            <div class="pagination-per-page">
+                <label style="color: rgba(255,255,255,0.7); font-size: 14px; margin-right: 8px;">Ko'rsatish:</label>
+                <select id="users-per-page-select" class="form-control pagination-select" style="width: auto; min-width: 90px; padding: 8px 35px 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; appearance: none; background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E\"); background-repeat: no-repeat; background-position: right 12px center;">
+                    <option value="5" ${usersPerPage === 5 ? 'selected' : ''} style="background: #1a1a2e; color: #fff; padding: 10px;">5</option>
+                    <option value="10" ${usersPerPage === 10 ? 'selected' : ''} style="background: #1a1a2e; color: #fff; padding: 10px;">10</option>
+                    <option value="20" ${usersPerPage === 20 ? 'selected' : ''} style="background: #1a1a2e; color: #fff; padding: 10px;">20</option>
+                    <option value="50" ${usersPerPage === 50 ? 'selected' : ''} style="background: #1a1a2e; color: #fff; padding: 10px;">50</option>
+                    <option value="100" ${usersPerPage === 100 ? 'selected' : ''} style="background: #1a1a2e; color: #fff; padding: 10px;">100</option>
+                </select>
+            </div>
+        </div>
+    `;
+    
+    paginationContainer.innerHTML = paginationHTML;
+    
+    // Replace icons
+    if (window.feather) {
+        feather.replace({ root: paginationContainer });
+    }
+    
+    // Setup pagination button listeners
+    const paginationButtons = paginationContainer.querySelectorAll('.pagination-btn[data-page]');
+    paginationButtons.forEach((btn, index) => {
+        // Remove old listeners by cloning
+        const newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        
+        newBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (newBtn.disabled) return;
+            
+            const pageAction = newBtn.dataset.page;
+            
+            if (pageAction === 'first') {
+                currentPage = 1;
+            } else if (pageAction === 'prev') {
+                currentPage = Math.max(1, currentPage - 1);
+            } else if (pageAction === 'next') {
+                currentPage = Math.min(totalPages, currentPage + 1);
+            } else if (pageAction === 'last') {
+                currentPage = totalPages;
+            } else {
+                const pageNum = parseInt(pageAction);
+                if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+                    currentPage = pageNum;
+                }
+            }
+            
+            // Scroll to top of users list
+            if (DOM.userListContainer) {
+                DOM.userListContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            
+            renderModernUsers(true);
+        });
+    });
+    
+    // Setup per-page selector
+    const perPageSelect = document.getElementById('users-per-page-select');
+    if (perPageSelect) {
+        // Remove old listener by cloning
+        const newSelect = perPageSelect.cloneNode(true);
+        perPageSelect.parentNode.replaceChild(newSelect, perPageSelect);
+        
+        newSelect.addEventListener('change', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const newValue = parseInt(e.target.value);
+            if (!isNaN(newValue) && newValue > 0) {
+                usersPerPage = newValue;
+                localStorage.setItem('usersPerPage', usersPerPage);
+                currentPage = 1; // Reset to first page
+                renderModernUsers(true);
+            }
+        });
+    } else {
+        console.warn('⚠️ [PAGINATION] Per-page selector topilmadi: #users-per-page-select');
+    }
+    
+    // Setup search input (pagination ichida)
+    setupPaginationSearchInput();
+    
+    // Setup view toggle buttons (pagination ichida)
+    setupPaginationViewToggle();
+}
+
+// Setup search input in pagination
+function setupPaginationSearchInput() {
+    const searchInput = document.getElementById('users-search-input');
+    if (!searchInput) return;
+    
+    let searchDebounceTimer = null;
+    
+    // Remove old listeners by cloning
+    const newSearchInput = searchInput.cloneNode(true);
+    searchInput.parentNode.replaceChild(newSearchInput, searchInput);
+    
+    // Clear search button
+    const clearBtn = document.getElementById('clear-search-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            newSearchInput.value = '';
+            currentFilters.search = '';
+            filteredUsersCache = null;
+            lastFiltersHash = '';
+            currentPage = 1;
+            renderModernUsers(true);
+        });
+    }
+    
+    // Show/hide clear button based on input value
+    newSearchInput.addEventListener('input', (e) => {
+        const searchTerm = e.target.value;
+        const clearBtn = document.getElementById('clear-search-btn');
+        if (clearBtn) {
+            clearBtn.style.display = searchTerm ? 'flex' : 'none';
+        }
+        
+        // Clear previous debounce timer
+        if (searchDebounceTimer) {
+            clearTimeout(searchDebounceTimer);
+        }
+        
+        // Debounce search for better performance
+        searchDebounceTimer = setTimeout(() => {
+            currentFilters.search = searchTerm;
+            filteredUsersCache = null; // Clear cache on search change
+            lastFiltersHash = ''; // Reset hash
+            currentPage = 1; // Reset to first page on search
+            renderModernUsers();
+        }, 300); // 300ms debounce
+    });
+    
+    // Replace icons
+    if (window.feather) {
+        const searchContainer = newSearchInput.parentElement;
+        feather.replace({ root: searchContainer });
+    }
+}
+
+// Setup view toggle buttons in pagination
+function setupPaginationViewToggle() {
+    const gridBtn = document.getElementById('view-toggle-grid');
+    const listBtn = document.getElementById('view-toggle-list');
+    
+    if (!gridBtn || !listBtn) {
+        console.warn('⚠️ [PAGINATION] View toggle buttons topilmadi');
+        return;
+    }
+    
+    console.log('🔄 [VIEW] View toggle buttons sozlanmoqda...');
+    
+    // Remove old listeners by cloning
+    const newGridBtn = gridBtn.cloneNode(true);
+    const newListBtn = listBtn.cloneNode(true);
+    
+    gridBtn.parentNode.replaceChild(newGridBtn, gridBtn);
+    listBtn.parentNode.replaceChild(newListBtn, listBtn);
+    
+    newGridBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('🔄 [VIEW] Grid ko\'rinish tanlandi');
+        toggleUsersViewMode('grid');
+    });
+    
+    newListBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('🔄 [VIEW] List ko\'rinish tanlandi');
+        toggleUsersViewMode('list');
+    });
+    
+    // Update active state
+    if (currentViewMode === 'grid') {
+        newGridBtn.classList.add('active');
+        newListBtn.classList.remove('active');
+    } else {
+        newGridBtn.classList.remove('active');
+        newListBtn.classList.add('active');
+    }
+    
+    // Replace icons
+    if (window.feather) {
+        const viewToggleContainer = document.querySelector('.view-toggle-buttons');
+        if (viewToggleContainer) {
+            feather.replace({ root: viewToggleContainer });
+        }
+    }
+}
+
+// Toggle view mode
+export function toggleUsersViewMode(mode) {
+    if (mode && (mode === 'grid' || mode === 'list')) {
+        currentViewMode = mode;
+    } else {
+        // Toggle between grid and list
+        currentViewMode = currentViewMode === 'grid' ? 'list' : 'grid';
+    }
+    
+    // Save to localStorage
+    localStorage.setItem('usersViewMode', currentViewMode);
+    
+    // Apply view mode
+    applyViewMode();
+    
+    // Re-render users (immediate, no debounce for view change)
+    renderModernUsers(true);
 }
 
 // Setup event listeners for user card action buttons
+let userCardEventListenersSetup = false;
+
 function setupUserCardEventListeners() {
-    if (!DOM.userListContainer) return;
+    if (!DOM.userListContainer) {
+        console.log('🔍 [SETUP] DOM.userListContainer topilmadi');
+        return;
+    }
+    
+    // Agar allaqachon sozlangan bo'lsa, qayta sozlamaslik
+    if (userCardEventListenersSetup) {
+        console.log('⚠️ [SETUP] Event listener allaqachon qo\'shilgan, qayta qo\'shilmaydi');
+        return;
+    }
+    
+    console.log('✅ [SETUP] Event listener qo\'shilmoqda...');
     
     // Event delegation - barcha user card action buttonlar uchun
-    DOM.userListContainer.addEventListener('click', async (e) => {
+    const clickHandler = async (e) => {
+        // Faqat .user-card-action-btn class'iga ega button'lar uchun ishlash
         const button = e.target.closest('.user-card-action-btn');
-        if (!button) return;
+        if (!button) {
+            // Agar button topilmasa, bu boshqa element (filter badge, checkbox, va h.k.)
+            return;
+        }
         
         // Icon yoki span ichida bosilgan bo'lsa, button'ni topish
         const actualButton = button.closest('button') || button;
-        if (!actualButton) return;
+        if (!actualButton || !actualButton.classList.contains('user-card-action-btn')) {
+            return;
+        }
         
         // Permission tekshirish
         const permission = actualButton.dataset.permission;
@@ -155,55 +732,147 @@ function setupUserCardEventListeners() {
         }
         
         await handleUserActions({ target: actualButton });
-    });
+    };
     
-    // Sessiya tugatish buttonlari uchun (event delegation)
-    if (DOM.sessionsListContainer) {
-        // Eski listener'larni olib tashlash
-        DOM.sessionsListContainer.removeEventListener('click', handleSessionTerminate);
-        DOM.sessionsListContainer.addEventListener('click', handleSessionTerminate);
+    DOM.userListContainer.addEventListener('click', clickHandler);
+    userCardEventListenersSetup = true;
+    console.log('✅ [SETUP] Event listener muvaffaqiyatli qo\'shildi');
+    
+    // Sessiya tugatish buttonlari uchun (event delegation) - faqat bir marta
+    if (DOM.sessionsListContainer && !DOM.sessionsListContainer._sessionTerminateHandler) {
+        const sessionTerminateHandler = (e) => {
+            if (e.target.closest('.terminate-session-btn')) {
+                handleSessionTerminate(e);
+            }
+        };
+        DOM.sessionsListContainer.addEventListener('click', sessionTerminateHandler);
+        DOM.sessionsListContainer._sessionTerminateHandler = sessionTerminateHandler;
     }
 }
 
-// Sessiya tugatish handler
+// Sessiya tugatish handler (bitta funksiya)
+let isTerminatingSession = false;
+
 async function handleSessionTerminate(e) {
+    // Event delegation tekshiruvi
     const button = e.target.closest('.terminate-session-btn');
     if (!button) return;
     
+    // Agar allaqachon ishlanmoqda bo'lsa, qayta ishlamaslik
+    if (isTerminatingSession) {
+        console.log('⚠️ [TERMINATE] Sessiya tugatish allaqachon jarayonda...');
+        return;
+    }
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
     const sessionId = button.dataset.sid;
-    if (!sessionId) return;
+    if (!sessionId) {
+        console.error('❌ [TERMINATE] Sessiya ID topilmadi');
+        return;
+    }
     
-    const confirmed = await showConfirmDialog({
-        title: '⚠️ Sessiyani Tugatish',
-        message: 'Rostdan ham bu sessiyani tugatmoqchimisiz?',
-        confirmText: 'Ha, tugatish',
-        cancelText: 'Bekor qilish',
-        type: 'danger',
-        icon: 'alert-triangle'
-    });
+    console.log('🔐 [TERMINATE] Sessiya tugatish boshlandi. SID:', sessionId);
+    isTerminatingSession = true;
     
-    if (!confirmed) return;
+    // Button'ni disable qilish
+    button.disabled = true;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<div class="loading-spinner"></div> Tugatilmoqda...';
     
     try {
-        const res = await safeFetch(`/api/sessions/${sessionId}`, {
+        const confirmed = await showConfirmDialog({
+            title: '⚠️ Sessiyani Tugatish',
+            message: 'Rostdan ham bu sessiyani tugatmoqchimisiz?',
+            confirmText: 'Ha, tugatish',
+            cancelText: 'Bekor qilish',
+            type: 'danger',
+            icon: 'alert-triangle'
+        });
+        
+        if (!confirmed) {
+            console.log('❌ [TERMINATE] Bekor qilindi');
+            button.disabled = false;
+            button.innerHTML = originalText;
+            isTerminatingSession = false;
+            return;
+        }
+        
+        console.log('📡 [TERMINATE] API so\'rovi yuborilmoqda...');
+        const res = await safeFetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'DELETE'
         });
         
-        if (!res || !res.ok) {
-            const errorData = await res.json();
-            throw new Error(errorData.message || 'Sessiyani tugatishda xatolik');
+        if (!res) {
+            throw new Error('Server bilan bog\'lanishda xatolik');
         }
         
-        showToast('Sessiya muvaffaqiyatli tugatildi', 'success');
+        if (!res.ok) {
+            const errorData = await res.json().catch(() => ({ message: 'Sessiyani tugatishda xatolik' }));
+            throw new Error(errorData.message || `Sessiyani tugatishda xatolik (${res.status})`);
+        }
+        
+        const result = await res.json();
+        console.log('✅ [TERMINATE] Sessiya muvaffaqiyatli tugatildi');
+        
+        showToast(result.message || 'Sessiya muvaffaqiyatli tugatildi', 'success');
         
         // Modal'ni yangilash - saqlangan userId va username dan foydalanish
         const userId = DOM.sessionsModal?.dataset.userId;
         const username = DOM.sessionsModal?.dataset.username;
         if (userId && username) {
-            await openSessionsModal(userId, username);
+            // Modal'ni darhol yangilash (flag'ni o'rnatish)
+            isOpeningSessionsModal = true;
+            
+            // Button holatini darhol qaytarish (modal yangilanishidan oldin)
+            button.disabled = false;
+            button.innerHTML = originalText;
+            
+            // Kichik kechikish - toast ko'rsatilishi uchun
+            setTimeout(async () => {
+                try {
+                    await openSessionsModal(userId, username);
+                } catch (error) {
+                    console.error('❌ [TERMINATE] Modal yangilashda xatolik:', error);
+                    isOpeningSessionsModal = false;
+                }
+            }, 300);
+        } else {
+            // Agar modal ochiq bo'lsa, sessiyani DOM'dan olib tashlash
+            const sessionItem = button.closest('.session-item-modern');
+            if (sessionItem) {
+                sessionItem.style.transition = 'opacity 0.3s, transform 0.3s';
+                sessionItem.style.opacity = '0';
+                sessionItem.style.transform = 'translateX(-20px)';
+                setTimeout(() => {
+                    sessionItem.remove();
+                    // Agar barcha sessiyalar tugatilgan bo'lsa, empty state ko'rsatish
+                    const remainingSessions = DOM.sessionsListContainer.querySelectorAll('.session-item-modern');
+                    if (remainingSessions.length === 0) {
+                        DOM.sessionsListContainer.innerHTML = `
+                            <div class="empty-state-modern">
+                                <div class="empty-state-icon">
+                                    <i data-feather="monitor"></i>
+                                </div>
+                                <h4>Aktiv sessiyalar topilmadi</h4>
+                                <p>Bu foydalanuvchining hozirgi vaqtda aktiv sessiyalari yo'q.</p>
+                            </div>
+                        `;
+                        if (window.feather) {
+                            window.feather.replace();
+                        }
+                    }
+                }, 300);
+            }
         }
     } catch (error) {
-        showToast(error.message, 'error');
+        console.error('❌ [TERMINATE] Xatolik:', error);
+        showToast(error.message || 'Sessiyani tugatishda xatolik', 'error');
+        button.disabled = false;
+        button.innerHTML = originalText;
+    } finally {
+        isTerminatingSession = false;
     }
 }
 
@@ -223,17 +892,59 @@ function renderModernUserCard(user) {
     // Status badge
     const userStatus = user.status === 'blocked' || user.status === 'archived' ? 'inactive' : 
                       user.status.startsWith('pending') ? 'pending' : 'active';
+    
+    // Agar foydalanuvchi hech narsa ko'ra olmasa (filial va brend ikkalasi ham tanlanmagan)
+    // Superadmin uchun istisno - superadmin barcha ma'lumotlarni ko'ra oladi
+    const isSuperadmin = user.role === 'superadmin' || user.role === 'super_admin';
+    const hasNoAccess = !isSuperadmin && (user.has_no_access || false);
 
     return `
-        <div class="user-card" data-user-id="${user.id}">
+        <div class="user-card ${hasNoAccess ? 'user-card-no-access' : ''}" data-user-id="${user.id}">
+            ${hasNoAccess ? `
+            <div class="user-card-warning-banner" style="
+                background: linear-gradient(135deg, #ef4444, #dc2626);
+                color: white;
+                padding: 12px 16px;
+                border-radius: 8px 8px 0 0;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                font-size: 13px;
+                font-weight: 600;
+                animation: pulse-warning 2s infinite;
+                box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+            ">
+                <i data-feather="alert-triangle" style="width: 18px; height: 18px;"></i>
+                <span>⚠️ Hech qanday ma'lumot ko'ra olmaydi (Filial va Brend tanlanmagan)</span>
+            </div>
+            ` : ''}
             <div class="user-card-header">
                 <input type="checkbox" class="user-card-checkbox" 
                        data-user-id="${user.id}"
                        onchange="window.toggleUserSelection(${user.id}, this)">
                 
-                <div class="user-card-avatar">
+                <div class="user-card-avatar ${hasNoAccess ? 'avatar-warning' : ''}">
                     ${initials}
                     <div class="user-card-status-indicator ${statusIndicator}"></div>
+                    ${hasNoAccess ? `
+                    <div class="user-card-warning-indicator" style="
+                        position: absolute;
+                        top: -5px;
+                        right: -5px;
+                        width: 20px;
+                        height: 20px;
+                        background: #ef4444;
+                        border-radius: 50%;
+                        border: 3px solid var(--card-bg);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        animation: pulse-warning 2s infinite;
+                        box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+                    ">
+                        <i data-feather="alert-circle" style="width: 12px; height: 12px; color: white;"></i>
+                    </div>
+                    ` : ''}
                 </div>
 
                 <div class="user-card-info">
@@ -269,7 +980,7 @@ function renderModernUserCard(user) {
                 ` : ''}
                 <div class="user-card-detail-item">
                     <i data-feather="calendar"></i>
-                    <span>Ro'yxatdan o'tgan: ${new Date(user.created_at).toLocaleDateString('uz-UZ')}</span>
+                    <span>Ro'yxatdan o'tgan: ${formatDate(user.created_at)}</span>
                 </div>
                 <div class="user-card-detail-item">
                     <i data-feather="activity"></i>
@@ -279,6 +990,35 @@ function renderModernUserCard(user) {
                 <div class="user-card-detail-item">
                     <i data-feather="send"></i>
                     <span>Telegram: <strong>@${user.telegram_username}</strong></span>
+                </div>
+                ` : ''}
+            </div>
+
+            <div class="user-card-meta">
+                ${user.email ? `
+                <div class="user-card-meta-item">
+                    <i data-feather="mail"></i>
+                    <span>${user.email}</span>
+                </div>
+                ` : ''}
+                ${user.phone ? `
+                <div class="user-card-meta-item">
+                    <i data-feather="phone"></i>
+                    <span>${user.phone}</span>
+                </div>
+                ` : ''}
+                <div class="user-card-meta-item">
+                    <i data-feather="calendar"></i>
+                    <span>${formatDate(user.created_at)}</span>
+                </div>
+                <div class="user-card-meta-item">
+                    <i data-feather="activity"></i>
+                    <span>Sessiyalar: ${user.active_sessions_count || 0}</span>
+                </div>
+                ${user.telegram_username ? `
+                <div class="user-card-meta-item">
+                    <i data-feather="send"></i>
+                    <span>@${user.telegram_username}</span>
                 </div>
                 ` : ''}
             </div>
@@ -370,17 +1110,6 @@ function updateUsersStatistics() {
     if (onlineStatusCountOffline) onlineStatusCountOffline.textContent = offlineUsers;
 }
 
-// OLD FUNCTION (kept for compatibility)
-export function renderUsersByStatus(status) {
-    // Use new modern render with status filter
-    currentFilters.status = status === 'active' ? 'active' : 
-                            status === 'pending' ? 'pending' : 
-                            status === 'inactive' ? 'inactive' : '';
-    renderModernUsers();
-}
-
-
-
 export function renderPendingUsers() {
     // Check if modern requests section exists
     const modernContainer = document.getElementById('pending-users-list');
@@ -419,7 +1148,7 @@ export function renderPendingUsers() {
                 <div class="username">${user.fullname || 'Nomsiz'} (@${user.username})</div>
                 <div class="user-meta">
                     <span>${statusText}</span> |
-                    <span>Sana: ${new Date(user.created_at).toLocaleDateString('uz-UZ')}</span>
+                    <span>Sana: ${user.created_at ? formatDate(user.created_at) : 'Noma\'lum'}</span>
                 </div>
             </div>
             <div class="item-actions">
@@ -547,29 +1276,19 @@ export async function toggleLocationVisibilityForApprovalForm() {
     if (isRequirementsUndefined) {
         console.log(`⚠️ [ROL TANLASH] 5. Shartlar belgilanmagan! UI o'zgartirilmoqda...`);
         // Shartlar belgilanmagan - filiallar va brendlarni yashirish
-        if (DOM.approvalLocationsGroup) {
-            DOM.approvalLocationsGroup.style.display = 'none';
-            console.log(`   ✅ Filiallar yashirildi`);
-        }
-        if (approvalBrandsGroup) {
-            approvalBrandsGroup.style.display = 'none';
-            console.log(`   ✅ Brendlar yashirildi`);
-        }
-        if (approvalRoleRequirementsGroup) {
-            approvalRoleRequirementsGroup.style.display = 'block';
-            console.log(`   ✅ "Rol Shartini Kiritish" ko'rsatildi`);
-        }
+        VisibilityHelper.hide(DOM.approvalLocationsGroup);
+        VisibilityHelper.hide(approvalBrandsGroup);
+        VisibilityHelper.show(approvalRoleRequirementsGroup);
+        console.log(`   ✅ Filiallar va brendlar yashirildi, "Rol Shartini Kiritish" ko'rsatildi`);
         
         // Shartlar belgilanmagan bo'limini ko'rsatish
         const requirementsNotSet = document.getElementById('requirements-not-set');
         const requirementsSet = document.getElementById('requirements-set');
-        if (requirementsNotSet) requirementsNotSet.style.display = 'block';
-        if (requirementsSet) requirementsSet.style.display = 'none';
+        VisibilityHelper.show(requirementsNotSet);
+        VisibilityHelper.hide(requirementsSet);
         
-        if (submitBtn) {
-            submitBtn.style.display = 'none';
-            console.log(`   ✅ Tasdiqlash tugmasi yashirildi`);
-        }
+        VisibilityHelper.hide(submitBtn);
+        console.log(`   ✅ Tasdiqlash tugmasi yashirildi`);
         
         // Tugma event listener - modal ochish
         const setRequirementsBtn = document.getElementById('set-role-requirements-btn');
@@ -1081,12 +1800,57 @@ export function openUserModalForAdd() {
     }
     
     toggleLocationVisibilityForUserForm();
-    DOM.userFormModal?.classList.remove('hidden');
+    ModalHelper.show(DOM.userFormModal);
 }
 
+// Modal ochilganligini tekshirish uchun flag
+let isUserModalOpen = false;
+let currentEditingUserId = null;
+let modalOpenTimeout = null;
+
 export async function openUserModalForEdit(userId) {
+    // Agar modal allaqachon ochilgan bo'lsa va bir xil foydalanuvchi tahrirlanmoqda bo'lsa, qayta ochmaslik
+    if (isUserModalOpen && currentEditingUserId === userId && DOM.userFormModal && !DOM.userFormModal.classList.contains('hidden')) {
+        console.log(`⚠️ [USERS] Modal allaqachon ochilgan (User ID: ${userId}), qayta ochilmaydi`);
+        return;
+    }
+    
+    // Agar modal ochilmoqda bo'lsa, keyingi chaqiruvni bekor qilish
+    if (modalOpenTimeout) {
+        clearTimeout(modalOpenTimeout);
+        modalOpenTimeout = null;
+    }
+    
+    // Debounce - qisqa vaqt ichida bir necha marta chaqirilganda, faqat oxirgisi ishlaydi
+    modalOpenTimeout = setTimeout(async () => {
+        modalOpenTimeout = null;
+        await executeOpenUserModalForEdit(userId);
+    }, 100);
+}
+
+async function executeOpenUserModalForEdit(userId) {
+    // Agar modal allaqachon ochilgan bo'lsa, qayta ochmaslik
+    if (isUserModalOpen && DOM.userFormModal && !DOM.userFormModal.classList.contains('hidden')) {
+        console.log(`⚠️ [USERS] Modal allaqachon ochilgan, qayta ochilmaydi`);
+        return;
+    }
+    
+    console.log(`🔍 [USERS] openUserModalForEdit chaqirildi - User ID: ${userId}`);
     const user = state.users.find(u => u.id == userId);
-    if (!user || !DOM.userForm) return;
+    if (!user || !DOM.userForm) {
+        console.warn(`⚠️ [USERS] Foydalanuvchi topilmadi yoki form mavjud emas`);
+        return;
+    }
+    
+    isUserModalOpen = true;
+    currentEditingUserId = userId;
+    
+    console.log(`📝 [USERS] Foydalanuvchi ma'lumotlari:`, {
+        id: user.id,
+        username: user.username,
+        currentRole: user.role,
+        currentUserRole: state.currentUser?.role
+    });
     
     DOM.userForm.reset();
     DOM.editUserIdInput.value = user.id;
@@ -1095,71 +1859,153 @@ export async function openUserModalForEdit(userId) {
     DOM.fullnameInput.value = user.fullname || '';
     DOM.passwordGroup.style.display = 'none';
     DOM.passwordInput.required = false;
+    
+    // Superadmin rolini to'liq olib tashlash va superadmin tomonidan yaratilgan barcha rollarga o'zgartirish imkoniyati
+    const isCurrentUserSuperadmin = state.currentUser?.role === 'superadmin' || state.currentUser?.role === 'super_admin';
+    const isEditingSuperadmin = user.role === 'superadmin' || user.role === 'super_admin';
+    const isEditingSelf = parseInt(userId) === parseInt(state.currentUser?.id);
+    const isSuperadminEditingSelf = isCurrentUserSuperadmin && isEditingSuperadmin && isEditingSelf;
+    
+    console.log(`🔐 [USERS] Rol tekshiruvi:`, {
+        isCurrentUserSuperadmin,
+        isEditingSuperadmin,
+        isEditingSelf,
+        isSuperadminEditingSelf,
+        currentUserRole: state.currentUser?.role,
+        editingUserRole: user.role
+    });
+    
     if (!state.roles || !Array.isArray(state.roles)) {
         DOM.userRoleSelect.innerHTML = `<option value="${user.role || ''}" selected>${user.role || 'Rollar yuklanmoqda...'}</option>`;
     } else {
-        DOM.userRoleSelect.innerHTML = state.roles
-            .filter(r => r.role_name !== 'admin' && r.role_name !== 'super_admin') // Admin va super admin yaratish mumkin emas
+        // Superadmin rolini to'liq olib tashlash (ham superadmin, ham super_admin)
+        // Agar joriy foydalanuvchi superadmin bo'lsa va superadminni tahrirlamayotgan bo'lsa,
+        // barcha rollarni ko'rsatish (superadmin va super_admin dan tashqari)
+        let filteredRoles = state.roles;
+        
+        if (isEditingSuperadmin) {
+            // Superadminni tahrirlashda - faqat joriy rolini ko'rsatish, o'zgartirish mumkin emas
+            console.log(`🚫 [USERS] Superadminni tahrirlash - rol o'zgartirish mumkin emas`);
+            filteredRoles = state.roles.filter(r => r.role_name === user.role);
+        } else if (isCurrentUserSuperadmin) {
+            // Superadmin tomonidan yaratilgan barcha rollarga o'zgartirish imkoniyati
+            // Superadmin va super_admin dan tashqari barcha rollarni ko'rsatish
+            console.log(`✅ [USERS] Superadmin tomonidan - barcha rollarga o'zgartirish imkoniyati`);
+            filteredRoles = state.roles.filter(r => 
+                r.role_name !== 'superadmin' && r.role_name !== 'super_admin'
+            );
+        } else {
+            // Boshqa foydalanuvchilar uchun - admin va superadmin olib tashlash
+            console.log(`🔒 [USERS] Oddiy foydalanuvchi - admin va superadmin olib tashlangan`);
+            filteredRoles = state.roles.filter(r => 
+                r.role_name !== 'admin' && r.role_name !== 'superadmin' && r.role_name !== 'super_admin'
+            );
+        }
+        
+        console.log(`📋 [USERS] Ko'rsatiladigan rollar:`, filteredRoles.map(r => r.role_name));
+        
+        DOM.userRoleSelect.innerHTML = filteredRoles
             .map(r => 
                 `<option value="${r.role_name}" ${user.role === r.role_name ? 'selected' : ''}>${r.role_name}</option>`
             ).join('');
-    }
-    DOM.deviceLimitInput.value = user.device_limit;
-    
-    // User-specific sozlamalarni yuklash
-    try {
-        const settingsRes = await safeFetch(`/api/users/${userId}/settings`);
-        if (settingsRes && settingsRes.ok) {
-            const settings = await settingsRes.json();
-            if (DOM.userRequiresLocations) {
-                DOM.userRequiresLocations.value = settings.requires_locations === null ? 'null' : 
-                    settings.requires_locations === true ? 'true' : 
-                    settings.requires_locations === false ? 'false' : '';
-            }
-            if (DOM.userRequiresBrands) {
-                DOM.userRequiresBrands.value = settings.requires_brands === null ? 'null' : 
-                    settings.requires_brands === true ? 'true' : 
-                    settings.requires_brands === false ? 'false' : '';
-            }
-        }
-    } catch (error) {
-        console.warn('User settings yuklanmadi:', error);
-        // Default qiymatlar
-        if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
-        if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
-    }
-    
-    // Filiallarni tanlash
-    if (user.locations && Array.isArray(user.locations)) {
-        document.querySelectorAll('#locations-checkbox-list input').forEach(cb => {
-            cb.checked = user.locations.includes(cb.value);
-        });
-    }
-    
-    // Rol tanlanganda sozlamalar bo'limini ko'rsatish
-    if (DOM.userRoleSelect) {
-        // Eski event listener'larni olib tashlash
-        const newSelect = DOM.userRoleSelect.cloneNode(true);
-        DOM.userRoleSelect.parentNode.replaceChild(newSelect, DOM.userRoleSelect);
-        DOM.userRoleSelect = newSelect;
         
-        DOM.userRoleSelect.addEventListener('change', toggleLocationVisibilityForUserForm);
+        // Agar superadminni tahrirlashda bo'lsa, rol select'ni disabled qilish
+        if (isEditingSuperadmin) {
+            DOM.userRoleSelect.disabled = true;
+            console.log(`🔒 [USERS] Rol select disabled qilindi (superadmin)`);
+        } else {
+            DOM.userRoleSelect.disabled = false;
+        }
     }
     
-    toggleLocationVisibilityForUserForm();
-    
-    // Tanlangan filiallarni ko'rsatish
-    updateSelectedLocationsDisplay(user.locations || []);
-    
-    // Tanlangan brendlarni ko'rsatish
-    if (DOM.userBrandsGroup && DOM.userBrandsGroup.style.display !== 'none') {
-        await loadBrandsForUser(userId);
-        // Brendlarni yuklagandan keyin tanlanganlarni ko'rsatish
-        const userBrandsRes = await safeFetch(`/api/brands/user/${userId}`);
-        if (userBrandsRes && userBrandsRes.ok) {
-            const data = await userBrandsRes.json();
-            const userBrands = data.brands || [];
-            updateSelectedBrandsDisplay(userBrands);
+    // Superadmin o'zini tahrirlayotgan bo'lsa, faqat login, to'liq ism, parol o'zgartirish imkoniyati
+    if (isSuperadminEditingSelf) {
+        console.log(`🔧 [USERS] Superadmin o'zini tahrirlayapti - login, to'liq ism, parol va qurulma soni o'zgartirish mumkin`);
+        
+        // Rol select'ni yashirish
+        if (DOM.userRoleSelect && DOM.userRoleSelect.parentElement) {
+            DOM.userRoleSelect.parentElement.style.display = 'none';
+        }
+        
+        // Device limit'ni ko'rsatish (superadmin o'zini tahrirlashda)
+        if (DOM.deviceLimitInput && DOM.deviceLimitInput.closest('.form-group')) {
+            DOM.deviceLimitInput.closest('.form-group').style.display = 'block';
+            DOM.deviceLimitInput.value = user.device_limit || '';
+        }
+        
+        // User-specific sozlamalarni yashirish (filial va brendlar)
+        if (DOM.userSettingsGroup) {
+            DOM.userSettingsGroup.style.display = 'none';
+        }
+        if (DOM.userLocationsGroup) {
+            DOM.userLocationsGroup.style.display = 'none';
+        }
+        if (DOM.userBrandsGroup) {
+            DOM.userBrandsGroup.style.display = 'none';
+        }
+        
+        // Parol o'zgartirish imkoniyatini ko'rsatish
+        DOM.passwordGroup.style.display = 'block';
+        DOM.passwordInput.required = false; // Parol ixtiyoriy (o'zgartirish uchun)
+        DOM.passwordInput.placeholder = 'Yangi parol (ixtiyoriy)';
+    } else {
+        DOM.deviceLimitInput.value = user.device_limit;
+        
+        // User-specific sozlamalarni yuklash
+        try {
+            const settingsRes = await safeFetch(`/api/users/${userId}/settings`);
+            if (settingsRes && settingsRes.ok) {
+                const settings = await settingsRes.json();
+                if (DOM.userRequiresLocations) {
+                    DOM.userRequiresLocations.value = settings.requires_locations === null ? 'null' : 
+                        settings.requires_locations === true ? 'true' : 
+                        settings.requires_locations === false ? 'false' : '';
+                }
+                if (DOM.userRequiresBrands) {
+                    DOM.userRequiresBrands.value = settings.requires_brands === null ? 'null' : 
+                        settings.requires_brands === true ? 'true' : 
+                        settings.requires_brands === false ? 'false' : '';
+                }
+            }
+        } catch (error) {
+            console.warn('User settings yuklanmadi:', error);
+            // Default qiymatlar
+            if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
+            if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
+        }
+        
+        // Filiallarni tanlash
+        if (user.locations && Array.isArray(user.locations)) {
+            document.querySelectorAll('#locations-checkbox-list input').forEach(cb => {
+                cb.checked = user.locations.includes(cb.value);
+            });
+        }
+        
+        // Rol tanlanganda sozlamalar bo'limini ko'rsatish
+        if (DOM.userRoleSelect) {
+            // Eski event listener'larni olib tashlash
+            const newSelect = DOM.userRoleSelect.cloneNode(true);
+            DOM.userRoleSelect.parentNode.replaceChild(newSelect, DOM.userRoleSelect);
+            DOM.userRoleSelect = newSelect;
+            
+            DOM.userRoleSelect.addEventListener('change', toggleLocationVisibilityForUserForm);
+        }
+        
+        toggleLocationVisibilityForUserForm();
+        
+        // Tanlangan filiallarni ko'rsatish
+        updateSelectedLocationsDisplay(user.locations || []);
+        
+        // Tanlangan brendlarni ko'rsatish
+        if (DOM.userBrandsGroup && DOM.userBrandsGroup.style.display !== 'none') {
+            await loadBrandsForUser(userId);
+            // Brendlarni yuklagandan keyin tanlanganlarni ko'rsatish
+            const userBrandsRes = await safeFetch(`/api/brands/user/${userId}`);
+            if (userBrandsRes && userBrandsRes.ok) {
+                const data = await userBrandsRes.json();
+                const userBrands = data.brands || [];
+                updateSelectedBrandsDisplay(userBrands);
+            }
         }
     }
     
@@ -1171,7 +2017,28 @@ export async function openUserModalForEdit(userId) {
         window.feather.replace();
     }
     
-    DOM.userFormModal.classList.remove('hidden');
+    ModalHelper.show(DOM.userFormModal);
+    
+    // Modal yopilganda flag'ni yangilash
+    const closeModal = () => {
+        isUserModalOpen = false;
+        currentEditingUserId = null;
+    };
+    
+    // Modal yopilganda event listener qo'shish (faqat bir marta)
+    if (!DOM.userFormModal.dataset.closeListenerAdded) {
+        DOM.userFormModal.addEventListener('click', (e) => {
+            // Agar modal tashqarisiga (background'ga) bosilgan bo'lsa, modal yopiladi
+            if (e.target === DOM.userFormModal) {
+                closeModal();
+            }
+            // Agar close-modal-btn'ga bosilgan bo'lsa, modal yopiladi
+            if (e.target.closest('.close-modal-btn')) {
+                closeModal();
+            }
+        });
+        DOM.userFormModal.dataset.closeListenerAdded = 'true';
+    }
 }
 
 // Tanlangan filiallarni ko'rsatish
@@ -1302,38 +2169,142 @@ async function openLocationsSelectModal() {
         });
     }
     
-    // Filiallarni yuklash
+    // Filiallarni yuklash - agar brend tanlangan bo'lsa, faqat shu brenddagi filiallarni ko'rsatish
     try {
-        const settingsRes = await safeFetch('/api/settings');
-        if (!settingsRes || !settingsRes.ok) throw new Error('Filiallarni yuklab bo\'lmadi');
-        const settings = await settingsRes.json();
-        const locations = settings.app_settings?.locations || [];
+        // Hozirgi tanlangan brendlarni olish - agar brend tanlangan bo'lsa, faqat shu brenddagi filiallarni ko'rsatish
+        const selectedBrandsDisplay = document.getElementById('selected-brands-display');
+        const selectedBrandIds = [];
+        if (selectedBrandsDisplay) {
+            selectedBrandsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
+                const removeBtn = tag.querySelector('.remove-btn');
+                if (removeBtn) {
+                    const onclickStr = removeBtn.getAttribute('onclick') || '';
+                    const match = onclickStr.match(/removeBrand\((\d+)\)/);
+                    if (match) {
+                        selectedBrandIds.push(parseInt(match[1]));
+                    }
+                }
+            });
+        }
         
-        // Modal'da ko'rsatish - grid ko'rinishida
-        list.innerHTML = locations.map(loc => {
+        let locations = [];
+        if (selectedBrandIds.length > 0 && selectedLocations.length === 0) {
+            // Brend tanlangan, filial tanlanmagan - faqat tanlangan brendlardagi filiallarni olish
+            console.log(`🔍 [USERS] Brend tanlangan (${selectedBrandIds.length} ta), faqat shu brendlardagi filiallarni yuklayapman...`);
+            const allLocationsSet = new Set();
+            for (const brandId of selectedBrandIds) {
+                const res = await safeFetch(`/api/brands/${brandId}/locations`);
+                if (res && res.ok) {
+                    const brandLocations = await res.json();
+                    brandLocations.forEach(loc => allLocationsSet.add(loc));
+                }
+            }
+            locations = Array.from(allLocationsSet);
+            console.log(`✅ [USERS] ${locations.length} ta filial topildi (tanlangan brendlarda)`);
+        } else {
+            // Barcha filiallarni olish
+            const settingsRes = await safeFetch('/api/settings');
+            if (!settingsRes || !settingsRes.ok) throw new Error('Filiallarni yuklab bo\'lmadi');
+            const settings = await settingsRes.json();
+            locations = settings.app_settings?.locations || [];
+        }
+        
+        // "Barchasini belgilash" tugmasi
+        const selectAllHtml = `
+            <div class="select-all-location-item" style="
+                grid-column: 1 / -1;
+                margin-bottom: 10px;
+                padding: 12px;
+                background: rgba(79, 172, 254, 0.15);
+                border: 1px solid rgba(79, 172, 254, 0.3);
+                border-radius: 8px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                transition: all 0.2s;
+            " onclick="selectAllLocations()" onmouseenter="this.style.background='rgba(79, 172, 254, 0.25)'" onmouseleave="this.style.background='rgba(79, 172, 254, 0.15)'">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 18px;">📍</span>
+                    <span style="font-size: 14px; font-weight: 600; color: #4facfe;">Barchasini belgilash</span>
+                </div>
+                <input type="checkbox" id="select-all-locations-checkbox" ${locations.length > 0 && locations.every(l => selectedLocations.includes(l)) ? 'checked' : ''} onclick="event.stopPropagation(); selectAllLocations()" style="width: 18px; height: 18px; cursor: pointer;">
+            </div>
+        `;
+        
+        // Modal'da ko'rsatish - tag ko'rinishida (rasmdagidek)
+        const locationsHtml = locations.map(loc => {
             const isSelected = selectedLocations.includes(loc);
             const locEscaped = loc.replace(/'/g, "\\'");
             return `
-                <div class="modal-list-item ${isSelected ? 'selected' : ''}" data-location="${locEscaped}" onclick="toggleLocationCard('${locEscaped}')" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; text-align: center; min-height: 100px; cursor: pointer;">
-                    <input type="checkbox" id="loc-checkbox-${locEscaped}" ${isSelected ? 'checked' : ''} onchange="toggleLocationSelection('${locEscaped}', this)" onclick="event.stopPropagation();" style="margin-bottom: 8px; cursor: pointer;">
-                    <div class="item-content" style="flex-direction: column; gap: 8px; pointer-events: none;">
-                        <span class="item-icon" style="font-size: 32px;">📍</span>
-                        <span class="item-name" style="font-size: 13px; font-weight: 600;">${loc}</span>
+                <div class="location-tag-item ${isSelected ? 'selected' : ''}" data-location="${locEscaped}" onclick="toggleLocationCard('${locEscaped}')" style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 10px 14px;
+                    background: ${isSelected ? 'rgba(79, 172, 254, 0.2)' : 'rgba(79, 172, 254, 0.1)'};
+                    border: 1px solid ${isSelected ? 'rgba(79, 172, 254, 0.5)' : 'rgba(79, 172, 254, 0.3)'};
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    box-shadow: ${isSelected ? '0 0 10px rgba(79, 172, 254, 0.3)' : 'none'};
+                " onmouseenter="if(!this.classList.contains('selected')) { this.style.background='rgba(79, 172, 254, 0.15)'; this.style.boxShadow='0 0 5px rgba(79, 172, 254, 0.2)'; }" onmouseleave="if(!this.classList.contains('selected')) { this.style.background='rgba(79, 172, 254, 0.1)'; this.style.boxShadow='none'; }">
+                    <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+                        <span style="font-size: 16px; color: #ef4444;">📍</span>
+                        <span class="tag-text" style="font-size: 14px; font-weight: 500; color: #ffffff;">${loc}</span>
                     </div>
+                    <input type="checkbox" id="loc-checkbox-${locEscaped}" ${isSelected ? 'checked' : ''} onchange="toggleLocationSelection('${locEscaped}', this)" onclick="event.stopPropagation();" style="display: none;">
+                    <button class="remove-btn" onclick="event.stopPropagation(); toggleLocationCard('${locEscaped}')" style="
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 50%;
+                        background: #ef4444;
+                        border: none;
+                        color: white;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 12px;
+                        padding: 0;
+                        margin-left: 10px;
+                        transition: all 0.2s;
+                    " onmouseenter="this.style.background='#dc2626'; this.style.transform='scale(1.1)'" onmouseleave="this.style.background='#ef4444'; this.style.transform='scale(1)'">
+                        ×
+                    </button>
                 </div>
             `;
         }).join('');
+        
+        list.innerHTML = selectAllHtml + locationsHtml;
+        
+        // Grid ko'rinishini o'zgartirish - 2 ustunli
+        list.style.display = 'grid';
+        list.style.gridTemplateColumns = 'repeat(2, 1fr)';
+        list.style.gap = '10px';
+        list.style.padding = '10px';
         
         // Qidiruv
         if (searchInput) {
             searchInput.value = '';
             searchInput.oninput = (e) => {
                 const query = e.target.value.toLowerCase();
-                list.querySelectorAll('.modal-list-item').forEach(item => {
+                const selectAllItem = document.querySelector('.select-all-location-item');
+                list.querySelectorAll('.location-tag-item').forEach(item => {
                     const location = item.dataset.location.toLowerCase();
                     item.style.display = location.includes(query) ? 'flex' : 'none';
                 });
+                // Qidiruv bo'lsa "Barchasini belgilash" ni yashirish
+                if (selectAllItem) {
+                    selectAllItem.style.display = query ? 'none' : 'flex';
+                }
             };
+        }
+        
+        // "Barchasini belgilash" checkbox event listener
+        const selectAllCheckbox = document.getElementById('select-all-locations-checkbox');
+        if (selectAllCheckbox) {
+            selectAllCheckbox.addEventListener('change', selectAllLocations);
         }
         
         modal.classList.remove('hidden');
@@ -1344,6 +2315,10 @@ async function openLocationsSelectModal() {
 
 // Brendlar tanlash modal'ini ochish
 async function openBrandsSelectModal() {
+    // Funksiyani global qilish (xatolikdan keyin qayta yuklash uchun)
+    if (!window.openBrandsSelectModal) {
+        window.openBrandsSelectModal = openBrandsSelectModal;
+    }
     const modal = document.getElementById('brands-select-modal');
     const list = document.getElementById('brands-modal-list');
     const searchInput = document.getElementById('brands-search-input');
@@ -1367,47 +2342,220 @@ async function openBrandsSelectModal() {
         });
     }
     
-    // Brendlarni yuklash
+    // Hozirgi tanlangan filiallarni olish - agar filial tanlangan bo'lsa, faqat shu filialdagi brendlarni ko'rsatish
+    const selectedLocationsDisplay = document.getElementById('selected-locations-display');
+    const selectedLocations = [];
+    if (selectedLocationsDisplay) {
+        selectedLocationsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
+            const locationName = tag.querySelector('.tag-text')?.textContent;
+            if (locationName) {
+                selectedLocations.push(locationName);
+            }
+        });
+    }
+    
+    // Loading state ko'rsatish
+    list.innerHTML = '<div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">Brendlar yuklanmoqda...</div>';
+    
+    // Brendlarni yuklash - agar filial tanlangan bo'lsa, faqat shu filialdagi brendlarni olish
     try {
-        const res = await safeFetch('/api/brands');
-        if (!res || !res.ok) throw new Error('Brendlarni yuklab bo\'lmadi');
-        const brands = await res.json();
+        let brands = [];
+        if (selectedLocations.length > 0 && selectedBrandIds.length === 0) {
+            // Filial tanlangan, brend tanlanmagan - faqat tanlangan filiallardagi brendlarni olish
+            console.log(`🔍 [USERS] Filial tanlangan (${selectedLocations.length} ta), faqat shu filiallardagi brendlarni yuklayapman...`);
+            // Har bir filial uchun brendlarni olish va birlashtirish
+            const allBrandsMap = new Map();
+            let hasError = false;
+            for (const location of selectedLocations) {
+                try {
+                    const res = await safeFetch(`/api/brands/by-location/${encodeURIComponent(location)}`);
+                    if (res && res.ok) {
+                        const locationBrands = await res.json();
+                        locationBrands.forEach(brand => {
+                            if (!allBrandsMap.has(brand.id)) {
+                                allBrandsMap.set(brand.id, brand);
+                            }
+                        });
+                    } else {
+                        hasError = true;
+                    }
+                } catch (err) {
+                    console.warn(`⚠️ [USERS] Filial "${location}" uchun brendlar yuklanmadi:`, err);
+                    hasError = true;
+                }
+            }
+            brands = Array.from(allBrandsMap.values());
+            console.log(`✅ [USERS] ${brands.length} ta brend topildi (tanlangan filiallarda)`);
+            
+            // Agar xatolik bo'lsa va brendlar bo'sh bo'lsa, fallback qilish
+            if (hasError && brands.length === 0) {
+                console.log('⚠️ [USERS] Filiallardan brendlar topilmadi, barcha brendlarni yuklayapman...');
+                const fallbackRes = await safeFetch('/api/brands/for-user');
+                if (fallbackRes && fallbackRes.ok) {
+                    brands = await fallbackRes.json();
+                } else {
+                    const allBrandsRes = await safeFetch('/api/brands');
+                    if (allBrandsRes && allBrandsRes.ok) {
+                        brands = await allBrandsRes.json();
+                    }
+                }
+            }
+        } else {
+            // Foydalanuvchi access control bo'yicha faqat ruxsat etilgan brendlarni olish
+            // Server-side filtering - tezroq va xavfsiz
+            const res = await safeFetch('/api/brands/for-user');
+            if (!res || !res.ok) {
+                // Agar for-user endpoint ishlamasa, fallback sifatida barcha brendlarni olish
+                const fallbackRes = await safeFetch('/api/brands');
+                if (!fallbackRes || !fallbackRes.ok) throw new Error('Brendlarni yuklab bo\'lmadi');
+                brands = await fallbackRes.json();
+            } else {
+                brands = await res.json();
+            }
+        }
         
-        // Modal'da ko'rsatish - grid ko'rinishida
-        list.innerHTML = brands.map(brand => {
+        // Agar brendlar bo'sh bo'lsa, xabar ko'rsatish
+        if (brands.length === 0) {
+            list.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">
+                    <p style="margin-bottom: 10px;">Brendlar topilmadi</p>
+                    <p style="font-size: 12px; color: rgba(255,255,255,0.3);">Filiallar tanlangan bo'lsa, shu filiallarda brendlar mavjud emas</p>
+                </div>
+            `;
+            modal.classList.remove('hidden');
+            return;
+        }
+        
+        // "Barchasini belgilash" tugmasi
+        const selectAllBrandsHtml = `
+            <div class="select-all-brand-item" style="
+                grid-column: 1 / -1;
+                margin-bottom: 10px;
+                padding: 12px;
+                background: rgba(79, 172, 254, 0.15);
+                border: 1px solid rgba(79, 172, 254, 0.3);
+                border-radius: 8px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                transition: all 0.2s;
+            " onclick="selectAllBrands()" onmouseenter="this.style.background='rgba(79, 172, 254, 0.25)'" onmouseleave="this.style.background='rgba(79, 172, 254, 0.15)'">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 18px;">${brands.length > 0 ? brands[0].emoji || '🏢' : '🏢'}</span>
+                    <span style="font-size: 14px; font-weight: 600; color: #4facfe;">Barchasini belgilash</span>
+                </div>
+                <input type="checkbox" id="select-all-brands-checkbox" ${brands.length > 0 && brands.every(b => selectedBrandIds.includes(b.id)) ? 'checked' : ''} onclick="event.stopPropagation(); selectAllBrands()" style="width: 18px; height: 18px; cursor: pointer;">
+            </div>
+        `;
+        
+        // Modal'da ko'rsatish - tag ko'rinishida (rasmdagidek)
+        const brandsHtml = brands.map(brand => {
             const isSelected = selectedBrandIds.includes(brand.id);
             return `
-                <div class="modal-list-item ${isSelected ? 'selected' : ''}" data-brand-id="${brand.id}" onclick="toggleBrandCard(${brand.id})" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; text-align: center; min-height: 100px; cursor: pointer;">
-                    <input type="checkbox" id="brand-checkbox-${brand.id}" ${isSelected ? 'checked' : ''} onchange="toggleBrandSelection(${brand.id}, this)" onclick="event.stopPropagation();" style="margin-bottom: 8px; cursor: pointer;">
-                    <div class="item-content" style="flex-direction: column; gap: 8px; pointer-events: none;">
-                        <span class="item-icon" style="font-size: 32px;">${brand.emoji || '🏢'}</span>
-                        <span class="item-name" style="font-size: 13px; font-weight: 600;">${brand.name}</span>
+                <div class="brand-tag-item ${isSelected ? 'selected' : ''}" data-brand-id="${brand.id}" onclick="toggleBrandCard(${brand.id})" style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 10px 14px;
+                    background: ${isSelected ? 'rgba(79, 172, 254, 0.2)' : 'rgba(79, 172, 254, 0.1)'};
+                    border: 1px solid ${isSelected ? 'rgba(79, 172, 254, 0.5)' : 'rgba(79, 172, 254, 0.3)'};
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    box-shadow: ${isSelected ? '0 0 10px rgba(79, 172, 254, 0.3)' : 'none'};
+                " onmouseenter="if(!this.classList.contains('selected')) { this.style.background='rgba(79, 172, 254, 0.15)'; this.style.boxShadow='0 0 5px rgba(79, 172, 254, 0.2)'; }" onmouseleave="if(!this.classList.contains('selected')) { this.style.background='rgba(79, 172, 254, 0.1)'; this.style.boxShadow='none'; }">
+                    <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+                        <span style="font-size: 16px;">${brand.emoji || '🏢'}</span>
+                        <span class="tag-text" style="font-size: 14px; font-weight: 500; color: #ffffff;">${brand.name}</span>
                     </div>
+                    <input type="checkbox" id="brand-checkbox-${brand.id}" ${isSelected ? 'checked' : ''} onchange="toggleBrandSelection(${brand.id}, this)" onclick="event.stopPropagation();" style="display: none;">
+                    <button class="remove-btn" onclick="event.stopPropagation(); toggleBrandCard(${brand.id})" style="
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 50%;
+                        background: #ef4444;
+                        border: none;
+                        color: white;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 12px;
+                        padding: 0;
+                        margin-left: 10px;
+                        transition: all 0.2s;
+                    " onmouseenter="this.style.background='#dc2626'; this.style.transform='scale(1.1)'" onmouseleave="this.style.background='#ef4444'; this.style.transform='scale(1)'">
+                        ×
+                    </button>
                 </div>
             `;
         }).join('');
+        
+        list.innerHTML = selectAllBrandsHtml + brandsHtml;
+        
+        // Grid ko'rinishini o'zgartirish - 2 ustunli
+        list.style.display = 'grid';
+        list.style.gridTemplateColumns = 'repeat(2, 1fr)';
+        list.style.gap = '10px';
+        list.style.padding = '10px';
         
         // Qidiruv
         if (searchInput) {
             searchInput.value = '';
             searchInput.oninput = (e) => {
                 const query = e.target.value.toLowerCase();
-                list.querySelectorAll('.modal-list-item').forEach(item => {
-                    const brandName = item.querySelector('.item-name')?.textContent.toLowerCase() || '';
+                const selectAllItem = document.querySelector('.select-all-brand-item');
+                list.querySelectorAll('.brand-tag-item').forEach(item => {
+                    const brandName = item.querySelector('.tag-text')?.textContent.toLowerCase() || '';
                     item.style.display = brandName.includes(query) ? 'flex' : 'none';
                 });
+                // Qidiruv bo'lsa "Barchasini belgilash" ni yashirish
+                if (selectAllItem) {
+                    selectAllItem.style.display = query ? 'none' : 'flex';
+                }
             };
+        }
+        
+        // "Barchasini belgilash" checkbox event listener
+        const selectAllCheckbox = document.getElementById('select-all-brands-checkbox');
+        if (selectAllCheckbox) {
+            selectAllCheckbox.addEventListener('change', selectAllBrands);
         }
         
         modal.classList.remove('hidden');
     } catch (error) {
-        showToast(error.message, 'error');
+        console.error('❌ [USERS] Brendlarni yuklashda xatolik:', error);
+        
+        // Xatolik holatida modal ichiga xatolik xabarini ko'rsatish
+        list.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
+                <div style="color: #ef4444; margin-bottom: 10px; font-size: 16px;">⚠️ Xatolik</div>
+                <p style="color: rgba(255,255,255,0.7); margin-bottom: 20px;">${error.message || 'Brendlarni yuklab bo\'lmadi'}</p>
+                <button onclick="window.openBrandsSelectModal && window.openBrandsSelectModal()" style="
+                    padding: 8px 16px;
+                    background: #4facfe;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 14px;
+                ">Qayta urinib ko'rish</button>
+            </div>
+        `;
+        
+        // Modal'ni ochish (xatolik xabari bilan)
+        modal.classList.remove('hidden');
+        
+        // Toast ham ko'rsatish
+        showToast(error.message || 'Brendlarni yuklab bo\'lmadi', 'error');
     }
 }
 
 // Filial kartochka bosilganda tanlash
 window.toggleLocationCard = function(location) {
-    const checkbox = document.getElementById(`loc-checkbox-${location.replace(/'/g, "\\'")}`);
+    const locEscaped = location.replace(/'/g, "\\'");
+    const checkbox = document.getElementById(`loc-checkbox-${locEscaped}`);
     if (checkbox) {
         checkbox.checked = !checkbox.checked;
         toggleLocationSelection(location, checkbox);
@@ -1416,15 +2564,49 @@ window.toggleLocationCard = function(location) {
 
 // Filial tanlash
 window.toggleLocationSelection = function(location, checkbox) {
-    const item = checkbox.closest('.modal-list-item');
+    const item = checkbox.closest('.location-tag-item');
     if (item) {
         if (checkbox.checked) {
             item.classList.add('selected');
+            item.style.background = 'rgba(79, 172, 254, 0.2)';
+            item.style.borderColor = 'rgba(79, 172, 254, 0.5)';
+            item.style.boxShadow = '0 0 10px rgba(79, 172, 254, 0.3)';
         } else {
             item.classList.remove('selected');
+            item.style.background = 'rgba(79, 172, 254, 0.1)';
+            item.style.borderColor = 'rgba(79, 172, 254, 0.3)';
+            item.style.boxShadow = 'none';
         }
     }
+    
+    // "Barchasini belgilash" checkbox'ni yangilash
+    updateSelectAllLocationsCheckbox();
 };
+
+// Barcha filiallarni belgilash/bekor qilish
+window.selectAllLocations = function() {
+    const checkbox = document.getElementById('select-all-locations-checkbox');
+    const allCheckboxes = document.querySelectorAll('#locations-modal-list .location-tag-item input[type="checkbox"]');
+    const isChecked = checkbox.checked;
+    
+    allCheckboxes.forEach(cb => {
+        cb.checked = !isChecked;
+        const location = cb.closest('.location-tag-item').dataset.location;
+        toggleLocationSelection(location, cb);
+    });
+    
+    checkbox.checked = !isChecked;
+};
+
+// "Barchasini belgilash" checkbox'ni yangilash
+function updateSelectAllLocationsCheckbox() {
+    const allCheckboxes = document.querySelectorAll('#locations-modal-list .location-tag-item input[type="checkbox"]');
+    const selectAllCheckbox = document.getElementById('select-all-locations-checkbox');
+    if (selectAllCheckbox && allCheckboxes.length > 0) {
+        const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+        selectAllCheckbox.checked = allChecked;
+    }
+}
 
 // Brend kartochka bosilganda tanlash
 window.toggleBrandCard = function(brandId) {
@@ -1437,37 +2619,71 @@ window.toggleBrandCard = function(brandId) {
 
 // Brend tanlash
 window.toggleBrandSelection = function(brandId, checkbox) {
-    const item = checkbox.closest('.modal-list-item');
+    const item = checkbox.closest('.brand-tag-item');
     if (item) {
         if (checkbox.checked) {
             item.classList.add('selected');
+            item.style.background = 'rgba(79, 172, 254, 0.2)';
+            item.style.borderColor = 'rgba(79, 172, 254, 0.5)';
+            item.style.boxShadow = '0 0 10px rgba(79, 172, 254, 0.3)';
         } else {
             item.classList.remove('selected');
+            item.style.background = 'rgba(79, 172, 254, 0.1)';
+            item.style.borderColor = 'rgba(79, 172, 254, 0.3)';
+            item.style.boxShadow = 'none';
         }
     }
+    
+    // "Barchasini belgilash" checkbox'ni yangilash
+    updateSelectAllBrandsCheckbox();
 };
+
+// Barcha brendlarni belgilash/bekor qilish
+window.selectAllBrands = function() {
+    const checkbox = document.getElementById('select-all-brands-checkbox');
+    const allCheckboxes = document.querySelectorAll('#brands-modal-list .brand-tag-item input[type="checkbox"]');
+    const isChecked = checkbox.checked;
+    
+    allCheckboxes.forEach(cb => {
+        cb.checked = !isChecked;
+        const brandId = parseInt(cb.closest('.brand-tag-item').dataset.brandId);
+        toggleBrandSelection(brandId, cb);
+    });
+    
+    checkbox.checked = !isChecked;
+};
+
+// "Barchasini belgilash" checkbox'ni yangilash
+function updateSelectAllBrandsCheckbox() {
+    const allCheckboxes = document.querySelectorAll('#brands-modal-list .brand-tag-item input[type="checkbox"]');
+    const selectAllCheckbox = document.getElementById('select-all-brands-checkbox');
+    if (selectAllCheckbox && allCheckboxes.length > 0) {
+        const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+        selectAllCheckbox.checked = allChecked;
+    }
+}
 
 // Filiallarni saqlash
 document.addEventListener('DOMContentLoaded', () => {
     const saveLocationsBtn = document.getElementById('save-locations-btn');
     if (saveLocationsBtn) {
         saveLocationsBtn.onclick = () => {
-            const selectedLocations = Array.from(document.querySelectorAll('#locations-modal-list input:checked'))
-                .map(cb => cb.closest('.modal-list-item').dataset.location);
+            const selectedLocations = Array.from(document.querySelectorAll('#locations-modal-list .location-tag-item input:checked'))
+                .map(cb => cb.closest('.location-tag-item').dataset.location);
             
             // Ko'rinishni yangilash (checkbox'larni yangilash kerak emas, chunki ular yashirilgan)
             updateSelectedLocationsDisplay(selectedLocations);
             
             // Modal'ni yopish
-            document.getElementById('locations-select-modal').classList.add('hidden');
+            ModalHelper.hide(document.getElementById('locations-select-modal'));
         };
     }
     
     const saveBrandsBtn = document.getElementById('save-brands-btn');
     if (saveBrandsBtn) {
         saveBrandsBtn.onclick = async () => {
-            const selectedBrandIds = Array.from(document.querySelectorAll('#brands-modal-list input:checked'))
-                .map(cb => parseInt(cb.closest('.modal-list-item').dataset.brandId));
+            const selectedBrandIds = Array.from(document.querySelectorAll('#brands-modal-list .brand-tag-item input:checked'))
+                .map(cb => parseInt(cb.closest('.brand-tag-item').dataset.brandId));
             
             // Brendlar ma'lumotlarini olish va ko'rsatish
             try {
@@ -1490,15 +2706,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             // Modal'ni yopish
-            document.getElementById('brands-select-modal').classList.add('hidden');
+            ModalHelper.hide(document.getElementById('brands-select-modal'));
         };
     }
 });
 
 export async function handleUserFormSubmit(e) {
     e.preventDefault();
+    console.log('🔍 [USERS] handleUserFormSubmit chaqirildi');
+    
     const userId = DOM.editUserIdInput.value;
     const isEditing = !!userId;
+    
+    console.log(`📝 [USERS] Form ma'lumotlari:`, {
+        isEditing,
+        userId: userId || 'YANGI FOYDALANUVCHI',
+        currentUserRole: state.currentUser?.role
+    });
     
     // Tanlangan filiallarni olish - selected-locations-display dan
     const selectedLocationsDisplay = document.getElementById('selected-locations-display');
@@ -1528,17 +2752,66 @@ export async function handleUserFormSubmit(e) {
         });
     }
     
-    const data = {
-        username: DOM.usernameInput.value.trim(),
-        fullname: DOM.fullnameInput.value.trim(),
-        role: DOM.userRoleSelect.value,
-        device_limit: parseInt(DOM.deviceLimitInput.value) || 1,
-        locations: selectedLocations,
-        brands: selectedBrandIds
-    };
+    // Superadmin o'zini tahrirlayotgan bo'lsa, faqat login, to'liq ism, parol o'zgartirish
+    const currentUser = state.users.find(u => u.id == userId);
+    const isSuperadminEditingSelf = isEditing && 
+        (state.currentUser?.role === 'superadmin' || state.currentUser?.role === 'super_admin') &&
+        parseInt(userId) === parseInt(state.currentUser?.id) &&
+        (currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin');
     
-    if (!isEditing && DOM.passwordInput.value) {
-        data.password = DOM.passwordInput.value;
+    let data = {};
+    
+    if (isSuperadminEditingSelf) {
+        // Superadmin o'zini tahrirlayotgan bo'lsa, login, to'liq ism, parol va device limit
+        data = {
+            username: DOM.usernameInput.value.trim(),
+            fullname: DOM.fullnameInput.value.trim()
+        };
+        
+        // Parol o'zgartirish (agar kiritilgan bo'lsa)
+        if (DOM.passwordInput.value) {
+            data.password = DOM.passwordInput.value;
+        }
+        
+        // Device limit o'zgartirish (agar kiritilgan bo'lsa)
+        if (DOM.deviceLimitInput && DOM.deviceLimitInput.value) {
+            const deviceLimit = parseInt(DOM.deviceLimitInput.value);
+            if (!isNaN(deviceLimit) && deviceLimit >= 0) {
+                data.device_limit = deviceLimit;
+            }
+        }
+        
+        console.log(`📋 [USERS] Superadmin o'zini tahrirlayapti - login, to'liq ism, parol, device limit`);
+    } else {
+        // Oddiy foydalanuvchilar uchun to'liq ma'lumotlar
+        data = {
+            username: DOM.usernameInput.value.trim(),
+            fullname: DOM.fullnameInput.value.trim(),
+            role: DOM.userRoleSelect.value,
+            device_limit: parseInt(DOM.deviceLimitInput.value) || 1,
+            locations: selectedLocations,
+            brands: selectedBrandIds
+        };
+        
+        if (!isEditing && DOM.passwordInput.value) {
+            data.password = DOM.passwordInput.value;
+        }
+    }
+    
+    console.log(`📋 [USERS] Yuboriladigan ma'lumotlar:`, {
+        username: data.username,
+        role: data.role || 'N/A',
+        locations: data.locations?.length || 0,
+        brands: data.brands?.length || 0,
+        device_limit: data.device_limit || 'N/A',
+        isSuperadminEditingSelf
+    });
+    
+    // Superadmin rolini tekshirish
+    if (data.role && (data.role === 'superadmin' || data.role === 'super_admin')) {
+        console.warn(`⚠️ [USERS] Superadmin rolini tanlashga urinish!`);
+        console.warn(`   - Requested role: ${data.role}`);
+        console.warn(`   - Current user role: ${state.currentUser?.role}`);
     }
     
     // User-specific sozlamalarni qo'shish
@@ -1559,13 +2832,40 @@ export async function handleUserFormSubmit(e) {
     const url = isEditing ? `/api/users/${userId}` : '/api/users';
     const method = isEditing ? 'PUT' : 'POST';
     
+    console.log(`📤 [USERS] API'ga so'rov yuborilmoqda:`, {
+        url,
+        method,
+        role: data.role
+    });
+    
     try {
         const res = await safeFetch(url, {
             method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        if (!res || !res.ok) throw new Error((await res.json()).message);
+        
+        if (!res || !res.ok) {
+            let errorMessage = 'Foydalanuvchi saqlashda xatolik yuz berdi';
+            try {
+                const errorData = await res.json();
+                errorMessage = errorData.message || errorMessage;
+                console.error(`❌ [USERS] API xatolik:`, errorData);
+            } catch (parseError) {
+                console.error(`❌ [USERS] Xatolik ma'lumotlarini parse qilishda xatolik:`, parseError);
+                // Agar JSON parse qilishda xatolik bo'lsa, status kodga qarab xabar berish
+                if (res.status === 403) {
+                    errorMessage = 'Bu amalni bajarish uchun ruxsatingiz yo\'q.';
+                } else if (res.status === 400) {
+                    errorMessage = 'Noto\'g\'ri ma\'lumotlar yuborildi.';
+                } else if (res.status === 404) {
+                    errorMessage = 'Foydalanuvchi topilmadi.';
+                }
+            }
+            throw new Error(errorMessage);
+        }
+        
+        console.log(`✅ [USERS] API muvaffaqiyatli javob qaytardi`);
         
         const result = await res.json();
         
@@ -1576,7 +2876,7 @@ export async function handleUserFormSubmit(e) {
         // Super admin yaratilganda avtomatik login qilish
         if (result.autoLogin && result.loginData) {
             // Login qilish
-            const loginRes = await fetch('/api/login', {
+            const loginRes = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1596,34 +2896,59 @@ export async function handleUserFormSubmit(e) {
         }
         
         // Foydalanuvchilar ro'yxatini yangilash
-        const usersRes = await fetchUsers();
-        if (usersRes) {
-            state.users = usersRes;
-            const activeTab = DOM.userTabs?.querySelector('.active')?.dataset.status || 'active';
-            renderUsersByStatus(activeTab);
-        }
+        await refreshUsersList();
         
         // Modal'ni yopish
-        if (DOM.userFormModal) {
-            DOM.userFormModal.classList.add('hidden');
-        }
+        ModalHelper.hide(DOM.userFormModal);
+        isUserModalOpen = false;
+        currentEditingUserId = null;
     } catch (error) {
-        console.error('Foydalanuvchi saqlashda xatolik:', error);
+        console.error('❌ [USERS] Foydalanuvchi saqlashda xatolik:', error);
         const errorMessage = error.message || 'Foydalanuvchi saqlashda xatolik yuz berdi';
         showToast(errorMessage, true);
     }
 }
 
+// Debounce flag - ikki marta chaqirilishni oldini olish
+let isHandlingUserAction = false;
+
 export async function handleUserActions(e) {
+    // Agar allaqachon bajarilmoqda bo'lsa, qayta bajarilmaslik (DARHOL tekshirish)
+    if (isHandlingUserAction) {
+        return;
+    }
+    
     const button = e.target.closest('button');
-    if (!button) return;
+    if (!button) {
+        return;
+    }
+    
+    // Faqat .user-card-action-btn class'iga ega button'lar uchun ishlash
+    if (!button.classList.contains('user-card-action-btn')) {
+        return;
+    }
+    
+    // Flag'ni DARHOL o'rnatish (button to'g'ri ekanligini tekshirgandan keyin)
+    isHandlingUserAction = true;
     
     const userId = button.dataset.id;
+    if (!userId) {
+        isHandlingUserAction = false;
+        return;
+    }
     
     if (button.classList.contains('edit-user-btn')) {
+        // Agar modal allaqachon ochilgan bo'lsa, qayta ochmaslik
+        if (isUserModalOpen && currentEditingUserId === userId && DOM.userFormModal && !DOM.userFormModal.classList.contains('hidden')) {
+            console.log(`⚠️ [USERS] handleUserActions: Modal allaqachon ochilgan (User ID: ${userId}), qayta ochilmaydi`);
+            isHandlingUserAction = false;
+            return;
+        }
         openUserModalForEdit(userId);
+        isHandlingUserAction = false;
     } else if (button.classList.contains('deactivate-user-btn') || button.classList.contains('activate-user-btn')) {
         const status = button.classList.contains('activate-user-btn') ? 'active' : 'blocked';
+        console.log('🔄 [HANDLE] Confirmation dialog ochilmoqda...');
         const confirmed = await showConfirmDialog({
             title: status === 'active' ? '✅ Faollashtirish' : '🚫 Bloklash',
             message: `Rostdan ham bu foydalanuvchini ${status === 'active' ? 'aktivlashtirmoqchimisiz' : 'bloklamoqchimisiz'}?`,
@@ -1633,52 +2958,182 @@ export async function handleUserActions(e) {
             icon: status === 'active' ? 'user-check' : 'user-x'
         });
         
+        console.log('🔄 [HANDLE] Confirmation natijasi:', confirmed);
+        
         if (confirmed) {
+            // Loading state - button'ni disable qilish
+            button.disabled = true;
+            const originalHTML = button.innerHTML;
+            const originalClass = button.className;
+            button.innerHTML = '<i data-feather="loader"></i> Kutilmoqda...';
+            button.classList.add('loading');
+            if (window.feather) window.feather.replace();
+            
             try {
                 const res = await safeFetch(`/api/users/${userId}/status`, { 
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ status })
                 });
-                if (!res || !res.ok) throw new Error((await res.json()).message);
+                if (!res || !res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.message || 'Status o\'zgartirishda xatolik');
+                }
                 
                 const result = await res.json();
-                showToast(result.message);
                 
-                const usersRes = await fetchUsers();
-                if (usersRes) {
-                    state.users = usersRes;
-                    renderModernUsers();
-                }
+                // Success animation
+                button.innerHTML = '<i data-feather="check"></i> Muvaffaqiyatli!';
+                button.style.background = status === 'active' ? 'var(--green-color)' : 'var(--red-color)';
+                button.classList.remove('loading');
+                if (window.feather) window.feather.replace();
+                
+                showToast(result.message, false);
+                
+                // Ma'lumotlarni yangilash
+                setTimeout(async () => {
+                    const usersRes = await fetchUsers();
+                    if (usersRes) {
+                        state.users = usersRes;
+                        renderModernUsers();
+                    }
+                    // Button'ni qayta tiklash
+                    button.disabled = false;
+                    button.innerHTML = originalHTML;
+                    button.className = originalClass;
+                    button.style.background = '';
+                    if (window.feather) window.feather.replace();
+                }, 1500);
             } catch (error) { 
-                showToast(error.message, true); 
+                showToast(error.message, true);
+                // Button'ni qayta tiklash
+                button.disabled = false;
+                button.innerHTML = originalHTML;
+                button.className = originalClass;
+                button.style.background = '';
+                button.classList.remove('loading');
+                if (window.feather) window.feather.replace();
             }
+            // Flag'ni qaytarish - muvaffaqiyatli yoki xatolikdan keyin
+            isHandlingUserAction = false;
+            console.log('✅ [HANDLE] Status o\'zgartirildi, flag qaytarildi');
+        } else {
+            // Bekor qilinganda flag'ni qaytarish
+            isHandlingUserAction = false;
+            console.log('❌ [HANDLE] Bekor qilindi, flag qaytarildi');
         }
     } else if (button.classList.contains('manage-sessions-btn')) {
+        console.log('🔐 [HANDLE] manage-sessions-btn bosildi');
+        console.log('🔐 [HANDLE] Modal holati:', DOM.sessionsModal ? (DOM.sessionsModal.classList.contains('hidden') ? 'yopiq' : 'ochiq') : 'topilmadi');
+        console.log('🔐 [HANDLE] isOpeningSessionsModal:', isOpeningSessionsModal);
+        
+        // Agar modal allaqachon ochilgan bo'lsa, qayta ochmaslik
+        if (DOM.sessionsModal && !DOM.sessionsModal.classList.contains('hidden')) {
+            console.log('⚠️ [HANDLE] Modal allaqachon ochiq, qayta ochilmaydi');
+            isHandlingUserAction = false;
+            return;
+        }
+        
+        if (isOpeningSessionsModal) {
+            console.log('⚠️ [HANDLE] Modal ochilmoqda, qayta ochilmaydi');
+            isHandlingUserAction = false;
+            return;
+        }
+        
+        console.log('🚀 [HANDLE] openSessionsModal chaqirilmoqda...');
         const username = button.dataset.username;
         await openSessionsModal(userId, username);
+        // Flag'ni qaytarish
+        isHandlingUserAction = false;
+        console.log('✅ [HANDLE] isHandlingUserAction flag qaytarildi');
     } else if (button.classList.contains('change-password-btn')) {
         openCredentialsModal(userId, 'password');
+        isHandlingUserAction = false;
     } else if (button.classList.contains('set-secret-word-btn')) {
         openCredentialsModal(userId, 'secret-word');
+        isHandlingUserAction = false;
     } else if (button.classList.contains('connect-telegram-btn')) {
         openTelegramConnectModal(userId);
+        isHandlingUserAction = false;
+    } else {
+        // Boshqa button'lar uchun ham flag'ni qaytarish
+        isHandlingUserAction = false;
     }
 }
 
+// Modal ochilish flag'i - ikki marta ochilishni oldini olish
+let isOpeningSessionsModal = false;
+
 async function openSessionsModal(userId, username) {
+    console.log('🚪 [MODAL] openSessionsModal chaqirildi');
+    console.log('🚪 [MODAL] User ID:', userId, 'Username:', username);
+    console.log('🚪 [MODAL] isOpeningSessionsModal:', isOpeningSessionsModal);
+    
     if (!DOM.sessionsModal || !DOM.sessionsModalTitle || !DOM.sessionsListContainer) {
-        console.error('Sessions modal elementlari topilmadi');
+        console.error('❌ [MODAL] Sessions modal elementlari topilmadi');
+        isHandlingUserAction = false;
+        isOpeningSessionsModal = false;
         return;
     }
     
-    DOM.sessionsModalTitle.textContent = `"${username}"ning Aktiv Sessiyalari`;
-    DOM.sessionsListContainer.innerHTML = '<div class="skeleton-item"></div>';
+    const isModalHidden = DOM.sessionsModal.classList.contains('hidden');
+    console.log('🚪 [MODAL] Modal holati:', isModalHidden ? 'yopiq' : 'ochiq');
+    
+    // Agar modal allaqachon ochilgan bo'lsa va yangilanish kerak bo'lsa, yangilash
+    if (!isModalHidden) {
+        if (isOpeningSessionsModal) {
+            console.log('⚠️ [MODAL] Modal allaqachon ochilmoqda, qayta ochilmaydi');
+            isHandlingUserAction = false;
+            return;
+        }
+        // Modal ochiq, lekin yangilash kerak - flag'ni o'rnatish va davom etish
+        console.log('🔄 [MODAL] Modal ochiq, yangilanmoqda...');
+    }
+    
+    // Agar modal yopiq bo'lsa va ochilmoqda bo'lsa, qayta ochmaslik
+    if (isModalHidden && isOpeningSessionsModal) {
+        console.log('⚠️ [MODAL] Modal ochilmoqda, qayta ochilmaydi');
+        isHandlingUserAction = false;
+        return;
+    }
+    
+    // Flag'ni o'rnatish
+    isOpeningSessionsModal = true;
+    console.log('✅ [MODAL] isOpeningSessionsModal = true o\'rnatildi');
+    
+    // Modal header va subtitle yangilash
+    DOM.sessionsModalTitle.textContent = `${username}ning Sessiyalari`;
+    const subtitle = DOM.sessionsModal.querySelector('#sessions-modal-subtitle');
+    if (subtitle) {
+        subtitle.textContent = 'Aktiv sessiyalar ro\'yxati';
+    }
+    
+    // Loading state
+    DOM.sessionsListContainer.innerHTML = `
+        <div class="sessions-loading">
+            <div class="loading-spinner"></div>
+            <p>Sessiyalar yuklanmoqda...</p>
+        </div>
+    `;
+    
+    // Modal yopish handler'larini sozlash
+    setupSessionsModalCloseHandlers();
+    
+    // Modal'ni ochish - animatsiya bilan
     DOM.sessionsModal.classList.remove('hidden');
+    DOM.sessionsModal.style.display = 'flex';
+    setTimeout(() => {
+        DOM.sessionsModal.classList.add('show');
+    }, 10);
     
     // User ID va username ni saqlash (keyinroq yangilash uchun)
     DOM.sessionsModal.dataset.userId = userId;
     DOM.sessionsModal.dataset.username = username;
+    
+    // Feather icons yangilash
+    if (window.feather) {
+        window.feather.replace();
+    }
     
     try {
         const res = await safeFetch(`/api/users/${userId}/sessions`);
@@ -1688,22 +3143,168 @@ async function openSessionsModal(userId, username) {
         }
         const sessions = await res.json();
         
-        DOM.sessionsListContainer.innerHTML = sessions.length > 0 ? sessions.map(s => `
-            <div class="session-item ${s.is_current ? 'current' : ''}">
-                <div class="session-details">
-                    <div><strong>IP Manzil:</strong> ${s.ip_address || 'Noma\'lum'}</div>
-                    <div><strong>Qurilma:</strong> ${parseUserAgent(s.user_agent) || 'Noma\'lum'}</div>
-                    <div><strong>Oxirgi faollik:</strong> ${new Date(s.last_activity).toLocaleString('uz-UZ')}</div>
+        // Subtitle yangilash
+        if (subtitle) {
+            subtitle.textContent = `${sessions.length} ta aktiv sessiya topildi`;
+        }
+        
+        // Sessiyalarni render qilish - zamonaviy dizayn
+        DOM.sessionsListContainer.innerHTML = sessions.length > 0 ? sessions.map((s, index) => {
+            // parseUserAgent object qaytaradi, string'ga o'tkazish
+            const deviceInfoObj = parseUserAgent(s.user_agent);
+            const deviceInfo = deviceInfoObj && typeof deviceInfoObj === 'object' 
+                ? `${deviceInfoObj.browser || 'Noma\'lum'} ${deviceInfoObj.browserVersion || ''} ${deviceInfoObj.os || ''}`.trim() || 'Noma\'lum qurilma'
+                : (deviceInfoObj || 'Noma\'lum qurilma');
+            const lastActivity = new Date(s.last_activity);
+            const timeAgo = getTimeAgo(lastActivity);
+            const isCurrent = s.is_current;
+            
+            return `
+                <div class="session-item-modern ${isCurrent ? 'current' : ''}" style="animation-delay: ${index * 0.05}s">
+                    <div class="session-item-icon">
+                        <i data-feather="${isCurrent ? 'smartphone' : 'monitor'}"></i>
+                    </div>
+                    <div class="session-item-content">
+                        <div class="session-item-header">
+                            <div class="session-item-title">
+                                ${isCurrent ? '<span class="session-badge-current">🟢 Joriy Sessiya</span>' : `<span class="session-badge">Sessiya #${index + 1}</span>`}
+                            </div>
+                            ${isCurrent ? '' : `
+                                <button class="btn btn-danger btn-sm terminate-session-btn" data-sid="${s.sid}" title="Sessiyani tugatish">
+                                    <i data-feather="x-circle"></i>
+                                    Tugatish
+                                </button>
+                            `}
+                        </div>
+                        <div class="session-item-details">
+                            <div class="session-detail-item">
+                                <i data-feather="globe"></i>
+                                <span class="detail-label">IP Manzil:</span>
+                                <span class="detail-value">${s.ip_address || 'Noma\'lum'}</span>
+                            </div>
+                            <div class="session-detail-item">
+                                <i data-feather="smartphone"></i>
+                                <span class="detail-label">Qurilma:</span>
+                                <span class="detail-value">${deviceInfo}</span>
+                            </div>
+                            <div class="session-detail-item">
+                                <i data-feather="clock"></i>
+                                <span class="detail-label">Oxirgi faollik:</span>
+                                <span class="detail-value">${timeAgo}</span>
+                                <span class="detail-time">${lastActivity.toLocaleString('uz-UZ')}</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                ${!s.is_current 
-                    ? `<button class="btn btn-danger btn-sm terminate-session-btn" data-sid="${s.sid}">Tugatish</button>` 
-                    : '<span class="badge" style="background-color: var(--green-color);">Joriy</span>'}
+            `;
+        }).join('') : `
+            <div class="empty-state-modern">
+                <div class="empty-state-icon">
+                    <i data-feather="monitor"></i>
+                </div>
+                <h4>Aktiv sessiyalar topilmadi</h4>
+                <p>Bu foydalanuvchining hozirgi vaqtda aktiv sessiyalari yo'q.</p>
             </div>
-        `).join('') : '<div class="empty-state">Aktiv sessiyalar topilmadi.</div>';
+        `;
+        
+        // Feather icons yangilash
+        if (window.feather) {
+            window.feather.replace();
+        }
+        
+        // Event listener qo'shish - terminate button uchun
+        // Event delegation orqali (allaqachon setupUserCardEventListeners da qo'shilgan)
+        // Qo'shimcha listener qo'shish shart emas
+        
     } catch (error) {
         console.error('Sessions modal xatolik:', error);
-        DOM.sessionsListContainer.innerHTML = `<div class="empty-state error">${error.message}</div>`;
+        DOM.sessionsListContainer.innerHTML = `
+            <div class="empty-state-modern error">
+                <div class="empty-state-icon">
+                    <i data-feather="alert-circle"></i>
+                </div>
+                <h4>Xatolik yuz berdi</h4>
+                <p>${error.message}</p>
+                <button class="btn btn-primary btn-sm" onclick="window.location.reload()">
+                    <i data-feather="refresh-cw"></i>
+                    Sahifani yangilash
+                </button>
+            </div>
+        `;
+        if (window.feather) {
+            window.feather.replace();
+        }
     }
+    
+    // Flag'ni qaytarish
+    console.log('✅ [MODAL] Modal ochildi, flag\'lar qaytarilmoqda...');
+    isOpeningSessionsModal = false;
+    isHandlingUserAction = false;
+    console.log('✅ [MODAL] Flag\'lar qaytarildi. isOpeningSessionsModal:', isOpeningSessionsModal, 'isHandlingUserAction:', isHandlingUserAction);
+}
+
+// Modal yopish funksiyasi
+function closeSessionsModal() {
+    if (!DOM.sessionsModal) return;
+    
+    DOM.sessionsModal.classList.remove('show');
+    setTimeout(() => {
+        DOM.sessionsModal.classList.add('hidden');
+        DOM.sessionsModal.style.display = 'none';
+    }, 300);
+}
+
+// Sessions modal yopish handler'larini sozlash
+function setupSessionsModalCloseHandlers() {
+    if (!DOM.sessionsModal) return;
+    
+    // Eski listener'larni olib tashlash
+    const oldCloseHandler = DOM.sessionsModal._closeHandler;
+    if (oldCloseHandler) {
+        DOM.sessionsModal.removeEventListener('click', oldCloseHandler);
+    }
+    
+    // Yangi close handler
+    const closeHandler = (e) => {
+        // Close button'ga bosilganda
+        if (e.target.closest('.close-modal-btn') || e.target.closest('.close-sessions-modal-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeSessionsModal();
+            return;
+        }
+        // Background'ga bosilganda
+        if (e.target === DOM.sessionsModal) {
+            closeSessionsModal();
+        }
+    };
+    
+    DOM.sessionsModal.addEventListener('click', closeHandler);
+    DOM.sessionsModal._closeHandler = closeHandler;
+    
+    // ESC tugmasi bilan yopish
+    const escHandler = (e) => {
+        if (e.key === 'Escape' && !DOM.sessionsModal.classList.contains('hidden')) {
+            closeSessionsModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+}
+
+// Time ago helper funksiyasi
+function getTimeAgo(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days} kun oldin`;
+    if (hours > 0) return `${hours} soat oldin`;
+    if (minutes > 0) return `${minutes} daqiqa oldin`;
+    return 'Hozirgina';
 }
 
 function openCredentialsModal(userId, type) {
@@ -1723,7 +3324,7 @@ function openCredentialsModal(userId, type) {
         DOM.credentialsInput.minLength = 6;
     }
     
-    DOM.credentialsModal.classList.remove('hidden');
+    ModalHelper.show(DOM.credentialsModal);
 }
 
 export async function handleCredentialsFormSubmit(e) {
@@ -1744,7 +3345,7 @@ export async function handleCredentialsFormSubmit(e) {
         
         const result = await res.json();
         showToast(result.message);
-        DOM.credentialsModal.classList.add('hidden');
+        ModalHelper.hide(DOM.credentialsModal);
     } catch (error) {
         showToast(error.message, true);
     }
@@ -1761,7 +3362,7 @@ function openTelegramConnectModal(userId) {
     
     const connectLink = `https://t.me/${botUsername}?start=${connectCode}`;
     DOM.telegramConnectLinkInput.value = connectLink;
-    DOM.telegramConnectModal.classList.remove('hidden');
+    ModalHelper.show(DOM.telegramConnectModal);
 }
 
 export function copyTelegramLink() {
@@ -1810,8 +3411,21 @@ export async function openApprovalModal(userId, username) {
         }
     }
     
+    // Superadmin rolini to'liq olib tashlash (ham superadmin, ham super_admin)
+    console.log(`🔍 [USERS] openApprovalModal - Rollarni filtrlash`);
+    console.log(`   - Joriy foydalanuvchi roli: ${state.currentUser?.role}`);
+    console.log(`   - Mavjud rollar soni: ${state.roles?.length || 0}`);
+    
     DOM.approvalRoleSelect.innerHTML = '<option value="">Rolni tanlang...</option>' + state.roles
-        .filter(r => r.role_name !== 'superadmin' && r.role_name !== 'super_admin') // Superadmin yaratish mumkin emas
+        .filter(r => {
+            // Superadmin rolini to'liq olib tashlash
+            const isSuperadmin = r.role_name === 'superadmin' || r.role_name === 'super_admin';
+            if (isSuperadmin) {
+                console.log(`   🚫 Superadmin roli olib tashlandi: ${r.role_name}`);
+                return false;
+            }
+            return true;
+        })
         .map(r => {
             // Rol nomlarini o'zbek tiliga tarjima qilish
             const roleNames = {
@@ -1897,6 +3511,49 @@ export async function openApprovalModal(userId, username) {
     console.log(`🚪 [MODAL OCHISH] 6. Modal ochilmoqda...`);
     DOM.approvalModal.classList.remove('hidden');
     feather.replace();
+    
+    // Modal tashqarisiga bosilganda yopish (faqat bir marta)
+    if (!DOM.approvalModal.dataset.closeListenerAdded) {
+        DOM.approvalModal.addEventListener('click', (e) => {
+            // Agar modal tashqarisiga (background'ga) bosilgan bo'lsa, modal yopiladi
+            if (e.target === DOM.approvalModal) {
+                DOM.approvalModal.classList.add('hidden');
+                // Bulk approval navbatini bekor qilish
+                if (window.bulkApprovalQueue) {
+                    console.log('⚠️ [BULK APPROVE] Modal bekor qilindi, navbat tozalanmoqda');
+                    window.bulkApprovalQueue = null;
+                    window.bulkApprovalCurrentIndex = null;
+                    window.bulkApprovalTotal = null;
+                    selectedRequests.clear();
+                    updateRequestsBulkActions();
+                }
+            }
+        });
+        DOM.approvalModal.dataset.closeListenerAdded = 'true';
+    }
+    
+    // ESC tugmasi bilan yopish handler (har safar yangi)
+    const currentEscHandler = (e) => {
+        if (e.key === 'Escape' && !DOM.approvalModal.classList.contains('hidden')) {
+            DOM.approvalModal.classList.add('hidden');
+            // Bulk approval navbatini bekor qilish
+            if (window.bulkApprovalQueue) {
+                console.log('⚠️ [BULK APPROVE] Modal ESC bilan yopildi, navbat tozalanmoqda');
+                window.bulkApprovalQueue = null;
+                window.bulkApprovalCurrentIndex = null;
+                window.bulkApprovalTotal = null;
+                selectedRequests.clear();
+                updateRequestsBulkActions();
+            }
+            document.removeEventListener('keydown', currentEscHandler);
+        }
+    };
+    // Eski handler'ni olib tashlash (agar mavjud bo'lsa)
+    if (DOM.approvalModal._escHandler) {
+        document.removeEventListener('keydown', DOM.approvalModal._escHandler);
+    }
+    DOM.approvalModal._escHandler = currentEscHandler;
+    document.addEventListener('keydown', currentEscHandler);
     
     // Qidiruv input uchun feather icon yangilash
     setTimeout(() => {
@@ -2122,7 +3779,12 @@ export async function submitUserApproval(e) {
             if (usersRes) {
                 state.users = usersRes;
                 const activeTab = DOM.userTabs.querySelector('.active')?.dataset.status || 'active';
-                renderUsersByStatus(activeTab);
+                if (activeTab) {
+                    currentFilters.accountStatus = activeTab === 'active' ? 'active' : 
+                                                   activeTab === 'pending' ? 'pending' : 
+                                                   activeTab === 'inactive' ? 'inactive' : '';
+                }
+                renderModernUsers();
             }
             
             DOM.approvalModal.classList.add('hidden');
@@ -2268,7 +3930,12 @@ export async function submitUserApproval(e) {
             // Faqat userTabs mavjud bo'lsa, render qilish
             if (DOM.userTabs) {
                 const activeTab = DOM.userTabs.querySelector('.active')?.dataset.status;
-                if (activeTab) renderUsersByStatus(activeTab);
+                if (activeTab) {
+                    currentFilters.accountStatus = activeTab === 'active' ? 'active' : 
+                                                   activeTab === 'pending' ? 'pending' : 
+                                                   activeTab === 'inactive' ? 'inactive' : '';
+                    renderModernUsers();
+                }
             }
         }
         
@@ -2279,6 +3946,42 @@ export async function submitUserApproval(e) {
         // Modal yopish
         if (DOM.approvalModal) {
             DOM.approvalModal.classList.add('hidden');
+        }
+        
+        // Bulk approval navbatini tekshirish
+        if (window.bulkApprovalQueue && window.bulkApprovalQueue.length > 0) {
+            window.bulkApprovalCurrentIndex = (window.bulkApprovalCurrentIndex || 0) + 1;
+            const nextUser = window.bulkApprovalQueue.shift();
+            
+            console.log(`📋 [BULK APPROVE] Navbatdagi foydalanuvchi: ${nextUser.username || nextUser.fullname} (ID: ${nextUser.id})`);
+            console.log(`📋 [BULK APPROVE] Qolgan: ${window.bulkApprovalQueue.length} ta`);
+            
+            // Kichik kechikish - modal yopilishi uchun
+            setTimeout(async () => {
+                try {
+                    const nextUsername = nextUser.username || nextUser.fullname || `User ${nextUser.id}`;
+                    await openApprovalModal(nextUser.id, nextUsername);
+                } catch (error) {
+                    console.error('❌ [BULK APPROVE] Navbatdagi foydalanuvchi uchun modal ochishda xatolik:', error);
+                    // Navbatni tozalash
+                    window.bulkApprovalQueue = null;
+                    window.bulkApprovalCurrentIndex = null;
+                    window.bulkApprovalTotal = null;
+                }
+            }, 300);
+        } else {
+            // Bulk approval yakunlandi
+            if (window.bulkApprovalTotal) {
+                console.log(`✅ [BULK APPROVE] Barcha ${window.bulkApprovalTotal} ta foydalanuvchi tasdiqlandi`);
+                showToast(`Barcha ${window.bulkApprovalTotal} ta foydalanuvchi muvaffaqiyatli tasdiqlandi`, 'success');
+                window.bulkApprovalTotal = null;
+            }
+            window.bulkApprovalQueue = null;
+            window.bulkApprovalCurrentIndex = null;
+            
+            // Tanlanganlarni tozalash
+            selectedRequests.clear();
+            updateRequestsBulkActions();
         }
         
         // So'rovlar bo'limini yangilash
@@ -2339,38 +4042,10 @@ export async function handlePendingUserActions(e) {
     }
 }
 
+// Eski funksiya - handleSessionTerminate ga yo'naltirish
 export async function handleSessionTermination(e) {
-    const button = e.target.closest('.terminate-session-btn');
-    if (!button) return;
-    
-    const sid = button.dataset.sid;
-    const confirmed = await showConfirmDialog({
-        title: '🔒 Sessiyani tugatish',
-        message: 'Rostdan ham bu sessiyani tugatmoqchimisiz?',
-        confirmText: 'Tugatish',
-        cancelText: 'Bekor qilish',
-        type: 'warning',
-        icon: 'log-out'
-    });
-    
-    if (confirmed) {
-        try {
-            const res = await safeFetch(`/api/sessions/${sid}`, { method: 'DELETE' });
-            if (!res || !res.ok) throw new Error((await res.json()).message);
-            
-            const result = await res.json();
-            showToast(result.message);
-            
-            if (DOM.securityPage.classList.contains('active')) {
-                const { fetchAndRenderMySessions } = await import('./security.js');
-                fetchAndRenderMySessions();
-            } else if (!DOM.sessionsModal.classList.contains('hidden')) {
-                button.closest('.session-item').remove();
-            }
-        } catch (error) {
-            showToast(error.message, true);
-        }
-    }
+    // handleSessionTerminate funksiyasini chaqirish
+    await handleSessionTerminate(e);
 }
 
 /* ===================================================== */
@@ -2516,11 +4191,11 @@ window.viewUserQuick = async function(userId) {
                 </div>
                 <div class="user-quick-view-stat">
                     <span class="label">📅 Ro'yxatdan o'tgan:</span>
-                    <span class="value">${new Date(user.created_at).toLocaleDateString('uz-UZ')}</span>
+                    <span class="value">${user.created_at ? formatDate(user.created_at) : 'Noma\'lum'}</span>
                 </div>
                 <div class="user-quick-view-stat">
                     <span class="label">⏰ Oxirgi faollik:</span>
-                    <span class="value">${user.last_active ? new Date(user.last_active).toLocaleString('uz-UZ') : 'Hech qachon'}</span>
+                    <span class="value">${user.last_active ? formatDate(user.last_active) : 'Hech qachon'}</span>
                 </div>
             </div>
             <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
@@ -2570,7 +4245,7 @@ window.bulkChangeStatus = async function() {
         showToast(`✅ ${selectedUsers.size} ta foydalanuvchi holati o'zgartirildi`);
         window.clearSelection();
         await fetchUsers();
-        renderUsersByStatus();
+        renderModernUsers();
     } catch (error) {
         showToast(`❌ Xatolik: ${error.message}`, true);
     }
@@ -2594,7 +4269,7 @@ window.bulkAssignRole = async function() {
         showToast(`✅ ${selectedUsers.size} ta foydalanuvchiga rol berildi`);
         window.clearSelection();
         await fetchUsers();
-        renderUsersByStatus();
+        renderModernUsers();
     } catch (error) {
         showToast(`❌ Xatolik: ${error.message}`, true);
     }
@@ -2622,7 +4297,7 @@ window.bulkDeleteUsers = async function() {
         showToast(`✅ ${selectedUsers.size} ta foydalanuvchi o'chirildi`);
         window.clearSelection();
         await fetchUsers();
-        renderUsersByStatus();
+        renderModernUsers();
     } catch (error) {
         showToast(`❌ Xatolik: ${error.message}`, true);
     }
@@ -2668,8 +4343,25 @@ window.deleteUserQuick = async function(userId) {
 export function initModernUsersPage() {
     // console.log('🔄 Initializing Modern Users Page...');
     
-    // Setup filters
+    // Setup filters (this also sets up view toggle buttons)
     setupUsersFilters();
+    
+    // Initialize view toggle icons and search icon
+    if (window.feather) {
+        setTimeout(() => {
+            // View toggle icons
+            const viewToggleContainer = document.querySelector('.view-toggle-buttons');
+            if (viewToggleContainer) {
+                feather.replace({ root: viewToggleContainer });
+            }
+            
+            // Search icon
+            const searchContainer = document.querySelector('#users-search-input')?.parentElement;
+            if (searchContainer) {
+                feather.replace({ root: searchContainer });
+            }
+        }, 200);
+    }
     
     // Load users
     fetchUsers().then(() => {
@@ -2723,7 +4415,8 @@ function loadRoleFilterBadges() {
     let badgesHTML = `
         <button class="filter-badge filter-badge-primary active" data-role="">
             <i data-feather="users"></i>
-            <span>Barchasi <span class="badge-count" id="role-count-all">${totalUsers}</span></span>
+            <span>Barchasi</span>
+            <span class="badge-count" id="role-count-all">${totalUsers}</span>
         </button>
     `;
 
@@ -2735,7 +4428,8 @@ function loadRoleFilterBadges() {
         badgesHTML += `
             <button class="filter-badge filter-badge-${config.color}" data-role="${role}">
                 <i data-feather="${config.icon}"></i>
-                <span>${config.label} <span class="badge-count" id="role-count-${role}">${count}</span></span>
+                <span>${config.label}</span>
+                <span class="badge-count" id="role-count-${role}">${count}</span>
             </button>
         `;
     });
@@ -2774,6 +4468,7 @@ function setupUsersFilters() {
             accountStatusBadges.forEach(b => b.classList.remove('active'));
             badge.classList.add('active');
             currentFilters.accountStatus = badge.dataset.accountStatus || '';
+            filteredUsersCache = null; // Clear cache on filter change
             renderModernUsers();
         });
     });
@@ -2785,9 +4480,59 @@ function setupUsersFilters() {
             onlineStatusBadges.forEach(b => b.classList.remove('active'));
             badge.classList.add('active');
             currentFilters.onlineStatus = badge.dataset.onlineStatus || '';
+            filteredUsersCache = null; // Clear cache on filter change
             renderModernUsers();
         });
     });
+    
+    // View toggle buttons
+    const gridBtn = document.getElementById('view-toggle-grid');
+    const listBtn = document.getElementById('view-toggle-list');
+    
+    if (gridBtn) {
+        // Remove old listeners by cloning
+        const newGridBtn = gridBtn.cloneNode(true);
+        gridBtn.parentNode.replaceChild(newGridBtn, gridBtn);
+        
+        newGridBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleUsersViewMode('grid');
+        });
+    }
+    
+    if (listBtn) {
+        // Remove old listeners by cloning
+        const newListBtn = listBtn.cloneNode(true);
+        listBtn.parentNode.replaceChild(newListBtn, listBtn);
+        
+        newListBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleUsersViewMode('list');
+        });
+    }
+    
+    // Replace feather icons for view toggle buttons
+    if (window.feather) {
+        setTimeout(() => {
+            const viewToggleContainer = document.querySelector('.view-toggle-buttons');
+            if (viewToggleContainer) {
+                feather.replace({ root: viewToggleContainer });
+            }
+            // Replace search icon
+            const searchContainer = document.querySelector('#users-search-input')?.parentElement;
+            if (searchContainer) {
+                feather.replace({ root: searchContainer });
+            }
+        }, 50);
+    }
+    
+    // Search input endi pagination ichida, setupPaginationSearchInput() orqali sozlanadi
+    // View toggle buttons endi pagination ichida, setupPaginationViewToggle() orqali sozlanadi
+    
+    // Apply initial view mode
+    applyViewMode();
     
     // Bulk actions
     setupBulkActions();
@@ -3277,14 +5022,78 @@ function setupRequestsFilters() {
     }
     
     // Bulk actions for selected requests
-    // NOTE: Bulk approve o'chirildi, chunki har bir foydalanuvchi uchun rol va shartlarni tanlash kerak
-    // Har bir foydalanuvchini alohida modal orqali tasdiqlash kerak
     const bulkApproveBtn = document.getElementById('requests-bulk-approve-btn');
     if (bulkApproveBtn) {
         bulkApproveBtn.addEventListener('click', async () => {
-            if (selectedRequests.size === 0) return;
+            if (selectedRequests.size === 0) {
+                showToast('Iltimos, kamida bitta foydalanuvchini tanlang', 'info');
+                return;
+            }
             
-            showToast('Har bir foydalanuvchini alohida tasdiqlash kerak. Iltimos, foydalanuvchini tanlab "Tasdiqlash" tugmasini bosing.', 'info');
+            // Tanlangan foydalanuvchilar ro'yxati
+            const selectedUserIds = Array.from(selectedRequests);
+            const selectedUsersData = [];
+            
+            // Foydalanuvchi ma'lumotlarini olish
+            for (const userId of selectedUserIds) {
+                let user = null;
+                if (state.pendingUsers && state.pendingUsers.length > 0) {
+                    user = state.pendingUsers.find(u => u.id === userId);
+                }
+                if (!user && state.users && state.users.length > 0) {
+                    user = state.users.find(u => u.id === userId);
+                }
+                if (user) {
+                    selectedUsersData.push(user);
+                }
+            }
+            
+            if (selectedUsersData.length === 0) {
+                showToast('Tanlangan foydalanuvchilar topilmadi', 'error');
+                return;
+            }
+            
+            // Tasdiqlash dialog
+            const confirmed = await showConfirmDialog({
+                title: 'Tanlanganlarni tasdiqlash',
+                message: `Tanlangan ${selectedUsersData.length} ta foydalanuvchini tasdiqlashni xohlaysizmi?<br><br><strong>Eslatma:</strong> Har bir foydalanuvchi uchun rol va shartlarni tanlash kerak bo'ladi.`,
+                confirmText: 'Davom etish',
+                cancelText: 'Bekor qilish',
+                type: 'warning',
+                icon: 'check-circle'
+            });
+            
+            if (!confirmed) return;
+            
+            // Birinchi foydalanuvchi uchun modal ochish
+            // Qolgan foydalanuvchilar uchun navbatda modal ochiladi
+            try {
+                // Bulk approval state'ni saqlash
+                window.bulkApprovalQueue = selectedUsersData.slice(1); // Birinchi foydalanuvchi tashqari
+                window.bulkApprovalCurrentIndex = 0;
+                window.bulkApprovalTotal = selectedUsersData.length;
+                
+                // Birinchi foydalanuvchi uchun modal ochish
+                const firstUser = selectedUsersData[0];
+                const firstUsername = firstUser.username || firstUser.fullname || `User ${firstUser.id}`;
+                
+                console.log(`📋 [BULK APPROVE] ${selectedUsersData.length} ta foydalanuvchi tasdiqlanmoqda`);
+                console.log(`📋 [BULK APPROVE] Birinchi foydalanuvchi: ${firstUsername} (ID: ${firstUser.id})`);
+                
+                // Modal ochish
+                await openApprovalModal(firstUser.id, firstUsername);
+                
+                // Agar modal yopilganda navbatdagi foydalanuvchi uchun modal ochilishi kerak
+                // Bu openApprovalModal ichida yoki modal yopilganda boshqariladi
+                
+            } catch (error) {
+                console.error('❌ [BULK APPROVE] Xatolik:', error);
+                showToast(`Xatolik: ${error.message}`, 'error');
+                // State'ni tozalash
+                window.bulkApprovalQueue = null;
+                window.bulkApprovalCurrentIndex = null;
+                window.bulkApprovalTotal = null;
+            }
         });
     }
     
@@ -3455,6 +5264,47 @@ function formatRelativeTime(dateStr) {
     return date.toLocaleDateString('uz-UZ', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+// Format date (sana) - xavfsiz formatlash
+function formatDate(timestamp) {
+    if (!timestamp) {
+        console.log('⚠️ [formatDate] Timestamp yo\'q:', timestamp);
+        return 'Noma\'lum';
+    }
+    
+    try {
+        let date;
+        if (typeof timestamp === 'string') {
+            // SQLite formatini ISO formatiga o'tkazish
+            // "2025-12-10 14:54:43" -> "2025-12-10T14:54:43Z"
+            const isoString = timestamp.replace(' ', 'T');
+            date = new Date(isoString + 'Z');
+        } else {
+            date = new Date(timestamp);
+        }
+        
+        // Invalid Date tekshiruvi
+        if (isNaN(date.getTime())) {
+            console.log('⚠️ [formatDate] Invalid Date:', timestamp);
+            return 'Noma\'lum';
+        }
+        
+        // Toshkent vaqti (UTC+5)
+        const formatter = new Intl.DateTimeFormat('uz-UZ', {
+            timeZone: 'Asia/Tashkent',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+        
+        const formatted = formatter.format(date);
+        console.log('✅ [formatDate] Formatlandi:', timestamp, '->', formatted);
+        return formatted;
+    } catch (error) {
+        console.error('❌ [formatDate] Date formatlash xatolik:', error, 'Timestamp:', timestamp);
+        return 'Noma\'lum';
+    }
+}
+
 // Format date and time (aniq vaqt) - Toshkent vaqti (+5) bilan hisoblanadi
 function formatDateTime(timestamp) {
     // Timestamp'ni to'g'ri parse qilish
@@ -3608,9 +5458,9 @@ function openRoleRequirementsModal(roleName, roleData) {
             const requiresBrands = document.getElementById('modal-requires-brands').checked;
             
             // Validatsiya: kamida bitta shart tanlanishi kerak (true bo'lishi kerak)
-            // false yoki null bo'lishi mumkin, lekin kamida bittasi true bo'lishi kerak
+            // Agar ikkalasi ham false/null bo'lsa, foydalanuvchi hech qanday ma'lumot ko'ra olmaydi
             if (!requiresLocations && !requiresBrands) {
-                showToast('Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar)', true);
+                showToast('⚠️ Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar). Agar ikkalasi ham tanlanmagan bo\'lsa, foydalanuvchi hech qanday ma\'lumot ko\'ra olmaydi.', true);
                 return;
             }
             

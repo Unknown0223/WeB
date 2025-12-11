@@ -276,4 +276,39 @@ router.post('/user/:userId', isAuthenticated, hasPermission('users:edit'), async
     }
 });
 
+// GET /api/brands/:id/locations - Brendga biriktirilgan filiallarni olish
+router.get('/:id/locations', isAuthenticated, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const locations = await db('brand_locations')
+            .where('brand_id', id)
+            .select('location_name')
+            .orderBy('location_name');
+        
+        res.json(locations.map(l => l.location_name));
+    } catch (error) {
+        console.error(`/api/brands/${req.params.id}/locations GET xatoligi:`, error);
+        res.status(500).json({ message: "Filiallarni olishda xatolik" });
+    }
+});
+
+// GET /api/locations/:locationName/brands - Filialga biriktirilgan brendlarni olish
+router.get('/by-location/:locationName', isAuthenticated, async (req, res) => {
+    try {
+        const { locationName } = req.params;
+        
+        const brands = await db('brands')
+            .join('brand_locations', 'brands.id', 'brand_locations.brand_id')
+            .where('brand_locations.location_name', locationName)
+            .select('brands.id', 'brands.name', 'brands.emoji', 'brands.color')
+            .orderBy('brands.name');
+        
+        res.json(brands);
+    } catch (error) {
+        console.error(`/api/brands/by-location/${req.params.locationName} GET xatoligi:`, error);
+        res.status(500).json({ message: "Brendlarni olishda xatolik" });
+    }
+});
+
 module.exports = router;

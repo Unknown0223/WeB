@@ -56,15 +56,27 @@ window.toggleRoleCategory = function(header) {
 };
 
 export function renderRoles(autoSelectRole = null) {
-    if (!state.roles || !state.allPermissions) return;
+    console.log('🔄 [ROLES] renderRoles chaqirildi:', { 
+        autoSelectRole, 
+        currentEditingRole: state.currentEditingRole,
+        rolesCount: state.roles?.length || 0,
+        hasPermissions: !!state.allPermissions
+    });
+    
+    if (!state.roles || !state.allPermissions) {
+        console.warn('⚠️ [ROLES] renderRoles: state.roles yoki state.allPermissions mavjud emas');
+        return;
+    }
     
     // Joriy tanlangan rolni saqlash
     const currentSelectedRole = autoSelectRole || state.currentEditingRole;
+    console.log('📌 [ROLES] Tanlash uchun rol:', currentSelectedRole);
     
     // Superadmin'ni ro'yxatdan olib tashlash (super_admin va superadmin)
     const filteredRoles = state.roles.filter(role => 
         role.role_name !== 'super_admin' && role.role_name !== 'superadmin'
     );
+    console.log('📋 [ROLES] Filtrlangan rollar soni:', filteredRoles.length);
     
     DOM.rolesList.innerHTML = filteredRoles.map(role => 
         `<li data-role="${role.role_name}" class="role-list-item">
@@ -163,10 +175,26 @@ export function renderRoles(autoSelectRole = null) {
         }
         
         const roleElement = DOM.rolesList.querySelector(`[data-role="${roleToSelect.role_name}"]`);
+        console.log('🎯 [ROLES] Tanlash uchun rol elementi:', { 
+            roleName: roleToSelect.role_name, 
+            elementFound: !!roleElement 
+        });
+        
         if (roleElement) {
-            setTimeout(() => {
-                handleRoleSelection({ target: roleElement });
-            }, 100);
+            // requestAnimationFrame va setTimeout kombinatsiyasi - DOM to'liq tayyor bo'lishi uchun
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    console.log('✅ [ROLES] Rol tanlanmoqda:', roleToSelect.role_name);
+                    const element = DOM.rolesList.querySelector(`[data-role="${roleToSelect.role_name}"]`);
+                    if (element) {
+                        handleRoleSelection({ target: element });
+                    } else {
+                        console.error('❌ [ROLES] Rol elementi topilmadi tanlash vaqtida:', roleToSelect.role_name);
+                    }
+                }, 150); // 100ms dan 150ms ga oshirildi
+            });
+        } else {
+            console.error('❌ [ROLES] Rol elementi topilmadi:', roleToSelect.role_name);
         }
     } else {
         // Agar hech qanday rol bo'lmasa (faqat superadmin bo'lsa), hech narsa ko'rsatmaslik
@@ -352,13 +380,19 @@ window.deleteRole = async function(roleName) {
 };
 
 export function handleRoleSelection(e) {
-    // console.log('🎯 handleRoleSelection called', e);
+    console.log('🎯 [ROLES] handleRoleSelection chaqirildi:', { 
+        target: e.target, 
+        closest: e.target?.closest('li') 
+    });
+    
     const li = e.target.closest('li');
-    // console.log('🎯 Found li element:', li);
-    if (!li) return;
+    if (!li) {
+        console.error('❌ [ROLES] handleRoleSelection: li elementi topilmadi');
+        return;
+    }
     
     const roleName = li.dataset.role;
-    // console.log('🎯 Selected role:', roleName);
+    console.log('✅ [ROLES] Rol tanlandi:', roleName);
     state.currentEditingRole = roleName;
     
     DOM.rolesList.querySelectorAll('li').forEach(item => item.classList.remove('active'));
@@ -516,6 +550,12 @@ async function saveRoleRequirements() {
     const requiresLocations = document.getElementById('role-requires-locations').checked;
     const requiresBrands = document.getElementById('role-requires-brands').checked;
     
+    // Validatsiya: kamida bitta shart tanlanishi kerak
+    if (!requiresLocations && !requiresBrands) {
+        showToast('⚠️ Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar). Agar ikkalasi ham tanlanmagan bo\'lsa, foydalanuvchi hech qanday ma\'lumot ko\'ra olmaydi.', true);
+        return;
+    }
+    
     const btn = document.getElementById('save-role-requirements-btn');
     const originalText = btn.innerHTML;
     btn.disabled = true;
@@ -654,6 +694,7 @@ export async function handleBackupDb() {
     if (!confirmed) return;
     
     try {
+        showToast('📥 Database yuklab olinmoqda...');
         const response = await safeFetch('/api/admin/backup-db');
         if (!response || !response.ok) {
             const error = await response.json();
@@ -680,10 +721,87 @@ export async function handleBackupDb() {
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
-        showToast("Baza nusxasi muvaffaqiyatli yuklab olindi.");
+        a.remove();
+        showToast("✅ Baza nusxasi muvaffaqiyatli yuklab olindi.");
     } catch (error) {
         showToast(error.message, true);
     }
+}
+
+// Database restore funksiyasi (YANGI)
+export async function handleRestoreDb() {
+    const confirmed = await showConfirmDialog({
+        title: '⚠️ DIQQAT! Database Restore',
+        message: "Bu amal hozirgi database'ni to'liq almashtiradi. Eski database avtomatik backup qilinadi, lekin server'ni qayta ishga tushirish kerak bo'ladi. Davom etasizmi?",
+        confirmText: 'Ha, restore qilish',
+        cancelText: 'Bekor qilish',
+        type: 'danger',
+        icon: 'alert-triangle'
+    });
+    
+    if (!confirmed) return;
+    
+    // File input yaratish
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.db';
+    input.style.display = 'none';
+    
+    input.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        if (!file.name.endsWith('.db')) {
+            showToast('❌ Faqat .db fayllarni yuklash mumkin!', true);
+            return;
+        }
+        
+        const finalConfirm = await showConfirmDialog({
+            title: '⚠️ OXIRGI TASDIQLASH',
+            message: `"${file.name}" faylini restore qilmoqchimisiz? Bu hozirgi barcha ma'lumotlarni o'zgartiradi!`,
+            confirmText: 'Ha, restore qilish',
+            cancelText: 'Bekor qilish',
+            type: 'danger',
+            icon: 'alert-triangle'
+        });
+        
+        if (!finalConfirm) return;
+        
+        try {
+            showToast('📤 Database restore qilinmoqda...');
+            
+            const formData = new FormData();
+            formData.append('database', file);
+            
+            const response = await fetch('/api/admin/restore-db', {
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin'
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Database restore qilishda xatolik');
+            }
+            
+            const result = await response.json();
+            
+            showToast(`✅ ${result.message}`, false, 10000);
+            
+            // Warning ko'rsatish
+            setTimeout(() => {
+                showToast('⚠️ Serverni qayta ishga tushiring (restart)!', true, 15000);
+            }, 2000);
+            
+        } catch (error) {
+            showToast(`❌ ${error.message}`, true);
+        } finally {
+            input.remove();
+        }
+    });
+    
+    document.body.appendChild(input);
+    input.click();
 }
 
 export async function handleClearSessions() {
@@ -1100,6 +1218,39 @@ export async function confirmImportSelectedTables() {
         showProgress('✅ Import muvaffaqiyatli!', 100);
         
         const result = await response.json();
+        console.log('✅ [ROLES] Import muvaffaqiyatli:', result);
+        
+        // Import qilinganda rollar yangilanishi kerak
+        // Avval rollarni yangilash, keyin sahifani reload qilish
+        try {
+            console.log('🔄 [ROLES] Import qilingandan keyin rollar yangilanmoqda...');
+            const { fetchRoles } = await import('./api.js');
+            const { state } = await import('./state.js');
+            const rolesData = await fetchRoles();
+            
+            if (rolesData && rolesData.roles && Array.isArray(rolesData.roles)) {
+                state.roles = rolesData.roles;
+                state.allPermissions = rolesData.all_permissions || [];
+                console.log('✅ [ROLES] Import qilingandan keyin state yangilandi:', {
+                    rolesCount: state.roles.length
+                });
+                
+                // Rollarni render qilish
+                const { renderRoles } = await import('./roles.js');
+                if (renderRoles) {
+                    // Birinchi rolni tanlash
+                    const firstRole = state.roles.find(r => 
+                        r.role_name !== 'super_admin' && r.role_name !== 'superadmin'
+                    );
+                    if (firstRole) {
+                        console.log('✅ [ROLES] Import qilingandan keyin birinchi rol tanlanmoqda:', firstRole.role_name);
+                        renderRoles(firstRole.role_name);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('❌ [ROLES] Import qilingandan keyin rollar yangilashda xatolik:', error);
+        }
         
         setTimeout(() => {
             hideProgress();
@@ -1473,17 +1624,26 @@ async function createNewRole() {
         }
         
         // Reload roles va yangi yaratilgan rolni tanlash
+        console.log('🔄 [ROLES] Yangi rol yaratilgandan keyin rollar yangilanmoqda...');
         const rolesResponse = await safeFetch('/api/roles');
         if (rolesResponse && rolesResponse.ok) {
             const rolesData = await rolesResponse.json();
+            console.log('📥 [ROLES] API javob:', { 
+                rolesCount: rolesData?.roles?.length || 0,
+                hasPermissions: !!rolesData?.all_permissions 
+            });
+            
             if (rolesData && rolesData.roles && Array.isArray(rolesData.roles)) {
                 state.roles = rolesData.roles;
                 state.allPermissions = rolesData.all_permissions || [];
+                console.log('✅ [ROLES] State yangilandi, yangi rolni tanlash:', roleName);
                 // Yangi yaratilgan rolni avtomatik tanlash
                 renderRoles(roleName);
             } else {
-                console.warn('[ROLES] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
+                console.warn('⚠️ [ROLES] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
             }
+        } else {
+            console.error('❌ [ROLES] Roles API javob xatolik:', rolesResponse?.status);
         }
         
     } catch (error) {

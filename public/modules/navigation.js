@@ -110,11 +110,11 @@ export async function navigateTo(pageId, hideLoaderAfter = false) {
             
             // Agar loader yashirilishi kerak bo'lsa
             if (hideLoaderAfter) {
-                // Sahifa to'liq render bo'lguncha biroz kutish
+                // Sahifa to'liq render bo'lguncha biroz kutish (100ms - tezroq)
                 requestAnimationFrame(() => {
                     setTimeout(() => {
                         hidePageLoader();
-                    }, 200);
+                    }, 100);
                 });
             }
         }, 100);

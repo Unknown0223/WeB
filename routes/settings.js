@@ -130,6 +130,16 @@ router.post('/', isAuthenticated, async (req, res, next) => {
             .onConflict('key')
             .merge();
         
+        // WebSocket orqali realtime yuborish
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [SETTINGS] Sozlama yangilandi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('settings_updated', {
+                key: key,
+                value: value
+            });
+            console.log(`✅ [SETTINGS] WebSocket yuborildi: settings_updated`);
+        }
+        
         if (key === 'telegram_bot_token') {
             await setWebhook(value);
         }

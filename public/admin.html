@@ -75,6 +75,7 @@
         .kpi-table th {
             cursor: pointer;
             position: relative;
+            -webkit-user-select: none;
             user-select: none;
         }
         .kpi-table th .sort-icon {
@@ -158,19 +159,80 @@
         <div id="loader-progress" class="loader-progress-bar"></div>
     </div>
     
-    <!-- Inline script to show loader immediately -->
+    <!-- Inline script to show loader immediately and load branding cache -->
     <script>
         // Darhol loader ko'rsatish (sahifa yuklanganda)
         (function() {
             const loader = document.getElementById('page-loader');
             const loaderAnimation = document.getElementById('loader-animation');
             const loaderText = document.getElementById('loader-text');
+            const loaderProgress = document.getElementById('loader-progress');
             
             if (loader && !loader.classList.contains('active')) {
                 loader.classList.add('active');
             }
             
-            // Default loader animatsiyasini o'rnatish
+            // SessionStorage'dan branding cache'ni yuklash (tezroq)
+            try {
+                const cachedBranding = sessionStorage.getItem('branding_settings_cache');
+                if (cachedBranding) {
+                    const branding = JSON.parse(cachedBranding);
+                    if (branding && branding.loader) {
+                        // Loader sozlamalarini darhol qo'llash
+                        const loaderType = branding.loader.type || 'spinner';
+                        const loaderTextValue = branding.loader.text || 'Tizim yuklanmoqda...';
+                        const showProgress = branding.loader.showProgress || false;
+                        const blurBackground = branding.loader.blurBackground !== undefined ? branding.loader.blurBackground : true;
+                        
+                        // Loader type'ni o'rnatish
+                        if (loaderAnimation) {
+                            // Barcha loader klaslarini olib tashlash
+                            const loaderClasses = ['loader-spinner', 'loader-dots', 'loader-pulse', 'loader-gradient', 
+                                                  'loader-bars', 'loader-circle-progress', 'loader-bounce', 
+                                                  'loader-cube', 'loader-dna', 'loader-hexagon'];
+                            loaderClasses.forEach(cls => loaderAnimation.classList.remove(cls));
+                            
+                            // Yangi loader turini qo'llash
+                            loaderAnimation.className = `loader-${loaderType}`;
+                            if (loaderType === 'dots') {
+                                loaderAnimation.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+                            } else if (loaderType === 'bars') {
+                                loaderAnimation.innerHTML = '<div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>';
+                            } else if (loaderType === 'progress') {
+                                loaderAnimation.innerHTML = '<svg width="60" height="60"><circle cx="30" cy="30" r="28"></circle></svg>';
+                            } else if (loaderType === 'bounce') {
+                                loaderAnimation.innerHTML = '<div class="ball"></div><div class="ball"></div><div class="ball"></div>';
+                            } else if (loaderType === 'cube') {
+                                loaderAnimation.innerHTML = '<div class="face"></div>';
+                            } else if (loaderType === 'dna') {
+                                loaderAnimation.innerHTML = '<div class="strand"></div><div class="strand"></div>';
+                            } else {
+                                loaderAnimation.innerHTML = '';
+                            }
+                        }
+                        
+                        if (loaderText) loaderText.textContent = loaderTextValue;
+                        
+                        if (loaderProgress) {
+                            loaderProgress.style.display = showProgress ? 'block' : 'none';
+                        }
+                        
+                        if (loader) {
+                            if (blurBackground) {
+                                loader.classList.add('blur-background');
+                            } else {
+                                loader.classList.remove('blur-background');
+                            }
+                        }
+                        
+                        return; // Cache'dan yuklandi, default'ga o'tmaslik
+                    }
+                }
+            } catch (e) {
+                // Cache xatolikni e'tiborsiz qoldirish
+            }
+            
+            // Default loader sozlamalari (cache yo'q bo'lsa)
             if (loaderAnimation && !loaderAnimation.className) {
                 loaderAnimation.className = 'loader-spinner';
             }
@@ -246,7 +308,7 @@
                     <i data-feather="arrow-left-circle"></i>
                     <span>Asosiy Sahifaga</span>
                 </a>
-                <button id="logout-btn" class="btn btn-danger sidebar-logout-btn" style="width: 100%; margin-top: 10px; box-sizing: border-box;">
+                <button id="logout-btn" class="btn btn-danger sidebar-logout-btn w-full mt-10 box-sizing-border">
                     <i data-feather="log-out"></i>
                     <span>Chiqish</span>
                 </button>
@@ -262,8 +324,8 @@
                         <h1 class="page-title">Boshqaruv Paneli</h1>
                         <p class="page-description">Tizimning <strong id="dashboard-selected-date">bugungi</strong> umumiy holati va statistik ma'lumotlar.</p>
                     </div>
-                    <div style="display: flex; gap: 15px; align-items: center;">
-                        <input type="text" id="dashboard-date-picker" class="form-control" style="width: 250px;" placeholder="Sanani tanlang">
+                    <div class="flex-center gap-15">
+                        <input type="text" id="dashboard-date-picker" class="form-control w-250" placeholder="Sanani tanlang">
                         <button id="customize-stats-btn" class="btn btn-secondary" title="Statistikalarni sozlash">
                             <i data-feather="sliders"></i> Sozlash
                         </button>
@@ -281,10 +343,12 @@
                                     </svg>
                                     Statistikalarni Sozlash
                                 </h2>
-                                <button class="btn-close close-modal"></button>
+                                <button class="btn-close close-modal" title="Bekor qilish">
+                                    <span class="sr-only">Bekor qilish</span>
+                                </button>
                             </div>
                             <div class="modal-body">
-                                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                                <p class="text-secondary mb-20">
                                     Ko'rsatmoqchi bo'lgan statistikalarni tanlang (maksimal 6 ta):
                                 </p>
                                 <div class="stats-options-grid" id="stats-options-grid">
@@ -307,7 +371,7 @@
                 <div class="stats-grid" id="stats-grid"></div>
                 
                 <!-- Grafiklar bo'limi -->
-                <div class="card" style="margin-top: 30px;">
+                <div class="card mt-30">
                     <div class="card-header-with-actions">
                         <h3 class="card-title" id="chart-title">Haftalik Dinamika (Hisobotlar Soni)</h3>
                         <button id="customize-charts-btn" class="btn btn-secondary btn-sm" title="Grafiklarni sozlash">
@@ -315,7 +379,7 @@
                         </button>
                     </div>
                     <div id="charts-container" class="charts-grid">
-                        <div id="chart-1" class="chart-wrapper" style="height: 300px; position: relative;">
+                        <div id="chart-1" class="chart-wrapper">
                             <canvas id="weekly-dynamics-chart"></canvas>
                         </div>
                     </div>
@@ -332,10 +396,12 @@
                                     </svg>
                                     <span>Grafik</span>
                                 </h2>
-                                <button class="btn-close" id="close-chart-fullscreen"></button>
+                                <button class="btn-close" id="close-chart-fullscreen">
+                                    <span class="sr-only">Bekor qilish</span>
+                                </button>
                             </div>
-                            <div class="modal-body" style="padding: 30px;">
-                                <div id="fullscreen-chart-container" style="height: 500px; position: relative;">
+                            <div class="modal-body p-30">
+                                <div id="fullscreen-chart-container" class="chart-wrapper-fullscreen">
                                     <canvas id="fullscreen-chart-canvas"></canvas>
                                 </div>
                             </div>
@@ -345,7 +411,7 @@
                 
                 <!-- Grafiklarni sozlash modali -->
                 <div id="charts-config-modal" class="modal hidden">
-                    <div class="modal-dialog modal-dialog-centered" style="max-width: 700px;">
+                    <div class="modal-dialog modal-dialog-centered max-w-700">
                         <div class="modal-content">
                             <div class="modal-header">
                                 <h2 class="modal-title">
@@ -354,10 +420,12 @@
                                     </svg>
                                     Grafiklarni Sozlash
                                 </h2>
-                                <button class="btn-close close-modal"></button>
+                                <button class="btn-close close-modal">
+                                    <span class="sr-only">Bekor qilish</span>
+                                </button>
                             </div>
                             <div class="modal-body">
-                                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                                <p class="text-secondary mb-20">
                                     Ko'rsatmoqchi bo'lgan grafiklarni tanlang (maksimal 3 ta):
                                 </p>
                                 <div class="charts-options-grid" id="charts-options-grid">
@@ -378,7 +446,7 @@
                 </div>
                 
                 <!-- Filiallar bo'yicha holat -->
-                <div class="card" style="margin-top: 30px;">
+                <div class="card mt-30">
                     <div class="locations-header">
                         <div>
                             <h3 class="card-title">Filiallar Bo'yicha Holat</h3>
@@ -387,8 +455,8 @@
                             </div>
                         </div>
                         <div class="locations-controls">
-                            <div class="form-group" style="min-width: 250px; margin-bottom: 0;">
-                                <select id="location-filter" class="form-control">
+                            <div class="form-group min-w-250 mb-0">
+                                <select id="location-filter" class="form-control" title="Filiallar filterini tanlash">
                                     <option value="all">Barcha filiallar</option>
                                 </select>
                             </div>
@@ -425,24 +493,24 @@
                 <div class="page-header">
                     <h1 class="page-title">Xodimlar Ish Samaradorligi (KPI)</h1>
                     <div class="modern-month-selector">
-                        <button class="month-nav-btn" id="prev-month-btn">
+                        <button class="month-nav-btn" id="prev-month-btn" title="O'tish orqaga">
                             <i data-feather="chevron-left"></i>
                         </button>
                         <div class="month-display" id="month-display-btn">
                             <span id="current-month-text">Noyabr 2025</span>
                             <i data-feather="calendar" style="width: 18px; height: 18px; margin-left: 8px;"></i>
                         </div>
-                        <button class="month-nav-btn" id="next-month-btn">
+                        <button class="month-nav-btn" id="next-month-btn" title="O'tish oldinga">
                             <i data-feather="chevron-right"></i>
                         </button>
                     </div>
                     <div class="month-dropdown hidden" id="month-dropdown">
                         <div class="month-dropdown-header">
-                            <button class="year-nav-btn" id="prev-year-btn">
+                            <button class="year-nav-btn" id="prev-year-btn" title="Yilni orqaga">
                                 <i data-feather="chevron-left"></i>
                             </button>
                             <span class="current-year" id="dropdown-year">2025</span>
-                            <button class="year-nav-btn" id="next-year-btn">
+                            <button class="year-nav-btn" id="next-year-btn" title="Yilni oldinga">
                                 <i data-feather="chevron-right"></i>
                             </button>
                         </div>
@@ -451,7 +519,7 @@
                 </div>
                 
                 <!-- Statistika Kartalari -->
-                <div id="kpi-stats-cards" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px;"></div>
+                <div id="kpi-stats-cards" class="grid-3-cols mb-30"></div>
 
                 <!-- Jadval -->
                 <div class="card">
@@ -481,59 +549,62 @@
             </section>
             
             <!-- Kalendar Modal -->
-            <div id="kpi-calendar-modal" class="modal hidden" style="z-index: 1000;">
-                <div class="modal-content" style="max-width: 900px; width: 90%;">
-                    <button class="close-modal-btn" id="close-calendar-modal">
+            <div id="kpi-calendar-modal" class="modal hidden z-index-1000">
+                <div class="modal-content max-w-900 max-w-90">
+                    <button class="close-modal-btn" id="close-calendar-modal" title="Bekor qilish">
+                        <span class="sr-only">Bekor qilish</span>
                         <i data-feather="x"></i>
                     </button>
-                    <div class="modal-header" style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
-                        <div style="width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px;" id="calendar-avatar"></div>
+                    <div class="modal-header-flex">
+                        <div class="calendar-avatar" id="calendar-avatar"></div>
                         <div>
-                            <h3 class="modal-title" id="calendar-employee-name" style="margin: 0; font-size: 22px;"></h3>
-                            <p style="margin: 5px 0 0 0; opacity: 0.7; font-size: 14px;" id="calendar-month-label"></p>
+                            <h3 class="modal-title m-0 font-22" id="calendar-employee-name"></h3>
+                            <p class="m-5 opacity-07 font-14" id="calendar-month-label"></p>
                         </div>
                     </div>
                     
                     <!-- Kalendar Statistika -->
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px;" id="calendar-stats"></div>
+                    <div class="grid-4-cols mb-25" id="calendar-stats"></div>
                     
                     <!-- Kalendar Grid -->
-                    <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 15px;">
-                        <div style="text-align: center; font-weight: 600; padding: 10px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; color: #4facfe;">Yak</div>
-                        <div style="text-align: center; font-weight: 600; padding: 10px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; color: #4facfe;">Du</div>
-                        <div style="text-align: center; font-weight: 600; padding: 10px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; color: #4facfe;">Se</div>
-                        <div style="text-align: center; font-weight: 600; padding: 10px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; color: #4facfe;">Cho</div>
-                        <div style="text-align: center; font-weight: 600; padding: 10px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; color: #4facfe;">Pay</div>
-                        <div style="text-align: center; font-weight: 600; padding: 10px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; color: #4facfe;">Ju</div>
-                        <div style="text-align: center; font-weight: 600; padding: 10px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; color: #4facfe;">Sha</div>
+                    <div class="grid-7-cols mb-15">
+                        <div class="calendar-day-header">Yak</div>
+                        <div class="calendar-day-header">Du</div>
+                        <div class="calendar-day-header">Se</div>
+                        <div class="calendar-day-header">Cho</div>
+                        <div class="calendar-day-header">Pay</div>
+                        <div class="calendar-day-header">Ju</div>
+                        <div class="calendar-day-header">Sha</div>
                     </div>
-                    <div id="modal-calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px;"></div>
+                    <div id="modal-calendar-grid" class="grid-7-cols"></div>
                 </div>
             </div>
             
             <!-- Kun Batafsil Modal -->
-            <div id="day-details-modal" class="modal hidden" style="z-index: 1100;">
-                <div class="modal-content" style="max-width: 600px;">
-                    <button class="close-modal-btn" id="close-day-details-modal">
+            <div id="day-details-modal" class="modal hidden z-index-1100">
+                <div class="modal-content max-w-600">
+                    <button class="close-modal-btn" id="close-day-details-modal" title="Bekor qilish">
+                        <span class="sr-only">Bekor qilish</span>
                         <i data-feather="x"></i>
                     </button>
-                    <h3 class="modal-title" id="day-details-title" style="margin-bottom: 20px;"></h3>
+                    <h3 class="modal-title mb-20" id="day-details-title"></h3>
                     
-                    <div id="day-details-content" style="display: flex; flex-direction: column; gap: 15px;">
+                    <div id="day-details-content" class="flex-column gap-15">
                         <!-- Bu yerda kun ma'lumotlari ko'rsatiladi -->
                     </div>
                 </div>
             </div>
 
             <!-- Brend Modal -->
-            <div id="brand-modal" class="modal hidden" style="z-index: 1100;">
-                <div class="modal-content" style="max-width: 500px;">
-                    <button class="close-modal-btn" id="close-brand-modal">
+            <div id="brand-modal" class="modal hidden z-index-1100">
+                <div class="modal-content max-w-500">
+                    <button class="close-modal-btn" id="close-brand-modal" title="Bekor qilish">
+                        <span class="sr-only">Bekor qilish</span>
                         <i data-feather="x"></i>
                     </button>
                     <h3 class="modal-title" id="brand-modal-title">Yangi Brend</h3>
                     
-                    <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 20px;">
+                    <div class="flex-column gap-15 mt-20">
                         <div class="form-group">
                             <label for="brand-name-input">Brend nomi *</label>
                             <input type="text" id="brand-name-input" class="form-control" placeholder="Masalan: Coca-Cola">
@@ -541,20 +612,20 @@
                         
                         <div class="form-group">
                             <label for="brand-color-input">Rang</label>
-                            <input type="color" id="brand-color-input" class="form-control" value="#4facfe" style="height: 60px; padding: 2px; cursor: pointer; width: 100%; border-radius: 8px;">
+                            <input type="color" id="brand-color-input" class="form-control color-input" value="#4facfe">
                         </div>
                         
                         <div class="form-group">
                             <label>Filiallar</label>
-                            <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 10px;">
+                            <p class="text-white-60 font-13 mb-10">
                                 Brendni qaysi filiallarga biriktirmoqchisiz? (Bir nechta tanlash mumkin)
                             </p>
-                            <div id="brand-locations-list" style="max-height: 200px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; background: rgba(0,0,0,0.2);">
+                            <div id="brand-locations-list" class="brand-locations-list">
                                 <!-- Filiallar checkbox ro'yxati -->
                             </div>
                         </div>
                         
-                        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
+                        <div class="form-actions">
                             <button class="btn btn-secondary" id="cancel-brand-btn">Bekor qilish</button>
                             <button class="btn btn-primary" id="save-brand-btn"><i data-feather="save"></i> Saqlash</button>
                         </div>
@@ -563,20 +634,21 @@
             </div>
 
             <!-- Ustun Modal -->
-            <div id="column-modal" class="modal hidden" style="z-index: 1100;">
-                <div class="modal-content" style="max-width: 400px;">
-                    <button class="close-modal-btn" id="close-column-modal">
+            <div id="column-modal" class="modal hidden z-index-1100">
+                <div class="modal-content max-w-400">
+                    <button class="close-modal-btn" id="close-column-modal" title="Bekor qilish">
+                        <span class="sr-only">Bekor qilish</span>
                         <i data-feather="x"></i>
                     </button>
                     <h3 class="modal-title" id="column-modal-title">Yangi Ustun</h3>
                     
-                    <div style="margin-top: 20px;">
+                    <div class="mt-20">
                         <div class="form-group">
                             <label for="column-name-input">Ustun nomi *</label>
                             <input type="text" id="column-name-input" class="form-control" placeholder="Masalan: Savdo hajmi" autofocus>
                         </div>
                         
-                        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                        <div class="form-actions-20">
                             <button class="btn btn-secondary" id="cancel-column-btn">Bekor qilish</button>
                             <button class="btn btn-primary" id="save-column-btn"><i data-feather="save"></i> Saqlash</button>
                         </div>
@@ -586,20 +658,21 @@
 
 
             <!-- Filial Modal -->
-            <div id="location-modal" class="modal hidden" style="z-index: 1100;">
-                <div class="modal-content" style="max-width: 400px;">
-                    <button class="close-modal-btn" id="close-location-modal">
+            <div id="location-modal" class="modal hidden z-index-1100">
+                <div class="modal-content max-w-400">
+                    <button class="close-modal-btn" id="close-location-modal" title="Bekor qilish">
+                        <span class="sr-only">Bekor qilish</span>
                         <i data-feather="x"></i>
                     </button>
                     <h3 class="modal-title" id="location-modal-title">Yangi Filial</h3>
                     
-                    <div style="margin-top: 20px;">
+                    <div class="mt-20">
                         <div class="form-group">
                             <label for="location-name-input">Filial nomi *</label>
                             <input type="text" id="location-name-input" class="form-control" placeholder="Masalan: Toshkent" autofocus>
                         </div>
                         
-                        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                        <div class="form-actions-20">
                             <button class="btn btn-secondary" id="cancel-location-btn">Bekor qilish</button>
                             <button class="btn btn-primary" id="save-location-btn"><i data-feather="save"></i> Saqlash</button>
                         </div>
@@ -612,7 +685,7 @@
                     <div class="card">
                         <div class="page-header">
                             <h3 class="card-title" id="details-view-title"></h3>
-                            <button id="back-to-list-btn" class="btn btn-secondary">
+                            <button id="back-to-list-btn" class="btn btn-secondary" title="Ortga">
                                 <i data-feather="arrow-left"></i> Ortga
                             </button>
                         </div>
@@ -790,7 +863,8 @@
                 <div class="modal-content modal-small">
                     <div class="modal-header">
                         <h3 class="modal-title">💾 Сохранить шаблон</h3>
-                        <button class="modal-close" onclick="document.getElementById('save-template-modal').classList.add('hidden')">
+                        <button class="modal-close" onclick="document.getElementById('save-template-modal').classList.add('hidden')" title="Bekor qilish">
+                            <span class="sr-only">Bekor qilish</span>
                             <i data-feather="x"></i>
                         </button>
                     </div>
@@ -833,7 +907,8 @@
                 <div class="modal-content modal-medium">
                     <div class="modal-header">
                         <h3 class="modal-title">📂 Загрузить шаблон</h3>
-                        <button class="modal-close" onclick="document.getElementById('load-template-modal').classList.add('hidden')">
+                        <button class="modal-close" onclick="document.getElementById('load-template-modal').classList.add('hidden')" title="Bekor qilish">
+                            <span class="sr-only">Bekor qilish</span>
                             <i data-feather="x"></i>
                         </button>
                     </div>
@@ -944,11 +1019,13 @@
                             </label>
                             <div class="filter-badges" id="requests-status-badges">
                                 <button class="filter-badge active" data-request-status="">
-                                    <span>Barchasi <span class="badge-count" id="request-status-count-all">0</span></span>
+                                    <span>Barchasi</span>
+                                    <span class="badge-count" id="request-status-count-all">0</span>
                                 </button>
                                 <button class="filter-badge filter-badge-warning" data-request-status="pending_telegram_subscription">
                                     <i data-feather="send"></i>
-                                    <span>Telegram kutmoqda <span class="badge-count" id="request-status-count-telegram">0</span></span>
+                                    <span>Telegram kutmoqda</span>
+                                    <span class="badge-count" id="request-status-count-telegram">0</span>
                                 </button>
                                 <button class="filter-badge filter-badge-info" data-request-status="pending_admin_approval">
                                     <i data-feather="user-check"></i>
@@ -1098,7 +1175,8 @@
                             </label>
                             <div class="filter-badges" id="users-role-badges">
                                 <button class="filter-badge active" data-role="">
-                                    <span>Barchasi <span class="badge-count" id="role-count-all">0</span></span>
+                                    <span>Barchasi</span>
+                                    <span class="badge-count" id="role-count-all">0</span>
                                 </button>
                                 <!-- JS orqali faqat mavjud rollar dinamik qo'shiladi -->
                             </div>
@@ -1112,19 +1190,23 @@
                             </label>
                             <div class="filter-badges" id="users-account-status-badges">
                                 <button class="filter-badge active" data-account-status="">
-                                    <span>Barchasi <span class="badge-count" id="account-status-count-all">0</span></span>
+                                    <span>Barchasi</span>
+                                    <span class="badge-count" id="account-status-count-all">0</span>
                                 </button>
                                 <button class="filter-badge filter-badge-success" data-account-status="active">
                                     <i data-feather="check-circle"></i>
-                                    <span>Faol <span class="badge-count" id="account-status-count-active">0</span></span>
+                                    <span>Faol</span>
+                                    <span class="badge-count" id="account-status-count-active">0</span>
                                 </button>
                                 <button class="filter-badge filter-badge-warning" data-account-status="pending">
                                     <i data-feather="clock"></i>
-                                    <span>Kutmoqda <span class="badge-count" id="account-status-count-pending">0</span></span>
+                                    <span>Kutmoqda</span>
+                                    <span class="badge-count" id="account-status-count-pending">0</span>
                                 </button>
                                 <button class="filter-badge filter-badge-danger" data-account-status="inactive">
                                     <i data-feather="x-circle"></i>
-                                    <span>Noaktiv <span class="badge-count" id="account-status-count-inactive">0</span></span>
+                                    <span>Noaktiv</span>
+                                    <span class="badge-count" id="account-status-count-inactive">0</span>
                                 </button>
                             </div>
                         </div>
@@ -1137,15 +1219,18 @@
                             </label>
                             <div class="filter-badges" id="users-online-status-badges">
                                 <button class="filter-badge active" data-online-status="">
-                                    <span>Barchasi <span class="badge-count" id="online-status-count-all">0</span></span>
+                                    <span>Barchasi</span>
+                                    <span class="badge-count" id="online-status-count-all">0</span>
                                 </button>
                                 <button class="filter-badge filter-badge-success" data-online-status="online">
                                     <i data-feather="wifi"></i>
-                                    <span>Online <span class="badge-count" id="online-status-count-online">0</span></span>
+                                    <span>Online</span>
+                                    <span class="badge-count" id="online-status-count-online">0</span>
                                 </button>
                                 <button class="filter-badge filter-badge-secondary" data-online-status="offline">
                                     <i data-feather="wifi-off"></i>
-                                    <span>Offline <span class="badge-count" id="online-status-count-offline">0</span></span>
+                                    <span>Offline</span>
+                                    <span class="badge-count" id="online-status-count-offline">0</span>
                                 </button>
                             </div>
                         </div>
@@ -1170,6 +1255,11 @@
                         </div>
                     </div>
 
+                    <!-- Pagination Controls (Tepada) - Qidiruv va Ko'rinish bilan birga -->
+                    <div id="users-pagination" class="users-pagination" style="display: none;">
+                        <!-- JS orqali to'ldiriladi -->
+                    </div>
+                    
                     <!-- Users List -->
                     <div id="user-list-container" class="users-grid">
                         <!-- JS orqali to'ldiriladi -->
@@ -1985,13 +2075,29 @@
                                     <i data-feather="database"></i>
                                 </div>
                                 <div class="control-item-info">
-                                    <h4>Ma'lumotlar Bazasi</h4>
-                                    <p>Database'ning oddiy nusxasini yuklab olish</p>
+                                    <h4>Ma'lumotlar Bazasi Backup</h4>
+                                    <p>Database'ning to'liq nusxasini yuklab olish (.db fayl)</p>
                                 </div>
                             </div>
                             <button id="backup-db-btn" class="btn btn-control btn-secondary">
                                 <i data-feather="download"></i>
                                 <span>Baza nusxasini yuklab olish</span>
+                            </button>
+                        </div>
+                        
+                        <div class="control-item">
+                            <div class="control-item-header">
+                                <div class="control-item-icon database" style="background: var(--orange-color, #ff9800);">
+                                    <i data-feather="upload"></i>
+                                </div>
+                                <div class="control-item-info">
+                                    <h4>Ma'lumotlar Bazasi Restore</h4>
+                                    <p>Database'ni restore qilish (.db fayl yuklash). Eski database avtomatik backup qilinadi.</p>
+                                </div>
+                            </div>
+                            <button id="restore-db-btn" class="btn btn-control" style="background: var(--orange-color, #ff9800);">
+                                <i data-feather="upload"></i>
+                                <span>Database'ni Restore Qilish</span>
                             </button>
                         </div>
                         
@@ -2431,13 +2537,13 @@
                                     <option value="perspective">📐 Perspektiv</option>
                                     <option value="skew">📊 Egilish</option>
                                 </select>
-                                <small style="display: block; margin-top: 5px; color: var(--text-secondary);">Tugmalar ustiga kelganda</small>
+                                <small class="block mt-5 text-secondary">Tugmalar ustiga kelganda</small>
                             </div>
                         </div>
 
                         <div class="animations-preview">
-                            <h4 style="margin: 20px 0 15px 0; font-size: 14px; color: #007bff;">👁️ Ko'rib chiqish</h4>
-                            <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+                            <h4 class="font-14 mt-20 mb-15" style="color: #007bff;">👁️ Ko'rib chiqish</h4>
+                            <div class="flex gap-15 flex-wrap flex-center">
                                 <button class="btn btn-primary animation-test-btn">Ustiga keling</button>
                                 <button class="btn btn-success animation-test-btn-2">Effekt test</button>
                                 <button class="btn btn-danger animation-test-btn-3">Ko'rish</button>
@@ -3110,7 +3216,7 @@
                     <div style="margin-bottom: 15px;">
                         <input type="text" id="locations-search-input" class="form-control" placeholder="Qidirish...">
                     </div>
-                    <div id="locations-modal-list" style="max-height: 400px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 10px;">
+                    <div id="locations-modal-list" style="max-height: 400px; overflow-y: auto;">
                         <!-- Filiallar ro'yxati -->
                     </div>
                 </div>
@@ -3139,7 +3245,7 @@
                     <div style="margin-bottom: 15px;">
                         <input type="text" id="brands-search-input" class="form-control" placeholder="Qidirish...">
                     </div>
-                    <div id="brands-modal-list" style="max-height: 400px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 10px;">
+                    <div id="brands-modal-list" style="max-height: 400px; overflow-y: auto;">
                         <!-- Brendlar ro'yxati -->
                     </div>
                 </div>
@@ -3212,10 +3318,30 @@
     </div>
 
     <div id="sessions-modal" class="modal hidden">
-        <div class="modal-content">
-            <button class="close-modal-btn" data-target="sessions-modal"><i data-feather="x"></i></button>
-            <h3 class="modal-title" id="sessions-modal-title"></h3>
-            <div id="sessions-list-container" class="sessions-list"></div>
+        <div class="modal-content sessions-modal-content">
+            <div class="modal-header">
+                <div class="modal-header-content">
+                    <div class="modal-icon-wrapper">
+                        <i data-feather="monitor" class="modal-icon"></i>
+                    </div>
+                    <div>
+                        <h3 class="modal-title" id="sessions-modal-title"></h3>
+                        <p class="modal-subtitle" id="sessions-modal-subtitle">Aktiv sessiyalar ro'yxati</p>
+                    </div>
+                </div>
+                <button class="close-modal-btn" data-target="sessions-modal" title="Yopish">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body sessions-modal-body">
+                <div id="sessions-list-container" class="sessions-list"></div>
+            </div>
+            <div class="modal-footer sessions-modal-footer">
+                <button class="btn btn-secondary close-sessions-modal-btn" type="button">
+                    <i data-feather="x"></i>
+                    Yopish
+                </button>
+            </div>
         </div>
     </div>
     

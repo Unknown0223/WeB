@@ -278,6 +278,7 @@ function initDOM() {
 
     // Admin
     DOM.backupDbBtn = document.getElementById('backup-db-btn');
+    DOM.restoreDbBtn = document.getElementById('restore-db-btn');
     DOM.clearSessionsBtn = document.getElementById('clear-sessions-btn');
 
     // Audit

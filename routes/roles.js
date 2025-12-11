@@ -242,6 +242,18 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
         return res.status(403).json({ message: 'Superadmin roli yaratib bo\'lmaydi. Bu standart rol.' });
     }
     
+    // Validatsiya: agar ikkalasi ham false/null bo'lsa, hech narsa ko'rsatilmaydi
+    // Kamida bitta shart tanlanishi kerak (true bo'lishi kerak)
+    const isLocationsFalse = requires_locations === false || requires_locations === null || requires_locations === undefined;
+    const isBrandsFalse = requires_brands === false || requires_brands === null || requires_brands === undefined;
+    
+    if (isLocationsFalse && isBrandsFalse) {
+        console.error(`❌ [ROLES] Validatsiya xatolik: Ikkalasi ham false/null - hech narsa ko'rsatilmaydi`);
+        return res.status(400).json({ 
+            message: "Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar). Agar ikkalasi ham tanlanmagan bo'lsa, foydalanuvchi hech qanday ma'lumot ko'ra olmaydi." 
+        });
+    }
+    
     try {
         // Check if role already exists
         const existing = await db('roles').where('role_name', role_name).first();
@@ -338,6 +350,18 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
 router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     const { role_name } = req.params;
     const { requires_brands, requires_locations, locations = [], brands = [] } = req.body;
+    
+    // Validatsiya: agar ikkalasi ham false/null bo'lsa, hech narsa ko'rsatilmaydi
+    // Kamida bitta shart tanlanishi kerak (true bo'lishi kerak)
+    const isLocationsFalse = requires_locations === false || requires_locations === null || requires_locations === undefined;
+    const isBrandsFalse = requires_brands === false || requires_brands === null || requires_brands === undefined;
+    
+    if (isLocationsFalse && isBrandsFalse) {
+        console.error(`❌ [ROLES] Validatsiya xatolik: Ikkalasi ham false/null - hech narsa ko'rsatilmaydi`);
+        return res.status(400).json({ 
+            message: "Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar). Agar ikkalasi ham tanlanmagan bo'lsa, foydalanuvchi hech qanday ma'lumot ko'ra olmaydi." 
+        });
+    }
     
     try {
         const adminId = req.session.user.id;

@@ -4,7 +4,7 @@
 import { state } from './state.js';
 import { DOM } from './dom.js';
 import { safeFetch } from './api.js';
-import { parseUserAgent } from './utils.js';
+import { parseUserAgent, showConfirmDialog } from './utils.js';
 
 let securityRefreshInterval = null;
 
@@ -187,7 +187,15 @@ function setupSecurityButtons() {
             const sid = terminateBtn.getAttribute('data-sid');
             if (!sid) return;
             
-            if (!await window.showConfirm('Bu sessiyani tugatishni xohlaysizmi?', 'Sessiyani tugatish')) return;
+            const confirmed = await showConfirmDialog({
+                title: 'Sessiyani tugatish',
+                message: 'Bu sessiyani tugatishni xohlaysizmi?',
+                confirmText: 'Ha, tugatish',
+                cancelText: 'Bekor qilish',
+                type: 'warning',
+                icon: 'log-out'
+            });
+            if (!confirmed) return;
             
             try {
                 const response = await safeFetch(`/api/sessions/${sid}`, {
@@ -784,7 +792,15 @@ async function saveSecuritySettings() {
 
 // Terminate All Sessions
 async function terminateAllSessions() {
-    if (!await window.showConfirm('Barcha sessiyalarni tugatishni xohlaysizmi? (Joriy sessiya bundan mustasno)', 'Barcha sessiyalarni tugatish')) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Barcha sessiyalarni tugatish',
+        message: 'Barcha sessiyalarni tugatishni xohlaysizmi? (Joriy sessiya bundan mustasno)',
+        confirmText: 'Ha, tugatish',
+        cancelText: 'Bekor qilish',
+        type: 'danger',
+        icon: 'alert-triangle'
+    });
+    if (!confirmed) return;
     
     try {
         const response = await safeFetch('/api/sessions/terminate-all', {

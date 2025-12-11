@@ -33,7 +33,7 @@ export const safeFetch = async (url, options) => {
 
 // API funksiyalari
 export async function fetchCurrentUser() {
-    const res = await safeFetch('/api/current-user');
+    const res = await safeFetch('/api/auth/current-user');
     if (!res || !res.ok) return null;
     return await res.json();
 }
@@ -63,6 +63,6 @@ export async function fetchRoles() {
 }
 
 export async function logout() {
-    await safeFetch('/api/logout', { method: 'POST' });
+    await safeFetch('/api/auth/logout', { method: 'POST' });
     window.location.href = '/login';
 }

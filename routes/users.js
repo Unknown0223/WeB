@@ -293,10 +293,26 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
                 });
         }
         
+        // WebSocket orqali realtime yuborish - yangi foydalanuvchi yaratildi
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [USERS] Yangi foydalanuvchi yaratildi, WebSocket orqali yuborilmoqda...`);
+            const newUser = await db('users').where('id', userId).first();
+            global.broadcastWebSocket('user_created', {
+                userId: userId,
+                username: username,
+                fullname: fullname,
+                role: role,
+                status: 'active',
+                created_by: adminId,
+                locations: locations,
+                brands: brands
+            });
+            console.log(`✅ [USERS] WebSocket yuborildi: user_created`);
+        }
+        
         // Superadmin yaratilganda avtomatik login qilish imkoniyati
         // Superadmin yaratilganda, login ma'lumotlarini qaytarish (faqat bir marta)
         if (role === 'superadmin' || role === 'super_admin') {
-            // WebSocket orqali realtime yuborish
             if (global.broadcastWebSocket) {
                 console.log(`📡 [USERS] Yangi superadmin yaratildi, WebSocket orqali yuborilmoqda...`);
                 const newUser = await db('users').where('id', userId).first();
@@ -350,6 +366,7 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
 
 // Foydalanuvchini tahrirlash
 router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    console.log('🔍 [USERS] PUT /:id - Foydalanuvchini tahrirlash so\'rovi kelindi');
     const userId = req.params.id;
     const { role, locations = [], device_limit, fullname, brands = [], user_settings } = req.body;
     const adminId = req.session.user.id;
@@ -357,14 +374,76 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     const ipAddress = req.session.ip_address;
     const userAgent = req.session.user_agent;
 
+    console.log(`📝 [USERS] So'rov ma'lumotlari:`, {
+        userId,
+        requestedRole: role,
+        adminId,
+        currentUserRole,
+        locations: locations.length,
+        brands: brands.length
+    });
+
     if (!role) {
+        console.error(`❌ [USERS] Rol kiritilmagan`);
         return res.status(400).json({ message: "Rol kiritilishi shart." });
     }
     
-    // Superadmin yaratish faqat superadmin tomonidan mumkin
+    // Foydalanuvchi ma'lumotlarini olish
+    const targetUser = await db('users').where('id', userId).first();
+    if (!targetUser) {
+        console.error(`❌ [USERS] Foydalanuvchi topilmadi: ${userId}`);
+        return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+    }
+    
+    const targetUserRole = targetUser.role;
+    const isTargetSuperadmin = targetUserRole === 'superadmin' || targetUserRole === 'super_admin';
+    const isCurrentUserSuperadmin = currentUserRole === 'superadmin' || currentUserRole === 'super_admin';
+    
+    console.log(`🔐 [USERS] Rol tekshiruvi:`, {
+        targetUserRole,
+        isTargetSuperadmin,
+        isCurrentUserSuperadmin,
+        requestedRole: role
+    });
+    
+    // Superadmin o'zini tahrirlashga ruxsat berish (lekin rolini o'zgartirishga ruxsat bermaslik)
+    const isEditingSelf = parseInt(userId) === parseInt(adminId);
+    if (isTargetSuperadmin) {
+        // Agar superadmin o'zini tahrirlayotgan bo'lsa, faqat login, to'liq ism, parol o'zgartirishga ruxsat berish
+        if (isEditingSelf) {
+            console.log(`✅ [USERS] Superadmin o'zini tahrirlayapti - faqat login, to'liq ism, parol o'zgartirish mumkin`);
+            // Rol o'zgartirishga ruxsat bermaslik
+            if (role !== targetUserRole) {
+                console.error(`❌ [USERS] Superadmin o'z rolini o'zgartirishga urinish!`);
+                return res.status(403).json({ message: "Superadmin o'z rolini o'zgartira olmaydi." });
+            }
+            // Filial va brendlarni o'zgartirishga ruxsat bermaslik (superadmin barchasini ko'radi)
+            // locations va brands bo'sh bo'lishi kerak yoki e'tiborsiz qoldiriladi
+        } else {
+            // Superadmin boshqa superadminni tahrirlashga ruxsat bermaslik
+            console.error(`❌ [USERS] Superadmin boshqa superadminni tahrirlashga urinish!`);
+            return res.status(403).json({ message: "Superadmin boshqa superadminni tahrirlash mumkin emas." });
+        }
+    }
+    
+    // Superadmin yaratish faqat superadmin tomonidan mumkin (lekin superadmin allaqachon mavjud bo'lsa, yaratish mumkin emas)
     if ((role === 'superadmin' || role === 'super_admin') && 
         currentUserRole !== 'superadmin' && currentUserRole !== 'super_admin') {
+        console.error(`❌ [USERS] Superadmin yaratishga urinish (ruxsat yo'q)!`);
         return res.status(403).json({ message: "Superadmin yaratish faqat superadmin tomonidan mumkin." });
+    }
+    
+    // Superadmin faqat bitta bo'lishi kerak
+    if (role === 'superadmin' || role === 'super_admin') {
+        const existingSuperAdmin = await db('users')
+            .whereIn('role', ['superadmin', 'super_admin'])
+            .where('id', '!=', userId) // Joriy foydalanuvchini hisobga olmaslik
+            .first();
+        if (existingSuperAdmin) {
+            console.error(`❌ [USERS] Superadmin allaqachon mavjud!`);
+            console.error(`   - Existing superadmin: ${existingSuperAdmin.username} (ID: ${existingSuperAdmin.id})`);
+            return res.status(403).json({ message: "Superadmin faqat bitta bo'lishi mumkin. Mavjud superadmin: " + existingSuperAdmin.username });
+        }
     }
     
     // Superadmin uchun hech qanday shartlar yo'q
@@ -393,17 +472,67 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     }
 
     try {
-        await userRepository.updateUser(adminId, userId, role, device_limit, fullname, ipAddress, userAgent);
-        await userRepository.updateUserLocations(adminId, userId, locations, ipAddress, userAgent);
+        console.log(`💾 [USERS] Foydalanuvchi ma'lumotlarini yangilash...`);
+        console.log(`   - Oldingi rol: ${targetUserRole}`);
+        console.log(`   - Yangi rol: ${role}`);
+        console.log(`   - Filiallar: ${locations.length} ta`);
+        console.log(`   - Brendlar: ${brands.length} ta`);
+        console.log(`   - Superadmin o'zini tahrirlayapti: ${isTargetSuperadmin && isEditingSelf}`);
         
-        // Brendlarni yangilash
-        await db('user_brands').where('user_id', userId).del();
-        if (brands && brands.length > 0) {
-            const brandRecords = brands.map(brandId => ({
-                user_id: userId,
-                brand_id: brandId
-            }));
-            await db('user_brands').insert(brandRecords);
+        // Superadmin o'zini tahrirlayotgan bo'lsa, login, to'liq ism, parol va device limit o'zgartirish
+        if (isTargetSuperadmin && isEditingSelf) {
+            // Username, fullname va device_limit o'zgartirish
+            const updateData = {
+                username: req.body.username || targetUser.username,
+                fullname: fullname || targetUser.fullname,
+                updated_at: db.fn.now()
+            };
+            
+            // Device limit o'zgartirish (agar berilgan bo'lsa)
+            if (device_limit !== undefined && device_limit !== null) {
+                const deviceLimitValue = parseInt(device_limit);
+                if (!isNaN(deviceLimitValue) && deviceLimitValue >= 0) {
+                    updateData.device_limit = deviceLimitValue;
+                }
+            }
+            
+            // Parol o'zgartirish (agar berilgan bo'lsa)
+            if (req.body.password) {
+                const bcrypt = require('bcrypt');
+                const saltRounds = 10;
+                updateData.password = await bcrypt.hash(req.body.password, saltRounds);
+                console.log(`   ✅ Parol yangilandi`);
+            }
+            
+            await db('users')
+                .where('id', userId)
+                .update(updateData);
+            
+            // Audit log
+            await userRepository.logAction(adminId, 'update_self', 'user', userId, { 
+                username: updateData.username, 
+                fullname: updateData.fullname,
+                password_changed: !!req.body.password,
+                ip: ipAddress, 
+                userAgent 
+            });
+            
+            console.log(`   ✅ Superadmin o'z ma'lumotlari yangilandi (login, to'liq ism${req.body.password ? ', parol' : ''})`);
+        } else {
+            // Oddiy foydalanuvchilar uchun to'liq yangilash
+            await userRepository.updateUser(adminId, userId, role, device_limit, fullname, ipAddress, userAgent);
+            await userRepository.updateUserLocations(adminId, userId, locations, ipAddress, userAgent);
+            
+            // Brendlarni yangilash
+            await db('user_brands').where('user_id', userId).del();
+            if (brands && brands.length > 0) {
+                const brandRecords = brands.map(brandId => ({
+                    user_id: userId,
+                    brand_id: brandId
+                }));
+                await db('user_brands').insert(brandRecords);
+                console.log(`   ✅ Brendlar yangilandi: ${brands.length} ta`);
+            }
         }
         
         // User-specific sozlamalarni yangilash
@@ -421,9 +550,20 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
                     requires_brands: user_settings.requires_brands,
                     updated_at: db.fn.now()
                 });
+            console.log(`   ✅ User-specific sozlamalar yangilandi`);
         }
 
         await refreshUserSessions(parseInt(userId, 10));
+        console.log(`   ✅ Sessiyalar yangilandi`);
+
+        // Cache'ni tozalash - user o'zgarganda
+        const { clearUserCache } = require('../utils/userAccessFilter');
+        clearUserCache(parseInt(userId, 10));
+        
+        // User repository cache'ni ham tozalash
+        if (userRepository && typeof userRepository.clearUserCache === 'function') {
+            userRepository.clearUserCache(parseInt(userId, 10));
+        }
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
@@ -440,9 +580,15 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
             console.log(`✅ [USERS] WebSocket yuborildi: user_updated`);
         }
 
+        console.log(`✅ [USERS] Foydalanuvchi muvaffaqiyatli yangilandi!`);
+        console.log(`   - User ID: ${userId}`);
+        console.log(`   - Username: ${targetUser.username}`);
+        console.log(`   - Oldingi rol: ${targetUserRole} -> Yangi rol: ${role}`);
+        
         res.json({ message: "Foydalanuvchi ma'lumotlari muvaffaqiyatli yangilandi." });
     } catch (error) {
-        console.error(`/api/users/${userId} PUT xatoligi:`, error);
+        console.error(`❌ [USERS] /api/users/${userId} PUT xatoligi:`, error);
+        console.error(`   - Error stack:`, error.stack);
         res.status(500).json({ message: "Foydalanuvchini yangilashda xatolik." });
     }
 });

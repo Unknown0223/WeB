@@ -1,3 +1,13 @@
+// Hex rangni RGB ga o'tkazish funksiyasi
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elementlarini aniq olish ---
     const registerForm = document.getElementById('register-form');
@@ -13,34 +23,95 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Brendingni yuklash ---
     async function fetchAndApplyBranding() {
         try {
-            const res = await fetch('/api/public/settings/branding');
+            // Cache'ni tozalash - har safar yangi sozlamalarni olish uchun
+            try {
+                sessionStorage.removeItem('branding_settings_cache');
+            } catch (e) {
+                // Xatolikni e'tiborsiz qoldirish
+            }
+            
+            // Cache-busting: timestamp qo'shish
+            const timestamp = Date.now();
+            const res = await fetch(`/api/auth/public/settings/branding?t=${timestamp}`, {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            });
+            
             if (res.ok) {
                 const brandingSettings = await res.json();
                 applyBrandingToLogo(brandingSettings);
             }
         } catch (error) {
-            console.error("Brending sozlamalarini yuklashda xatolik:", error);
+            // Xatolikni e'tiborsiz qoldirish
         }
     }
 
     function applyBrandingToLogo(settings) {
+        // Eski va yangi formatlarni qo'llab-quvvatlash
+        const logoData = settings?.logo || settings || {};
+        const text = logoData.text || 'MANUS';
+        const color = logoData.color || '#4CAF50';
+        const animation = logoData.animation || 'anim-glow-pulse';
+        const border = logoData.border || 'border-none';
+        const size = logoData.size || 32;
+        
         const logo = document.querySelector('.brand-logo');
-        const container = logo.closest('.logo-border-effect');
-        if (!logo || !container) return;
+        const container = logo?.closest('.logo-border-effect');
+        
+        if (!logo || !container) {
+            return;
+        }
 
-        logo.textContent = settings.text || 'MANUS';
-        logo.style.setProperty('--glow-color', settings.color || '#4CAF50');
+        logo.textContent = text;
+        
+        // CSS variable va to'g'ridan-to'g'ri color o'rnatish
+        logo.style.setProperty('--glow-color', color);
+        logo.style.color = color; // Inline CSS'dan ustun kelish uchun
+        
+        if (size) {
+            logo.style.fontSize = `${size}px`;
+        }
         
         logo.className = 'brand-logo';
-        if (settings.animation && settings.animation !== 'anim-none') {
-            logo.classList.add(settings.animation);
+        if (animation && animation !== 'anim-none') {
+            logo.classList.add(animation);
+            // Animatsiya uchun text-shadow ham o'rnatish
+            if (color) {
+                const rgb = hexToRgb(color);
+                if (rgb) {
+                    logo.style.textShadow = `0 0 20px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8), 0 0 40px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`;
+                }
+            }
         }
 
-        container.className = 'logo-border-effect';
-        if (settings.border && settings.border !== 'border-none') {
-            container.classList.add(settings.border);
+        // Container className'ni to'g'ri yangilash
+        let newContainerClassName = container.className
+            .split(' ')
+            .filter(cls => {
+                // logo-border-effect klassini saqlash
+                if (cls === 'logo-border-effect') {
+                    return true;
+                }
+                // Boshqa border- bilan boshlanadigan klasslarni olib tashlash
+                return !cls.startsWith('border-');
+            })
+            .join(' ')
+            .trim();
+        
+        // Agar logo-border-effect yo'q bo'lsa, qo'shish
+        if (!newContainerClassName.includes('logo-border-effect')) {
+            newContainerClassName = 'logo-border-effect' + (newContainerClassName ? ' ' + newContainerClassName : '');
         }
-        container.style.setProperty('--glow-color', settings.color || '#4CAF50');
+        
+        container.className = newContainerClassName;
+        
+        if (border && border !== 'border-none') {
+            container.classList.add(border);
+        }
+        container.style.setProperty('--glow-color', color);
     }
 
     fetchAndApplyBranding();
@@ -114,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
         submitButton.innerHTML = 'Yuborilmoqda... <span class="spinner"></span>';
 
         try {
-            const response = await fetch('/api/register', {
+            const response = await fetch('/api/auth/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fullname, username, password, secret_word: secretWord }),

@@ -157,7 +157,14 @@ const isSecure = isProduction ||
                  process.env.HTTPS === 'true';
 
 app.use(session({
-    store: new SQLiteStore({ db: 'database.db', dir: './' }),
+    store: new SQLiteStore({ 
+        db: 'database.db', 
+        dir: './',
+        // SQLite BUSY xatoliklarini hal qilish
+        table: 'sessions',
+        // Connection pool sozlamalari
+        busyTimeout: 5000 // 5 soniya kutish
+    }),
     secret: process.env.SESSION_SECRET || 'a-very-strong-and-long-secret-key-for-session',
     resave: false,
     saveUninitialized: false,
@@ -192,6 +199,10 @@ app.get('/login', (req, res) => {
     } else {
         res.sendFile(path.join(__dirname, 'public', 'login.html'));
     }
+});
+
+app.get('/bot-connect.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'bot-connect.html'));
 });
 
 app.get('/register.html', (req, res) => {

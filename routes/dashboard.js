@@ -63,36 +63,75 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
             }
         }
         
+        // Optimallashtirilgan - subquery o'rniga bir marta olish
         const submittedReports = await submittedReportsQuery
             .select(
                 'r.id',
                 'r.location',
                 'r.late_comment',
-                'u_creator.username as creator_username',
-                // Tahrirlar sonini hisoblash uchun subquery
-                db.raw(`(
-                    SELECT COUNT(h.id) 
-                    FROM report_history h 
-                    WHERE h.report_id = r.id
-                ) as edit_count`),
-                // Oxirgi tahrirlovchi username'ini olish uchun subquery
-                db.raw(`(
-                    SELECT u.username 
-                    FROM report_history rh 
-                    JOIN users u ON rh.changed_by = u.id 
-                    WHERE rh.report_id = r.id 
-                    ORDER BY rh.changed_at DESC 
-                    LIMIT 1
-                ) as last_edited_by`),
-                // Oxirgi tahrir vaqtini olish uchun subquery
-                db.raw(`(
-                    SELECT rh.changed_at 
-                    FROM report_history rh 
-                    WHERE rh.report_id = r.id 
-                    ORDER BY rh.changed_at DESC 
-                    LIMIT 1
-                ) as last_edited_at`)
+                'u_creator.username as creator_username'
             );
+        
+        // Report history ma'lumotlarini bir marta olish (optimallashtirish)
+        const reportIds = submittedReports.map(r => r.id);
+        let editInfoMap = {};
+        if (reportIds.length > 0) {
+            // Barcha report history ma'lumotlarini bir marta olish (parallel)
+            const [editCounts, allLastEdits] = await Promise.all([
+                db('report_history')
+                    .select('report_id')
+                    .count('* as edit_count')
+                    .whereIn('report_id', reportIds)
+                    .groupBy('report_id'),
+                db('report_history as rh')
+                    .leftJoin('users as u', 'rh.changed_by', 'u.id')
+                    .select('rh.report_id', 'u.username as last_edited_by', 'rh.changed_at')
+                    .whereIn('rh.report_id', reportIds)
+                    .orderBy('rh.changed_at', 'desc')
+            ]);
+            
+            // Har bir report uchun eng so'nggi edit'ni topish (memory'da)
+            const lastEdits = [];
+            const seenReports = new Set();
+            for (const edit of allLastEdits) {
+                if (!seenReports.has(edit.report_id)) {
+                    lastEdits.push(edit);
+                    seenReports.add(edit.report_id);
+                }
+            }
+            
+            // Edit counts map
+            const editCountMap = {};
+            editCounts.forEach(item => {
+                editCountMap[item.report_id] = parseInt(item.edit_count) || 0;
+            });
+            
+            // Last edits map
+            const lastEditMap = {};
+            lastEdits.forEach(item => {
+                lastEditMap[item.report_id] = {
+                    last_edited_by: item.last_edited_by,
+                    last_edited_at: item.changed_at
+                };
+            });
+            
+            // Birlashtirish
+            reportIds.forEach(id => {
+                editInfoMap[id] = {
+                    edit_count: editCountMap[id] || 0,
+                    last_edited_by: lastEditMap[id]?.last_edited_by || null,
+                    last_edited_at: lastEditMap[id]?.last_edited_at || null
+                };
+            });
+        }
+        
+        // Reports'ga edit info qo'shish
+        submittedReports.forEach(report => {
+            const editInfo = editInfoMap[report.id] || { edit_count: 0, last_edited_by: null, last_edited_at: null };
+            report.edit_count = editInfo.edit_count;
+            report.last_edited_by = editInfo.last_edited_by;
+            report.last_edited_at = editInfo.last_edited_at;
+        });
         
         const submittedLocations = new Set(submittedReports.map(r => r.location));
 
@@ -421,11 +460,6 @@ router.get('/chart-data', isAuthenticated, hasPermission('dashboard:view'), asyn
         console.error("/api/dashboard/chart-data GET xatoligi:", error);
         res.status(500).json({ message: "Grafik ma'lumotlarini yuklashda xatolik" });
     }
-});
-
-// Eski endpointni o'chiramiz, chunki u endi ishlatilmaydi.
-router.get('/status', isAuthenticated, hasPermission('dashboard:view'), async (req, res) => {
-    res.status(404).json({ message: "Bu endpoint eskirgan. Iltimos, /api/dashboard/stats'dan foydalaning." });
 });
 
 module.exports = router;

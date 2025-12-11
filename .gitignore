@@ -9,6 +9,10 @@ package-lock.json
 *.db-shm
 database.db
 
+# Backups
+backups/
+*.backup
+
 # Logs
 logs/
 *.log

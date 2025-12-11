@@ -172,7 +172,7 @@ const renderKpiCards = (stats) => {
    // --- Asosiy Funksiyalar ---
     async function init() {
         try {
-            const userRes = await fetch('/api/current-user');
+            const userRes = await fetch('/api/auth/current-user');
             if (!userRes.ok) {
                 window.location.href = '/login';
                 return;
@@ -1324,7 +1324,7 @@ const renderKpiCards = (stats) => {
         if (dropdownLogoutBtn) {
             dropdownLogoutBtn.addEventListener('click', async () => {
                 closeDropdown();
-                await fetch('/api/logout', { method: 'POST' });
+                await fetch('/api/auth/logout', { method: 'POST' });
                 window.location.href = '/login';
             });
         }

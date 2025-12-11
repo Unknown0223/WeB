@@ -107,12 +107,30 @@ const initializeDB = async () => {
     };
 
     // Tranzaksiya ichida boshlang'ich ma'lumotlarni kiritish
-    await db.transaction(async trx => {
-        // Faqat superadmin rolini yaratish
-        await trx('roles')
-            .insert(initialRoles.map(r => ({ role_name: r })))
-            .onConflict('role_name')
-            .ignore();
+    // Retry mexanizmi bilan - SQLite BUSY xatoliklarini hal qilish
+    let retries = 3;
+    let lastError = null;
+    
+    while (retries > 0) {
+        try {
+            await db.transaction(async trx => {
+                // Import oldidan rollarni tekshirish
+                const rolesBefore = await trx('roles').select('role_name');
+                const roleNamesBefore = rolesBefore.map(r => r.role_name);
+                console.log(`🔍 [ROLES] Server ishga tushishdan oldin rollar (${roleNamesBefore.length} ta):`, roleNamesBefore);
+                
+                // Faqat superadmin rolini yaratish - retry bilan
+                try {
+                    await trx('roles')
+                        .insert(initialRoles.map(r => ({ role_name: r })))
+                        .onConflict('role_name')
+                        .ignore();
+                } catch (insertError) {
+                    // Agar insert xatolik bo'lsa, ignore qilish (chunki onConflict.ignore() ishlashi kerak)
+                    if (insertError.code !== 'SQLITE_CONSTRAINT') {
+                        throw insertError;
+                    }
+                }
         
         // Permissions yaratish
         await trx('permissions')
@@ -135,12 +153,52 @@ const initializeDB = async () => {
             .where('role_name', 'superadmin')
             .update({ requires_locations: null, requires_brands: null });
         
-        // Eski standart rollarni o'chirish (admin, manager, operator)
-        await trx('roles')
-            .whereIn('role_name', ['admin', 'manager', 'operator', 'super_admin'])
-            .whereNot('role_name', 'superadmin')
-            .del();
-    });
+        // EHTIYOT: Eski standart rollarni o'chirish kodi olib tashlandi
+        // Chunki bu kod har safar server ishga tushganda rollarni o'chiryapti
+        // Rollar endi import yoki admin panel orqali boshqariladi
+        // Agar eski rollarni tozalash kerak bo'lsa, buni qo'lda qilish kerak
+        
+        // Import keyin rollarni tekshirish
+        const rolesAfter = await trx('roles').select('role_name');
+        const roleNamesAfter = rolesAfter.map(r => r.role_name);
+        console.log(`🔍 [ROLES] Server ishga tushishdan keyin rollar (${roleNamesAfter.length} ta):`, roleNamesAfter);
+        
+        // Yo'qolgan rollarni topish
+        const lostRoles = roleNamesBefore.filter(role => !roleNamesAfter.includes(role));
+        if (lostRoles.length > 0) {
+            console.log(`❌ [ROLES] XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
+        } else {
+            console.log(`✅ [ROLES] Barcha rollar saqlanib qoldi`);
+        }
+        
+        // Yangi qo'shilgan rollarni topish
+        const newRoles = roleNamesAfter.filter(role => !roleNamesBefore.includes(role));
+        if (newRoles.length > 0) {
+            console.log(`➕ [ROLES] Yangi qo'shilgan rollar (${newRoles.length} ta):`, newRoles);
+        }
+            });
+            
+            // Agar muvaffaqiyatli bo'lsa, retry loop'ni to'xtatish
+            retries = 0;
+            break;
+        } catch (error) {
+            lastError = error;
+            retries--;
+            
+            if (error.code === 'SQLITE_BUSY' && retries > 0) {
+                console.warn(`⚠️ [DB] SQLite BUSY xatolik, qayta urinish... (${retries} qoldi)`);
+                // Qisqa kutish va qayta urinish
+                await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries))); // 100ms, 200ms, 300ms
+            } else {
+                // Boshqa xatolik yoki retry'lar tugagan
+                throw error;
+            }
+        }
+    }
+    
+    if (lastError && retries === 0) {
+        throw lastError;
+    }
 
     // Seeds faylini ishga tushirish (kengaytirilgan permission'lar)
     try {

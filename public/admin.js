@@ -10,7 +10,6 @@ import { setupDashboard } from './modules/dashboard.js';
 import { setupKpiPage, setupKpiEventListeners } from './modules/kpi.js';
 import { loadBrands, setupBrandsEventListeners } from './modules/brands.js';
 import { 
-    renderUsersByStatus, 
     renderPendingUsers, 
     toggleLocationVisibilityForUserForm,
     toggleLocationVisibilityForApprovalForm,
@@ -27,7 +26,7 @@ import {
 } from './modules/users.js';
 import { setupPivot, savePivotTemplate, handleTemplateActions, handleTemplateModalActions } from './modules/pivot.js';
 import { setupComparison } from './modules/comparison.js';
-import { renderRoles, handleRoleSelection, saveRolePermissions, handleBackupDb, handleClearSessions, initExportImport, setupAddNewRole } from './modules/roles.js';
+import { renderRoles, handleRoleSelection, saveRolePermissions, handleBackupDb, handleRestoreDb, handleClearSessions, initExportImport, setupAddNewRole } from './modules/roles.js';
 import { 
     renderTableSettings,
     renderGeneralSettings,
@@ -69,6 +68,39 @@ async function init() {
             showPageLoader('Tizim yuklanmoqda...');
         }
         
+        // AVVAL sessionStorage'dan branding cache'ni yuklash (tezroq)
+        try {
+            const cachedBranding = sessionStorage.getItem('branding_settings_cache');
+            if (cachedBranding) {
+                const branding = JSON.parse(cachedBranding);
+                if (branding && branding.loader) {
+                    // Loader sozlamalarini darhol qo'llash
+                    const loaderType = branding.loader.type || 'spinner';
+                    const loaderText = branding.loader.text || 'Tizim yuklanmoqda...';
+                    const showProgress = branding.loader.showProgress || false;
+                    const blurBackground = branding.loader.blurBackground !== undefined ? branding.loader.blurBackground : true;
+                    
+                    updateLoaderType(loaderType);
+                    const loaderTextEl = document.getElementById('loader-text');
+                    if (loaderTextEl) loaderTextEl.textContent = loaderText;
+                    
+                    const loaderProgress = document.getElementById('loader-progress');
+                    if (loaderProgress) loaderProgress.style.display = showProgress ? 'block' : 'none';
+                    
+                    const pageLoader = document.getElementById('page-loader');
+                    if (pageLoader) {
+                        if (blurBackground) {
+                            pageLoader.classList.add('blur-background');
+                        } else {
+                            pageLoader.classList.remove('blur-background');
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // Cache xatolikni e'tiborsiz qoldirish
+        }
+        
         // Joriy foydalanuvchini olish
         state.currentUser = await fetchCurrentUser();
         if (!state.currentUser) {
@@ -78,40 +110,53 @@ async function init() {
         
         applyPermissions();
         
-        // Parallel ma'lumotlarni yuklash
+        // Settings'ni AVVAL yuklash (branding uchun)
+        const settingsPromise = hasPermission(state.currentUser, 'settings:view') 
+            ? fetchSettings() 
+            : Promise.resolve(null);
+        
+        // Parallel ma'lumotlarni yuklash (settings bilan birga)
         const dataSources = [
-            { key: 'settings', fetch: fetchSettings, permission: 'settings:view' },
             { key: 'users', fetch: fetchUsers, permission: 'users:view' },
             { key: 'rolesData', fetch: fetchRoles, permission: 'roles:manage' },
             { key: 'pendingUsers', fetch: fetchPendingUsers, permission: 'users:edit' }
         ];
         
-        const results = await Promise.all(dataSources.map(async ds => {
-            if (hasPermission(state.currentUser, ds.permission)) {
-                return await ds.fetch();
-            }
-            return null;
-        }));
+        const [settingsData, ...otherResults] = await Promise.all([
+            settingsPromise,
+            ...dataSources.map(async ds => {
+                if (hasPermission(state.currentUser, ds.permission)) {
+                    return await ds.fetch();
+                }
+                return null;
+            })
+        ]);
 
-        results.forEach((data, index) => {
+        // Settings'ni birinchi bo'lib qo'llash (branding uchun)
+        if (settingsData) {
+            state.settings = { ...state.settings, ...settingsData };
+            
+            // Branding sozlamalarini darhol qo'llash
+            if (state.settings.branding_settings) {
+                applyBranding(state.settings.branding_settings);
+            }
+        }
+        
+        // Qolgan ma'lumotlarni qayta ishlash
+        otherResults.forEach((data, index) => {
             const { key } = dataSources[index];
             if (data) {
                 if (key === 'rolesData') {
                     state.roles = data.roles;
                     state.allPermissions = data.all_permissions;
-                } else if (key === 'settings') {
-                    state.settings = { ...state.settings, ...data };
                 } else {
                     state[key] = data;
                 }
             }
         });
-
-        // AVVAL brending qo'llash (loader turi uchun)
-        if (state.settings.branding_settings) {
-            applyBranding(state.settings.branding_settings);
-        } else {
-            // Default loader sozlamalari
+        
+        // Agar branding hali qo'llanmagan bo'lsa, default qo'llash
+        if (!state.settings.branding_settings) {
             const loaderText = 'Tizim yuklanmoqda...';
             const loaderType = 'spinner';
             
@@ -241,6 +286,7 @@ function setupEventListeners() {
         addSafeListener(DOM.rolesList, 'click', handleRoleSelection);
         addSafeListener(DOM.saveRolePermissionsBtn, 'click', saveRolePermissions);
         addSafeListener(DOM.backupDbBtn, 'click', handleBackupDb);
+        addSafeListener(DOM.restoreDbBtn, 'click', handleRestoreDb);
         addSafeListener(DOM.clearSessionsBtn, 'click', handleClearSessions);
     }
     
@@ -323,9 +369,28 @@ function setupEventListeners() {
 
     // Modal yopish tugmalari
     document.querySelectorAll('.close-modal-btn').forEach(btn => {
-        addSafeListener(btn, 'click', () => 
-            document.getElementById(btn.dataset.target)?.classList.add('hidden')
-        );
+        addSafeListener(btn, 'click', () => {
+            const targetModal = document.getElementById(btn.dataset.target);
+            if (targetModal) {
+                targetModal.classList.add('hidden');
+                
+                // Bulk approval navbatini bekor qilish (approval-modal uchun)
+                if (btn.dataset.target === 'approval-modal' && window.bulkApprovalQueue) {
+                    console.log('⚠️ [BULK APPROVE] Modal close button bosildi, navbat tozalanmoqda');
+                    window.bulkApprovalQueue = null;
+                    window.bulkApprovalCurrentIndex = null;
+                    window.bulkApprovalTotal = null;
+                    // selectedRequests tozalash (agar mavjud bo'lsa)
+                    if (typeof selectedRequests !== 'undefined' && selectedRequests.clear) {
+                        selectedRequests.clear();
+                        // updateRequestsBulkActions funksiyasini chaqirish (agar mavjud bo'lsa)
+                        if (typeof updateRequestsBulkActions === 'function') {
+                            updateRequestsBulkActions();
+                        }
+                    }
+                }
+            }
+        });
     });
 
     // Admin panel modal oynalarini tashqariga bosilganda yopish
@@ -340,19 +405,15 @@ function setupEventListeners() {
         
         const clickedElement = e.target;
         
-        // Agar bosilgan joy har qanday modal-content ichida bo'lsa, yopilmaydi
-        if (clickedElement.closest('.modal-content')) {
+        // Agar bosilgan joy har qanday modal-content yoki modal-dialog ichida bo'lsa, yopilmaydi
+        if (clickedElement.closest('.modal-content') || clickedElement.closest('.modal-dialog')) {
             return;
         }
         
         // Barcha ochiq modal oynalarni tekshirish
         openModals.forEach(modal => {
-            const modalContent = modal.querySelector('.modal-content');
-            
-            // Agar bosilgan joy modal oynaning o'zi bo'lsa (background) yoki tashqarisida bo'lsa, yopiladi
-            if (clickedElement === modal || 
-                (modal.contains(clickedElement) && modalContent && !modalContent.contains(clickedElement)) ||
-                !modal.contains(clickedElement)) {
+            // Agar bosilgan joy modal oynaning o'zi bo'lsa (background), yopiladi
+            if (clickedElement === modal) {
                 modal.classList.add('hidden');
             }
         });

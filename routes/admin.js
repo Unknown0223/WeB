@@ -1,34 +1,152 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs').promises;
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
+const multer = require('multer');
 
 const router = express.Router();
+
+// Multer konfiguratsiyasi - database fayllari uchun
+const uploadDb = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: 100 * 1024 * 1024 // 100MB limit (database fayllari katta bo'lishi mumkin)
+    },
+    fileFilter: (req, file, cb) => {
+        // Faqat .db fayllarni qabul qilish
+        if (file.originalname.endsWith('.db') || 
+            file.mimetype === 'application/x-sqlite3' ||
+            file.mimetype === 'application/octet-stream') {
+            cb(null, true);
+        } else {
+            cb(new Error('Faqat database fayllarni (.db) yuklash mumkin'), false);
+        }
+    }
+});
 
 // Bu butun router uchun middleware vazifasini o'taydi.
 // Faqat 'roles:manage' huquqi borlar bu endpointlarga kira oladi.
 router.use(isAuthenticated, hasPermission('roles:manage'));
 
-// GET /api/admin/backup-db - Ma'lumotlar bazasini yuklab olish
-router.get('/backup-db', (req, res) => {
+// GET /api/admin/backup-db - Ma'lumotlar bazasini yuklab olish (TAKOMILLASHTIRILGAN)
+router.get('/backup-db', async (req, res) => {
     try {
         const dbPath = path.join(__dirname, '..', 'database.db');
-        const fileName = `database_backup_${new Date().toISOString().split('T')[0]}.db`;
+        
+        // Database faylini tekshirish
+        try {
+            await fs.access(dbPath);
+        } catch (error) {
+            return res.status(404).json({ message: "Ma'lumotlar bazasi fayli topilmadi." });
+        }
+        
+        // Database hajmini olish
+        const stats = await fs.stat(dbPath);
+        const fileSizeInMB = (stats.size / (1024 * 1024)).toFixed(2);
+        
+        // Fayl nomini yaratish (sana va vaqt bilan)
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0];
+        const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+        const fileName = `database_backup_${dateStr}_${timeStr}.db`;
 
-        res.download(dbPath, fileName, (err) => {
-            if (err) {
-                console.error("Baza nusxasini yuklashda xatolik:", err);
-                if (!res.headersSent) {
-                    res.status(500).json({ message: "Ma'lumotlar bazasi faylini o'qib bo'lmadi." });
-                }
-            }
-        });
+        // Response header'larni o'rnatish
+        res.setHeader('Content-Type', 'application/x-sqlite3');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.setHeader('Content-Length', stats.size);
+        
+        // Database faylini yuborish
+        const fileStream = require('fs').createReadStream(dbPath);
+        fileStream.pipe(res);
+        
+        console.log(`✅ Database backup yuklab olindi: ${fileName} (${fileSizeInMB} MB)`);
 
     } catch (error) {
         console.error("Baza nusxasini yuklashda kutilmagan xatolik:", error);
         if (!res.headersSent) {
-            res.status(500).json({ message: "Serverda ichki xatolik." });
+            res.status(500).json({ message: "Serverda ichki xatolik: " + error.message });
         }
+    }
+});
+
+// POST /api/admin/restore-db - Ma'lumotlar bazasini restore qilish (YANGI)
+router.post('/restore-db', uploadDb.single('database'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'Database fayl yuklanmagan. Iltimos, .db faylini tanlang.' });
+        }
+
+        const dbPath = path.join(__dirname, '..', 'database.db');
+        const backupDir = path.join(__dirname, '..', 'backups');
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0];
+        const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+        
+        // Backup papkasini yaratish (agar mavjud bo'lmasa)
+        try {
+            await fs.access(backupDir);
+        } catch {
+            await fs.mkdir(backupDir, { recursive: true });
+        }
+
+        // Eski database'ni backup qilish (xavfsizlik uchun)
+        const backupFileName = `database_backup_before_restore_${dateStr}_${timeStr}.db`;
+        const backupPath = path.join(backupDir, backupFileName);
+        
+        try {
+            await fs.copyFile(dbPath, backupPath);
+            console.log(`✅ Eski database backup qilindi: ${backupFileName}`);
+        } catch (error) {
+            console.warn(`⚠️ Eski database backup qilishda xatolik (ehtimol fayl mavjud emas): ${error.message}`);
+        }
+
+        // Yangi database faylini yozish
+        await fs.writeFile(dbPath, req.file.buffer);
+        console.log(`✅ Yangi database yozildi: ${req.file.originalname} (${(req.file.size / (1024 * 1024)).toFixed(2)} MB)`);
+
+        // Database'ni tekshirish (bazaga ulanishni sinab ko'rish)
+        try {
+            // Yangi database bilan bog'lanishni sinab ko'rish
+            const testDb = require('knex')({
+                client: 'sqlite3',
+                connection: {
+                    filename: dbPath
+                },
+                useNullAsDefault: true
+            });
+            
+            // Oddiy so'rovni sinab ko'rish
+            await testDb.raw('SELECT 1');
+            await testDb.destroy();
+            
+            console.log(`✅ Database to'g'ri ishlayapti`);
+        } catch (error) {
+            // Agar yangi database noto'g'ri bo'lsa, eski database'ni qaytarish
+            try {
+                await fs.copyFile(backupPath, dbPath);
+                console.log(`⚠️ Yangi database noto'g'ri, eski database qaytarildi`);
+            } catch (restoreError) {
+                console.error(`❌ Eski database'ni qaytarishda xatolik: ${restoreError.message}`);
+            }
+            
+            return res.status(400).json({ 
+                message: 'Yuklangan database fayli noto\'g\'ri yoki buzilgan. Eski database qaytarildi.',
+                error: error.message 
+            });
+        }
+
+        res.json({ 
+            message: 'Database muvaffaqiyatli restore qilindi!',
+            backup_file: backupFileName,
+            restored_file: req.file.originalname,
+            file_size_mb: (req.file.size / (1024 * 1024)).toFixed(2),
+            warning: 'Iltimos, serverni qayta ishga tushiring (restart) yangi database ishlashi uchun.'
+        });
+
+    } catch (error) {
+        console.error("Database restore xatoligi:", error);
+        res.status(500).json({ message: "Database restore qilishda xatolik: " + error.message });
     }
 });
 
@@ -183,6 +301,39 @@ router.post('/import-full-db', async (req, res) => {
             // 1. Ma'lumotlarni import qilish (tozalash emas, faqat yangi ma'lumotlarni qo'shish)
             console.log('📥 Yangi ma\'lumotlarni yuklash...');
             
+            // Import oldidan rollarni tekshirish va saqlash (keyinroq solishtirish uchun)
+            let existingRoleNames = [];
+            if (data.roles && Array.isArray(data.roles)) {
+                const existingRoles = await trx('roles').select('role_name');
+                existingRoleNames = existingRoles.map(r => r.role_name);
+                const importRoleNames = data.roles.map(r => r.role_name).filter(Boolean);
+                
+                console.log(`🔍 [ROLES] Import oldidan rollar tekshiruvi:`);
+                console.log(`  📊 Mavjud rollar (${existingRoleNames.length} ta):`, existingRoleNames);
+                console.log(`  📊 Import qilinadigan rollar (${importRoleNames.length} ta):`, importRoleNames);
+                
+                // O'chirilgan rollarni topish (import faylida yo'q, lekin bazada mavjud)
+                const deletedRoles = existingRoleNames.filter(role => !importRoleNames.includes(role));
+                if (deletedRoles.length > 0) {
+                    console.log(`  ⚠️ [ROLES] EHTIYOT: Quyidagi rollar import faylida yo'q (o'chirilishi mumkin):`, deletedRoles);
+                    console.log(`  ⚠️ [ROLES] Bu rollar bazada qoladi, chunki import faqat yangi ma'lumotlarni qo'shadi/yangilaydi`);
+                } else {
+                    console.log(`  ✅ [ROLES] Barcha mavjud rollar import faylida mavjud`);
+                }
+                
+                // Yangi rollarni topish
+                const newRoles = importRoleNames.filter(role => !existingRoleNames.includes(role));
+                if (newRoles.length > 0) {
+                    console.log(`  ➕ [ROLES] Yangi qo'shiladigan rollar (${newRoles.length} ta):`, newRoles);
+                }
+                
+                // Yangilanadigan rollarni topish
+                const updatedRoles = importRoleNames.filter(role => existingRoleNames.includes(role));
+                if (updatedRoles.length > 0) {
+                    console.log(`  🔄 [ROLES] Yangilanadigan rollar (${updatedRoles.length} ta):`, updatedRoles);
+                }
+            }
+            
             // Helper funksiya - jadvalni import qilish (smart import)
             const importTable = async (tableName, tableData, options = {}) => {
                 if (!tableData || !Array.isArray(tableData) || tableData.length === 0) {
@@ -251,9 +402,25 @@ router.post('/import-full-db', async (req, res) => {
                             
                             // Insert yoki update
                             if (options.upsert) {
-                                const existing = await trx(tableName)
-                                    .where(options.upsert.where, record[options.upsert.key])
-                                    .first();
+                                let existing = null;
+                                
+                                // Composite unique key uchun tekshirish
+                                if (options.compositeUnique) {
+                                    const whereClause = {};
+                                    for (const key of options.compositeUnique) {
+                                        if (record[key] !== undefined && record[key] !== null) {
+                                            whereClause[key] = record[key];
+                                        }
+                                    }
+                                    if (Object.keys(whereClause).length === options.compositeUnique.length) {
+                                        existing = await trx(tableName).where(whereClause).first();
+                                    }
+                                } else {
+                                    // Oddiy unique key uchun tekshirish
+                                    existing = await trx(tableName)
+                                        .where(options.upsert.where, record[options.upsert.key])
+                                        .first();
+                                }
                                 
                                 if (existing) {
                                     // Super admin'ni yangilamaslik
@@ -262,25 +429,106 @@ router.post('/import-full-db', async (req, res) => {
                                         continue;
                                     }
                                     
+                                    // Rollar jadvali uchun log
+                                    if (tableName === 'roles') {
+                                        const roleName = record.role_name || record[options.upsert.key];
+                                        console.log(`  🔄 [ROLES] Rol yangilanmoqda: ${roleName}`);
+                                        console.log(`  📋 [ROLES] Eski ma'lumot:`, JSON.stringify(existing));
+                                        console.log(`  📋 [ROLES] Yangi ma'lumot:`, JSON.stringify(record));
+                                    }
+                                    
+                                    // Users jadvali uchun telegram_chat_id unique constraint tekshiruvi
+                                    if (tableName === 'users' && record.telegram_chat_id) {
+                                        const existingByTelegram = await trx(tableName)
+                                            .where('telegram_chat_id', record.telegram_chat_id)
+                                            .where('id', '!=', existing.id)
+                                            .first();
+                                        if (existingByTelegram) {
+                                            // Boshqa user allaqachon bu telegram_chat_id'ga ega
+                                            skipped++;
+                                            continue;
+                                        }
+                                    }
+                                    
                                     // ID'ni o'chirib, update qilish (avtomatik generatsiya uchun)
                                     const recordToUpdate = { ...record };
                                     if (options.upsert.key === 'id' && tableName !== 'users') {
                                         delete recordToUpdate.id;
                                     }
                                     
+                                    // Update uchun where clause
+                                    let updateWhere = {};
+                                    if (options.compositeUnique) {
+                                        for (const key of options.compositeUnique) {
+                                            if (record[key] !== undefined && record[key] !== null) {
+                                                updateWhere[key] = record[key];
+                                            }
+                                        }
+                                    } else {
+                                        updateWhere[options.upsert.where] = record[options.upsert.key];
+                                    }
+                                    
                                     await trx(tableName)
-                                        .where(options.upsert.where, record[options.upsert.key])
+                                        .where(updateWhere)
                                         .update(recordToUpdate);
+                                    
+                                    // Rollar jadvali uchun log
+                                    if (tableName === 'roles') {
+                                        const roleName = record.role_name || record[options.upsert.key];
+                                        console.log(`  ✅ [ROLES] Rol yangilandi: ${roleName}`);
+                                    }
                                 } else {
                                     // ID'ni o'chirib, insert qilish (avtomatik generatsiya uchun)
                                     const recordToInsert = { ...record };
                                     if (options.upsert.key === 'id' && tableName !== 'users') {
                                         delete recordToInsert.id;
                                     }
+                                    
+                                    // Rollar jadvali uchun log
+                                    if (tableName === 'roles') {
+                                        const roleName = recordToInsert.role_name || recordToInsert[options.upsert?.key];
+                                        console.log(`  ➕ [ROLES] Yangi rol qo'shilmoqda: ${roleName}`);
+                                        console.log(`  📋 [ROLES] Rol ma'lumotlari:`, JSON.stringify(recordToInsert));
+                                    }
+                                    
+                                    // Users jadvali uchun telegram_chat_id unique constraint tekshiruvi
+                                    if (tableName === 'users' && recordToInsert.telegram_chat_id) {
+                                        const existingByTelegram = await trx(tableName)
+                                            .where('telegram_chat_id', recordToInsert.telegram_chat_id)
+                                            .first();
+                                        if (existingByTelegram) {
+                                            skipped++;
+                                            continue;
+                                        }
+                                    }
+                                    
                                     await trx(tableName).insert(recordToInsert);
+                                    
+                                    // Rollar jadvali uchun log
+                                    if (tableName === 'roles') {
+                                        const roleName = recordToInsert.role_name || recordToInsert[options.upsert?.key];
+                                        console.log(`  ✅ [ROLES] Yangi rol qo'shildi: ${roleName}`);
+                                    }
                                 }
                                 imported++;
                             } else {
+                                // Composite unique key tekshiruvi (agar upsert yo'q bo'lsa)
+                                if (options.compositeUnique) {
+                                    const whereClause = {};
+                                    for (const key of options.compositeUnique) {
+                                        if (record[key] !== undefined && record[key] !== null) {
+                                            whereClause[key] = record[key];
+                                        }
+                                    }
+                                    if (Object.keys(whereClause).length === options.compositeUnique.length) {
+                                        const existing = await trx(tableName).where(whereClause).first();
+                                        if (existing) {
+                                            skipped++;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                
                                 // ID'ni tekshirish va agar mavjud bo'lsa, skip qilish
                                 if (record.id) {
                                     const existing = await trx(tableName)
@@ -300,8 +548,13 @@ router.post('/import-full-db', async (req, res) => {
                                 imported++;
                             }
                         } catch (err) {
-                            console.error(`  ❌ ${tableName} yozuv import xatolik:`, err.message);
-                            errors++;
+                            // UNIQUE constraint xatoliklarini skip qilish
+                            if (err.code === 'SQLITE_CONSTRAINT' && err.message && err.message.includes('UNIQUE constraint failed')) {
+                                skipped++;
+                            } else {
+                                console.error(`  ❌ ${tableName} yozuv import xatolik:`, err.message);
+                                errors++;
+                            }
                         }
                     }
                     
@@ -322,6 +575,7 @@ router.post('/import-full-db', async (req, res) => {
             await importTable('users', data.users, {
                 upsert: { where: 'id', key: 'id' },
                 checkDuplicate: { where: 'username', key: 'username' }
+                // telegram_chat_id unique constraint kod ichida tekshiriladi
             });
             
             await importTable('roles', data.roles, {
@@ -333,6 +587,7 @@ router.post('/import-full-db', async (req, res) => {
             });
             
             await importTable('role_permissions', data.role_permissions, {
+                compositeUnique: ['role_name', 'permission_key'],
                 foreignKeys: [
                     { table: 'roles', column: 'role_name', reference: 'role_name' },
                     { table: 'permissions', column: 'permission_key', reference: 'permission_key' }
@@ -358,6 +613,7 @@ router.post('/import-full-db', async (req, res) => {
             
             // Foydalanuvchi bog'lanishlar
             await importTable('user_locations', data.user_locations, {
+                compositeUnique: ['user_id', 'location_name'],
                 foreignKeys: [
                     { table: 'users', column: 'id', reference: 'user_id' }
                 ]
@@ -371,6 +627,7 @@ router.post('/import-full-db', async (req, res) => {
             });
             
             await importTable('brand_locations', data.brand_locations, {
+                compositeUnique: ['brand_id', 'location_name'],
                 foreignKeys: [
                     { table: 'brands', column: 'id', reference: 'brand_id' }
                 ]
@@ -423,6 +680,7 @@ router.post('/import-full-db', async (req, res) => {
             
             // Valyuta kurslari
             await importTable('exchange_rates', data.exchange_rates, {
+                compositeUnique: ['base_currency', 'target_currency', 'date'],
                 upsert: { where: 'id', key: 'id' }
             });
             
@@ -468,6 +726,43 @@ router.post('/import-full-db', async (req, res) => {
             
             // Import loglari
             await importTable('imports_log', data.imports_log);
+            
+            // Import keyin rollarni tekshirish
+            if (data.roles && Array.isArray(data.roles)) {
+                const finalRoles = await trx('roles').select('role_name');
+                const finalRoleNames = finalRoles.map(r => r.role_name);
+                const importRoleNames = data.roles.map(r => r.role_name).filter(Boolean);
+                
+                console.log(`🔍 [ROLES] Import keyin rollar tekshiruvi:`);
+                console.log(`  📊 Import oldin bazadagi rollar (${existingRoleNames.length} ta):`, existingRoleNames);
+                console.log(`  📊 Import keyin bazadagi rollar (${finalRoleNames.length} ta):`, finalRoleNames);
+                
+                // O'chirilgan rollarni topish (import faylida yo'q, lekin bazada mavjud)
+                const deletedRoles = finalRoleNames.filter(role => !importRoleNames.includes(role));
+                if (deletedRoles.length > 0) {
+                    console.log(`  ⚠️ [ROLES] EHTIYOT: Quyidagi rollar import faylida yo'q, lekin bazada qolgan (${deletedRoles.length} ta):`, deletedRoles);
+                    console.log(`  ⚠️ [ROLES] Bu rollar o'chirilmagan, chunki import faqat yangi ma'lumotlarni qo'shadi/yangilaydi`);
+                }
+                
+                // Qo'shilgan yangi rollarni topish (import oldin yo'q edi, keyin qo'shildi)
+                const actuallyNewRoles = finalRoleNames.filter(role => {
+                    const wasInImport = importRoleNames.includes(role);
+                    const wasInDbBefore = existingRoleNames.includes(role);
+                    return wasInImport && !wasInDbBefore;
+                });
+                if (actuallyNewRoles.length > 0) {
+                    console.log(`  ✅ [ROLES] Muvaffaqiyatli qo'shilgan yangi rollar (${actuallyNewRoles.length} ta):`, actuallyNewRoles);
+                }
+                
+                // Yo'qolgan rollarni topish (import oldin bor edi, keyin yo'qoldi)
+                const lostRoles = existingRoleNames.filter(role => !finalRoleNames.includes(role));
+                if (lostRoles.length > 0) {
+                    console.log(`  ❌ [ROLES] XATOLIK: Quyidagi rollar import oldin bor edi, lekin keyin yo'qoldi (${lostRoles.length} ta):`, lostRoles);
+                    console.log(`  ❌ [ROLES] Bu rollar o'chirilgan bo'lishi mumkin!`);
+                } else {
+                    console.log(`  ✅ [ROLES] Barcha mavjud rollar saqlanib qoldi`);
+                }
+            }
             
             console.log('✅ Import muvaffaqiyatli yakunlandi!');
         });

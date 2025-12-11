@@ -31,7 +31,7 @@ const isAuthenticated = async (req, res, next) => {
         }
 
         // 3. Foydalanuvchining joriy ma'lumotlarini bazadan olish
-        const user = await db('users').where({ id: userId }).select('id', 'status', 'telegram_chat_id').first();
+        const user = await db('users').where({ id: userId }).select('id', 'status', 'telegram_chat_id', 'is_telegram_connected').first();
 
         // Agar foydalanuvchi bazadan o'chirilgan bo'lsa
         if (!user) {
@@ -48,7 +48,10 @@ const isAuthenticated = async (req, res, next) => {
         // === YANGI MANTIQ: MAJBURIY TELEGRAM OBUNASINI TEKSHIRISH ===
         // Superadmin (role='superadmin' yoki 'super_admin') uchun bu tekshiruv o'tkazib yuboriladi.
         const userRole = userSessionData.role;
-        if (userRole !== 'superadmin' && userRole !== 'super_admin' && !user.telegram_chat_id) {
+        const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
+        const hasTelegramChatId = !!user.telegram_chat_id;
+        
+        if (userRole !== 'superadmin' && userRole !== 'super_admin' && (!isTelegramConnected || !hasTelegramChatId)) {
             const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
             const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
 

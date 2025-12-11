@@ -4,6 +4,7 @@ const multer = require('multer');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { applyReportsFilter } = require('../utils/userAccessFilter.js');
+const { safeSendMessage } = require('../utils/bot.js');
 
 const router = express.Router();
 
@@ -459,24 +460,33 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             console.log(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial, Brand: ${brandName}, Date: ${date}`);
             
             try {
-                // Operatorlarni qidirish
+                // Operatorlarni qidirish (telegram_chat_id bilan)
                 let operators = await db('users')
                     .where('role', 'operator')
                     .where('status', 'active')
-                    .select('id', 'username', 'role');
+                    .whereNotNull('telegram_chat_id')
+                    .select('id', 'username', 'role', 'telegram_chat_id', 'fullname');
                 
                 // Agar 'operator' bilan topilmasa, 'kassir' yoki boshqa variantlarni tekshirish
                 if (operators.length === 0) {
                     const kassirUsers = await db('users')
                         .where('role', 'kassir')
                         .where('status', 'active')
-                        .select('id', 'username', 'role');
+                        .whereNotNull('telegram_chat_id')
+                        .select('id', 'username', 'role', 'telegram_chat_id', 'fullname');
                     
                     if (kassirUsers.length === 0) {
                         const allActiveUsers = await db('users')
                             .where('status', 'active')
-                            .select('id', 'username', 'role');
-                        operators = allActiveUsers.map(u => ({ id: u.id, username: u.username, role: u.role }));
+                            .whereNotNull('telegram_chat_id')
+                            .select('id', 'username', 'role', 'telegram_chat_id', 'fullname');
+                        operators = allActiveUsers.map(u => ({ 
+                            id: u.id, 
+                            username: u.username, 
+                            role: u.role,
+                            telegram_chat_id: u.telegram_chat_id,
+                            fullname: u.fullname
+                        }));
                     } else {
                         operators = kassirUsers;
                     }
@@ -508,6 +518,56 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                         console.log(`✅ [COMPARISON] ${notificationData.length} ta notification yaratildi`);
                     } catch (insertError) {
                         console.error(`❌ [COMPARISON] Notification'lar bazaga yozishda xatolik:`, insertError.message);
+                    }
+                    
+                    // Telegram orqali har bir operatorga xabar yuborish
+                    try {
+                        let telegramSuccessCount = 0;
+                        let telegramErrorCount = 0;
+                        
+                        // Farqlar ro'yxatini formatlash
+                        const differencesList = differences.map((diff, index) => {
+                            const diffSign = diff.difference > 0 ? '▲' : diff.difference < 0 ? '▼' : '=';
+                            const diffValue = Math.abs(diff.difference).toLocaleString('uz-UZ');
+                            return `${index + 1}. ${diff.location}: ${diffSign} ${diffValue}`;
+                        }).join('\n');
+                        
+                        for (const operator of operators) {
+                            if (!operator.telegram_chat_id) {
+                                console.warn(`⚠️ [COMPARISON] Operator ${operator.username} (ID: ${operator.id}) da telegram_chat_id yo'q`);
+                                continue;
+                            }
+                            
+                            try {
+                                const telegramMessage = `🔔 <b>Solishtirishda farqlar aniqlandi</b>\n\n` +
+                                    `📅 <b>Sana:</b> ${date}\n` +
+                                    `🏷️ <b>Brend:</b> ${brandName}\n` +
+                                    `📊 <b>Farqlar soni:</b> ${differences.length} ta filial\n\n` +
+                                    `<b>Farqlar ro'yxati:</b>\n${differencesList}\n\n` +
+                                    `⚠️ Iltimos, tizimga kirib batafsil ma'lumotlarni ko'ring.`;
+                                
+                                const result = await safeSendMessage(operator.telegram_chat_id, telegramMessage);
+                                if (result) {
+                                    telegramSuccessCount++;
+                                    console.log(`✅ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborildi`);
+                                } else {
+                                    telegramErrorCount++;
+                                    console.warn(`⚠️ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborilmadi`);
+                                }
+                            } catch (telegramError) {
+                                telegramErrorCount++;
+                                console.error(`❌ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborishda xatolik:`, telegramError.message);
+                            }
+                        }
+                        
+                        if (telegramSuccessCount > 0) {
+                            console.log(`✅ [COMPARISON] Telegram: ${telegramSuccessCount} ta operatorga xabar yuborildi`);
+                        }
+                        if (telegramErrorCount > 0) {
+                            console.warn(`⚠️ [COMPARISON] Telegram: ${telegramErrorCount} ta operatorga xabar yuborilmadi`);
+                        }
+                    } catch (telegramError) {
+                        console.error(`❌ [COMPARISON] Telegram yuborishda umumiy xatolik:`, telegramError.message);
                     }
                     
                     // WebSocket orqali realtime yuborish
@@ -557,6 +617,20 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             }
         }
 
+        // WebSocket orqali realtime yuborish (umumiy yangilanish)
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [COMPARISON] Solishtirish yangilandi, WebSocket orqali yuborilmoqda...`);
+            global.broadcastWebSocket('comparison_updated', {
+                date: date,
+                brandId: brandId,
+                brandName: brandName,
+                savedCount: savedCount,
+                updatedCount: updatedCount,
+                updated_by: userId
+            });
+            console.log(`✅ [COMPARISON] WebSocket yuborildi: comparison_updated`);
+        }
+        
         res.json({
             success: true,
             message: 'Ma\'lumotlar saqlandi',

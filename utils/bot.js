@@ -717,6 +717,62 @@ const initializeBot = async (botToken, options = { polling: true }) => {
             
             console.log(`🤖 [BOT] /start komandasi qabul qilindi. Chat ID: ${chatId}, Code: ${code || 'yo\'q'}`);
 
+            // Bot bog'lash tokeni tekshiruvi (bot_connect_*)
+            if (code && code.startsWith('bot_connect_')) {
+                const token = code;
+                console.log(`🔗 [BOT] Bot bog'lash tokeni. Token: ${token.substring(0, 30)}..., Chat ID: ${chatId}`);
+                
+                try {
+                    // Token tekshiruvi
+                    const magicLink = await db('magic_links')
+                        .where({ token: token })
+                        .where('expires_at', '>', new Date().toISOString())
+                        .first();
+
+                    if (!magicLink) {
+                        console.error(`❌ [BOT] Token topilmadi yoki muddati tugagan. Token: ${token.substring(0, 30)}...`);
+                        await safeSendMessage(chatId, `❌ Bot bog'lash havolasi noto'g'ri yoki muddati tugagan. Iltimos, yangi havola oling.`);
+                        return;
+                    }
+
+                    // Foydalanuvchi ma'lumotlarini olish
+                    const user = await db('users').where({ id: magicLink.user_id }).first();
+                    
+                    if (!user) {
+                        console.error(`❌ [BOT] Foydalanuvchi topilmadi. User ID: ${magicLink.user_id}`);
+                        await safeSendMessage(chatId, `❌ Foydalanuvchi topilmadi. Iltimos, administrator bilan bog'laning.`);
+                        return;
+                    }
+
+                    // Superadmin uchun bot obunasi majburiy emas
+                    const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+                    if (isSuperAdmin) {
+                        await safeSendMessage(chatId, `✅ Superadmin uchun bot obunasi majburiy emas.`);
+                        return;
+                    }
+
+                    // Telegram chat_id va is_telegram_connected yangilash
+                    await db('users').where({ id: user.id }).update({
+                        telegram_chat_id: chatId,
+                        telegram_username: msg.from.username,
+                        is_telegram_connected: true
+                    });
+
+                    // Token o'chirish (bir marta ishlatiladi)
+                    await db('magic_links').where({ token: token }).del();
+
+                    console.log(`✅ [BOT] Bot obunasi tasdiqlandi. User ID: ${user.id}, Username: ${user.username}, Chat ID: ${chatId}`);
+                    
+                    await safeSendMessage(chatId, `✅ <b>Muvaffaqiyatli!</b>\n\nSizning akkauntingiz (<b>${escapeHtml(user.username)}</b>) Telegram bot bilan bog'landi.\n\nEndi tizimga kirishingiz mumkin.`);
+
+                } catch (error) {
+                    console.error(`❌ [BOT] Bot bog'lashda xatolik:`, error);
+                    await safeSendMessage(chatId, `❌ Tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.`);
+                }
+                return;
+            }
+
+            // Ro'yxatdan o'tish jarayoni (subscribe_*)
             if (code && code.startsWith('subscribe_')) {
                 const newUserIdStr = code.split('_')[1];
                 const newUserId = parseInt(newUserIdStr, 10);

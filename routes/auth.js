@@ -12,13 +12,17 @@ const router = express.Router();
 router.get('/public/settings/branding', async (req, res) => {
     try {
         const brandingSetting = await db('settings').where({ key: 'branding_settings' }).first();
-        const settings = brandingSetting 
+        
+        let settings = brandingSetting 
             ? JSON.parse(brandingSetting.value) 
             : { 
-                text: 'MANUS', 
-                color: '#4CAF50', 
-                animation: 'anim-glow-pulse', 
-                border: 'border-none',
+                logo: {
+                    text: 'MANUS', 
+                    color: '#4CAF50', 
+                    animation: 'anim-glow-pulse', 
+                    border: 'border-none',
+                    size: 32
+                },
                 loader: {
                     type: 'spinner',
                     text: 'Yuklanmoqda...',
@@ -26,14 +30,87 @@ router.get('/public/settings/branding', async (req, res) => {
                     blurBackground: true
                 }
             };
+        
+        // MUAMMO: Bazada ikkala format ham mavjud bo'lishi mumkin
+        // Yechim: Avval logo strukturasini tekshirish, agar mavjud bo'lsa uni ishlatish
+        // Faqat logo strukturasida ma'lumotlar bo'lmasa, keyin eski formatni qo'llash
+        
+        if (settings.logo && (settings.logo.text || settings.logo.color)) {
+            // Yangi format mavjud - logo strukturasini ishlatish
+            
+            // Logo strukturasini to'ldirish
+            if (!settings.logo.size) {
+                settings.logo.size = 32;
+            }
+            if (!settings.logo.text) {
+                settings.logo.text = 'MANUS';
+            }
+            if (!settings.logo.color) {
+                settings.logo.color = '#4CAF50';
+            }
+            if (!settings.logo.animation) {
+                settings.logo.animation = 'anim-glow-pulse';
+            }
+            if (!settings.logo.border) {
+                settings.logo.border = 'border-none';
+            }
+            
+            // Eski format maydonlarini olib tashlash (tozalash)
+            delete settings.text;
+            delete settings.color;
+            delete settings.animation;
+            delete settings.border;
+            
+        } else if (settings.text || settings.color) {
+            // Faqat eski format mavjud - yangi formatga o'tkazish
+            settings = {
+                logo: {
+                    text: settings.text || 'MANUS',
+                    color: settings.color || '#4CAF50',
+                    animation: settings.animation || 'anim-glow-pulse',
+                    border: settings.border || 'border-none',
+                    size: settings.size || 32
+                },
+                loader: settings.loader || {
+                    type: 'spinner',
+                    text: 'Yuklanmoqda...',
+                    showProgress: false,
+                    blurBackground: true
+                }
+            };
+        } else {
+            // Hech qanday format mavjud emas - default qo'llash
+            if (!settings.logo) {
+                settings.logo = {};
+            }
+            if (!settings.logo.size) {
+                settings.logo.size = 32;
+            }
+            if (!settings.logo.text) {
+                settings.logo.text = 'MANUS';
+            }
+            if (!settings.logo.color) {
+                settings.logo.color = '#4CAF50';
+            }
+            if (!settings.logo.animation) {
+                settings.logo.animation = 'anim-glow-pulse';
+            }
+            if (!settings.logo.border) {
+                settings.logo.border = 'border-none';
+            }
+        }
+        
         res.json(settings);
     } catch (error) {
         console.error("Public branding settings xatoligi:", error);
         res.status(500).json({ 
-            text: 'MANUS', 
-            color: '#4CAF50', 
-            animation: 'anim-glow-pulse', 
-            border: 'border-none',
+            logo: {
+                text: 'MANUS', 
+                color: '#4CAF50', 
+                animation: 'anim-glow-pulse', 
+                border: 'border-none',
+                size: 32
+            },
             loader: {
                 type: 'spinner',
                 text: 'Yuklanmoqda...',
@@ -343,6 +420,17 @@ router.post('/login', async (req, res) => {
         req.session.ip_address = ipAddress;
         req.session.user_agent = userAgent;
         req.session.last_activity = Date.now();
+        
+        // Online statusni real-time yangilash
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [LOGIN] Foydalanuvchi tizimga kirdi, online status yangilanmoqda...`);
+            global.broadcastWebSocket('user_status_changed', {
+                userId: user.id,
+                username: user.username,
+                isOnline: true
+            });
+            console.log(`✅ [LOGIN] WebSocket yuborildi: user_status_changed (online)`);
+        }
 
         // Login attempts'ni reset qilish (agar kerak bo'lsa)
         if (user.login_attempts > 0 || user.lock_reason) {
@@ -360,6 +448,48 @@ router.post('/login', async (req, res) => {
             db('users').where({ id: user.id }).update({ must_delete_creds: false }).catch(err => console.error('Update xatolik:', err));
         }
 
+        // === BOT OBUNASI TEKSHIRUVI (VARIANT A: MAJBURIY) ===
+        // Superadmin uchun bot obunasi majburiy emas
+        const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+        const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
+        const hasTelegramChatId = !!user.telegram_chat_id;
+
+        if (!isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId)) {
+            // Bot obunasi yo'q - bot bog'lash sahifasiga redirect
+            console.log(`⚠️ [LOGIN] Bot obunasi yo'q. User ID: ${user.id}, Username: ${user.username}`);
+            
+            // Sessiya yaratiladi, lekin bot bog'languncha dashboard ochilmaydi
+            req.session.user = {
+                id: user.id,
+                username: user.username,
+                role: user.role,
+                locations: locations,
+                permissions: finalPermissions,
+                requires_bot_connection: true // Flag qo'shildi
+            };
+            req.session.ip_address = ipAddress;
+            req.session.user_agent = userAgent;
+            req.session.last_activity = Date.now();
+
+            // Background'da log yozish
+            logAction(user.id, 'login_success_but_bot_required', 'user', user.id, { 
+                ip: ipAddress, 
+                userAgent,
+                reason: 'Bot subscription required'
+            }).catch(err => console.error('Log yozishda xatolik:', err));
+
+            const elapsedTime = Date.now() - startTime;
+            console.log(`✅ [LOGIN] Login muvaffaqiyatli, lekin bot obunasi kerak. User ID: ${user.id}, Vaqt: ${elapsedTime}ms`);
+            
+            return res.json({ 
+                message: "Login muvaffaqiyatli, lekin Telegram bot bilan bog'lash kerak.", 
+                user: req.session.user, 
+                redirectUrl: '/bot-connect',
+                requiresBotConnection: true
+            });
+        }
+        // =======================================================
+
         // Super admin yoki admin uchun admin paneliga redirect
         // Yoki kerakli permissions'ga ega foydalanuvchilar uchun
         let redirectUrl = '/';
@@ -371,6 +501,17 @@ router.post('/login', async (req, res) => {
         
         // Background'da log yozish (javobni kutmaslik)
         logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+        
+        // Online statusni real-time yangilash
+        if (global.broadcastWebSocket) {
+            console.log(`📡 [LOGIN] Foydalanuvchi tizimga kirdi, online status yangilanmoqda...`);
+            global.broadcastWebSocket('user_status_changed', {
+                userId: user.id,
+                username: user.username,
+                isOnline: true
+            });
+            console.log(`✅ [LOGIN] WebSocket yuborildi: user_status_changed (online)`);
+        }
         
         const elapsedTime = Date.now() - startTime;
         console.log(`✅ [LOGIN] Login muvaffaqiyatli. User ID: ${user.id}, Vaqt: ${elapsedTime}ms, Redirect: ${redirectUrl}`);
@@ -466,8 +607,21 @@ router.get('/verify-session/:token', async (req, res) => {
 // POST /api/logout - Tizimdan chiqish
 router.post('/logout', isAuthenticated, async (req, res) => {
     const user = req.session.user;
+    const userId = user.id;
+    const username = user.username;
     
     await logAction(user.id, 'logout', 'user', user.id, { ip: req.session.ip_address, userAgent: req.session.user_agent });
+    
+    // Online statusni real-time yangilash (sessiya o'chirilishidan oldin)
+    if (global.broadcastWebSocket) {
+        console.log(`📡 [LOGOUT] Foydalanuvchi tizimdan chiqdi, online status yangilanmoqda...`);
+        global.broadcastWebSocket('user_status_changed', {
+            userId: userId,
+            username: username,
+            isOnline: false
+        });
+        console.log(`✅ [LOGOUT] WebSocket yuborildi: user_status_changed (offline)`);
+    }
     
     req.session.destroy(err => {
         if (err) {
@@ -625,6 +779,174 @@ router.post('/verify-secret', async (req, res) => {
     } catch (error) {
         console.error("Maxfiy so'zni tekshirish xatoligi:", error);
         res.status(500).json({ message: "Tekshirishda xatolik yuz berdi." });
+    }
+});
+
+// POST /api/auth/bot-connect/generate-token - Bot bog'lash uchun token yaratish
+router.post('/bot-connect/generate-token', async (req, res) => {
+    let { username } = req.body;
+    
+    // Agar sessiya mavjud bo'lsa, sessiyadagi username'ni ishlatish
+    if (req.session && req.session.user && req.session.user.username) {
+        username = req.session.user.username;
+        console.log(`🔗 [BOT-CONNECT] Sessiyadagi username ishlatilmoqda: ${username}`);
+    }
+    
+    if (!username) {
+        return res.status(400).json({ message: "Login kiritilishi shart." });
+    }
+
+    try {
+        // Login tekshiruvi
+        const user = await db('users').where({ username: username }).first();
+        
+        if (!user) {
+            return res.status(404).json({ message: "Bunday login topilmadi." });
+        }
+
+        // Sessiya mavjud bo'lsa, sessiyadagi user ID bilan mos kelishini tekshirish
+        if (req.session && req.session.user) {
+            if (req.session.user.id !== user.id) {
+                return res.status(403).json({ message: "Bu login sizning akkauntingizga tegishli emas." });
+            }
+        }
+
+        // Superadmin uchun bot obunasi majburiy emas
+        const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+        if (isSuperAdmin) {
+            return res.status(400).json({ message: "Superadmin uchun bot obunasi majburiy emas." });
+        }
+
+        // Token yaratish
+        const { v4: uuidv4 } = require('uuid');
+        const token = `bot_connect_${uuidv4()}`;
+        const expires_at = new Date(Date.now() + 10 * 60 * 1000); // 10 daqiqa
+
+        // Eski tokenlarni o'chirish
+        await db('magic_links')
+            .where({ user_id: user.id })
+            .where('token', 'like', 'bot_connect_%')
+            .del();
+
+        // Yangi token yaratish
+        await db('magic_links').insert({
+            token: token,
+            user_id: user.id,
+            expires_at: expires_at.toISOString()
+        });
+
+        // Bot username olish
+        const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
+        const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
+
+        if (!botUsername) {
+            return res.status(500).json({ message: "Bot username topilmadi. Iltimos, administrator bilan bog'laning." });
+        }
+
+        // Bot havolasi yaratish
+        const botLink = `https://t.me/${botUsername}?start=${token}`;
+
+        console.log(`🔗 [BOT-CONNECT] Token yaratildi. User ID: ${user.id}, Username: ${username}, Token: ${token.substring(0, 20)}...`);
+
+        res.json({
+            success: true,
+            token: token,
+            botLink: botLink,
+            expiresAt: expires_at.toISOString(),
+            message: "Bot havolasi yaratildi. Iltimos, havola orqali botga ulaning."
+        });
+
+    } catch (error) {
+        console.error("Bot bog'lash token yaratish xatoligi:", error);
+        res.status(500).json({ message: "Token yaratishda xatolik yuz berdi." });
+    }
+});
+
+// POST /api/auth/bot-connect/verify - Bot bog'lash tokenini tekshirish
+router.post('/bot-connect/verify', async (req, res) => {
+    const { token } = req.body;
+    
+    if (!token) {
+        return res.status(400).json({ message: "Token kiritilishi shart." });
+    }
+
+    try {
+        // Token tekshiruvi
+        const magicLink = await db('magic_links')
+            .where({ token: token })
+            .where('expires_at', '>', new Date().toISOString())
+            .first();
+
+        if (!magicLink) {
+            return res.status(404).json({ message: "Token topilmadi yoki muddati tugagan." });
+        }
+
+        // Foydalanuvchi ma'lumotlarini olish
+        const user = await db('users').where({ id: magicLink.user_id }).first();
+        
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+
+        // Bot obunasi tekshiruvi (telegram_chat_id va is_telegram_connected)
+        const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
+        const hasTelegramChatId = !!user.telegram_chat_id;
+
+        if (!isTelegramConnected || !hasTelegramChatId) {
+            return res.json({
+                success: false,
+                message: "Bot obunasi hali tasdiqlanmagan. Iltimos, botga ulanib, /start buyrug'ini bosing."
+            });
+        }
+
+        // Token o'chirish (bir marta ishlatiladi)
+        await db('magic_links').where({ token: token }).del();
+
+        console.log(`✅ [BOT-CONNECT] Bot obunasi tasdiqlandi. User ID: ${user.id}, Username: ${user.username}`);
+
+        res.json({
+            success: true,
+            message: "Bot obunasi muvaffaqiyatli tasdiqlandi!",
+            user: {
+                id: user.id,
+                username: user.username
+            }
+        });
+
+    } catch (error) {
+        console.error("Bot bog'lash token tekshirish xatoligi:", error);
+        res.status(500).json({ message: "Token tekshirishda xatolik yuz berdi." });
+    }
+});
+
+// GET /api/auth/bot-connect/status - Bot obunasi holatini tekshirish
+router.get('/bot-connect/status', async (req, res) => {
+    if (!req.session || !req.session.user) {
+        return res.status(401).json({ message: "Avtorizatsiyadan o'tmagansiz." });
+    }
+
+    try {
+        const userId = req.session.user.id;
+        const user = await db('users').where({ id: userId }).select('id', 'username', 'is_telegram_connected', 'telegram_chat_id', 'role').first();
+
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+
+        const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+        const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
+        const hasTelegramChatId = !!user.telegram_chat_id;
+
+        res.json({
+            isSuperAdmin: isSuperAdmin,
+            isTelegramConnected: isTelegramConnected && hasTelegramChatId,
+            requiresBotConnection: !isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId),
+            username: user.username // Sessiyadagi username'ni qaytarish
+        });
+
+    } catch (error) {
+        console.error("Bot obunasi holati tekshirish xatoligi:", error);
+        res.status(500).json({ message: "Holatni tekshirishda xatolik yuz berdi." });
     }
 });
 
