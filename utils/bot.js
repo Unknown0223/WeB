@@ -142,17 +142,12 @@ function createBrandButtons(brands, selectedBrands = []) {
 }
 
 async function safeSendMessage(chatId, text, options = {}) {
-    console.log(`🔐 [TELEGRAM] safeSendMessage chaqirildi. Chat ID: ${chatId}, Bot initialized: ${botIsInitialized}, Bot exists: ${!!bot}`);
-    
     if (!bot || !botIsInitialized) {
-        console.warn(`❌ [TELEGRAM] Bot ishga tushirilmagan, xabar yuborib bo'lmaydi. Bot: ${!!bot}, Initialized: ${botIsInitialized}`);
         return null;
     }
     
     try {
-        console.log(`📨 [TELEGRAM] Telegram API'ga xabar yuborilmoqda... Chat ID: ${chatId}`);
         const result = await bot.sendMessage(chatId, text, { parse_mode: 'HTML', ...options });
-        console.log(`✅ [TELEGRAM] Telegram API javob berdi. Message ID: ${result?.message_id}`);
         return result;
     } catch (error) {
         const body = error.response?.body;
@@ -164,9 +159,7 @@ async function safeSendMessage(chatId, text, options = {}) {
         });
         
         if (body?.error_code === 403) {
-            console.warn(`⚠️ [TELEGRAM] Xabar yuborish imkonsiz (chat_id: ${chatId}). Bot foydalanuvchi tomonidan bloklangan.`);
             await db('users').where({ telegram_chat_id: chatId }).update({ telegram_chat_id: null, telegram_username: null });
-            console.log(`🗑️ [TELEGRAM] Foydalanuvchi (chat_id: ${chatId}) bloklagani uchun bazadan tozalandi.`);
         } else if (body?.error_code === 400) {
             console.error(`❌ [TELEGRAM] Bad Request (400). Chat ID: ${chatId}, Description: ${body?.description}`);
             if (body?.description?.includes("chat not found")) {
@@ -178,10 +171,8 @@ async function safeSendMessage(chatId, text, options = {}) {
             console.error(`❌ [TELEGRAM] Telegramga xabar yuborishda xatolik (chat_id: ${chatId}): ${body?.description || error.message}`);
             if (String(body?.description).includes("can't parse entities")) {
                 try {
-                    console.log(`🔄 [TELEGRAM] HTML xatoligi tufayli oddiy matn rejimida qayta yuborilmoqda...`);
                     const plainText = text.replace(/<[^>]*>/g, '');
                     const fallbackResult = await bot.sendMessage(chatId, plainText, { ...options, parse_mode: undefined });
-                    console.log(`✅ [TELEGRAM] Oddiy matn rejimida yuborildi. Message ID: ${fallbackResult?.message_id}`);
                     return fallbackResult;
                 } catch (fallbackError) {
                     console.error(`❌ [TELEGRAM] Oddiy matn rejimida ham yuborib bo'lmadi:`, fallbackError.response?.body || fallbackError.message);
@@ -201,7 +192,7 @@ async function formatAndSendReport(payload) {
     // `old_report_date` va `old_location` payload'dan olinmoqda
     const { type, report_id, location, date, author, data, old_data, settings, group_id, old_report_date, old_location, brand_name, old_brand_name, currency } = payload;
     
-    console.log(`📋 [TELEGRAM] formatAndSendReport boshlandi. Type: ${type}, Report ID: ${report_id}, Group ID: ${group_id}`);
+
     
     // Valyuta formatlash uchun
     const { formatCurrency, BASE_CURRENCY } = require('./exchangeRates.js');
@@ -422,16 +413,16 @@ async function formatAndSendReport(payload) {
     }
 
     if (messageText) {
-        console.log(`💬 [TELEGRAM] Xabar tayyor. Uzunligi: ${messageText.length} belgi`);
-        console.log(`📤 [TELEGRAM] safeSendMessage chaqirilmoqda. Group ID: ${group_id}`);
+
+
         const result = await safeSendMessage(group_id, messageText);
         if (result) {
-            console.log(`✅ [TELEGRAM] Xabar muvaffaqiyatli yuborildi. Message ID: ${result.message_id}`);
+
         } else {
             console.error(`❌ [TELEGRAM] Xabar yuborilmadi. Result: null`);
         }
     } else {
-        console.warn(`⚠️ [TELEGRAM] Xabar matni bo'sh. Xabar yuborilmadi.`);
+
     }
 }
 
@@ -446,17 +437,17 @@ async function handleSecurityRequest(payload) {
     }
 
     async function sendMarkdownV2Message(chatId, text, options = {}) {
-        console.log(`📨 [TELEGRAM] sendMarkdownV2Message chaqirildi. Chat ID: ${chatId}, Bot initialized: ${botIsInitialized}, Bot exists: ${!!bot}`);
+
         
         if (!bot || !botIsInitialized) {
-            console.warn(`❌ [TELEGRAM] Bot ishga tushirilmagan, MarkdownV2 xabar yuborib bo'lmaydi. Bot: ${!!bot}, Initialized: ${botIsInitialized}`);
+
             return null;
         }
         
         try {
-            console.log(`📤 [TELEGRAM] MarkdownV2 xabar yuborilmoqda... Chat ID: ${chatId}, Text length: ${text?.length || 0}`);
+
             const result = await bot.sendMessage(chatId, text, { parse_mode: 'MarkdownV2', ...options });
-            console.log(`✅ [TELEGRAM] MarkdownV2 xabar muvaffaqiyatli yuborildi. Chat ID: ${chatId}, Message ID: ${result?.message_id}`);
+
             return result;
         } catch (error) {
             const body = error.response?.body;
@@ -468,7 +459,6 @@ async function handleSecurityRequest(payload) {
             });
             
             if (body?.error_code === 403) {
-                console.warn(`⚠️ [TELEGRAM] MarkdownV2 xabar yuborish imkonsiz (chat_id: ${chatId}). Bot foydalanuvchi tomonidan bloklangan.`);
             } else if (body?.error_code === 400) {
                 console.error(`❌ [TELEGRAM] MarkdownV2 Bad Request (400). Chat ID: ${chatId}, Description: ${body?.description}`);
                 if (body?.description?.includes("chat not found")) {
@@ -488,66 +478,65 @@ async function handleSecurityRequest(payload) {
             break;
 
         case 'magic_link_request':
-            console.log(`🔗 [TELEGRAM] Magic link so'rovi. Chat ID: ${chat_id}, User ID: ${user_id}`);
+
             const magicLink = new URL(path.join('api/verify-session/', token), NODE_SERVER_URL).href;
             text = `Salom, *${escapeMarkdownV2(username)}*\\! \n\n${escapeMarkdownV2("Yangi qurilmadan kirishni tasdiqlash uchun quyidagi tugmani bosing. Bu havola 5 daqiqa amal qiladi.")}`;
             keyboard = { inline_keyboard: [[{ text: "✅ Yangi Qurilmada Kirish", url: magicLink }]] };
             const magicLinkResult = await sendMarkdownV2Message(chat_id, text, { reply_markup: keyboard });
             if (magicLinkResult) {
-                console.log(`✅ [TELEGRAM] Magic link yuborildi. Chat ID: ${chat_id}, Message ID: ${magicLinkResult.message_id}`);
+
             } else {
                 console.error(`❌ [TELEGRAM] Magic link yuborilmadi. Chat ID: ${chat_id}`);
             }
             break;
 
         case 'security_alert':
-            console.log(`⚠️ [TELEGRAM] Security alert. Admin Chat ID: ${admin_chat_id}, User ID: ${user_id}`);
+
             text = `⚠️ *${escapeMarkdownV2("Xavfsizlik Ogohlantirishi!")}* \n\n*${escapeMarkdownV2("Foydalanuvchi:")}* ${escapeMarkdownV2(username)} \\(ID: ${user_id}\\)\n*${escapeMarkdownV2("Holat:")}* ${escapeMarkdownV2("Akkauntga kirish uchun maxfiy so'z 2 marta xato kiritildi. Jarayon bloklandi.")}\n\n${escapeMarkdownV2("Nima qilamiz?")}`;
             keyboard = { inline_keyboard: [[{ text: "✅ Yana Urinish Berish", callback_data: `retry_${user_id}` }, { text: "❌ Jarayonni Bloklash", callback_data: `block_${user_id}` }]] };
             const securityAlertResult = await sendMarkdownV2Message(admin_chat_id, text, { reply_markup: keyboard });
             if (securityAlertResult) {
-                console.log(`✅ [TELEGRAM] Security alert yuborildi. Admin Chat ID: ${admin_chat_id}, Message ID: ${securityAlertResult.message_id}`);
+
             } else {
                 console.error(`❌ [TELEGRAM] Security alert yuborilmadi. Admin Chat ID: ${admin_chat_id}`);
             }
             break;
 
         case 'account_lock_alert':
-            console.log(`🔒 [TELEGRAM] Account lock alert. Admin Chat ID: ${admin_chat_id}, User ID: ${user_id}`);
+
             text = `⚠️ *${escapeMarkdownV2("Xavfsizlik Ogohlantirishi!")}* \n\n*${escapeMarkdownV2("Foydalanuvchi:")}* ${escapeMarkdownV2(username)} \\(ID: ${user_id}\\)\n*${escapeMarkdownV2("Holat:")}* ${escapeMarkdownV2("Parol kiritish limitidan oshib ketgani uchun akkaunt bloklandi.")}\n\n${escapeMarkdownV2("Foydalanuvchiga qayta kirishga ruxsat berilsinmi?")}`;
             keyboard = { inline_keyboard: [[{ text: "✅ Ruxsat Berish", callback_data: `unblock_${user_id}` }, { text: "❌ Rad Etish", callback_data: `keep_blocked_${user_id}` }]] };
             const accountLockResult = await sendMarkdownV2Message(admin_chat_id, text, { reply_markup: keyboard });
             if (accountLockResult) {
-                console.log(`✅ [TELEGRAM] Account lock alert yuborildi. Admin Chat ID: ${admin_chat_id}, Message ID: ${accountLockResult.message_id}`);
+
             } else {
                 console.error(`❌ [TELEGRAM] Account lock alert yuborilmadi. Admin Chat ID: ${admin_chat_id}`);
             }
             break;
             
         case 'new_user_request':
-            console.log(`🔔 [TELEGRAM] Yangi foydalanuvchi so'rovi (bot sozlanmagan). User ID: ${user_id}, Admin Chat ID: ${admin_chat_id}`);
             text = `🔔 *${escapeMarkdownV2("Yangi Foydalanuvchi So'rovi (Bot sozlanmagan)!")}* \n\n${escapeMarkdownV2("Tizimda yangi foydalanuvchi ro'yxatdan o'tdi, lekin bot sozlanmaganligi sababli obuna bo'la olmadi. Iltimos, admin panel orqali so'rovni tasdiqlang yoki rad eting.")} \n\n👤 *${escapeMarkdownV2("To'liq ism:")}* ${escapeMarkdownV2(fullname)}\n🔑 *${escapeMarkdownV2("Login:")}* \`${escapeMarkdownV2(username)}\``;
             const newUserRequestResult = await sendMarkdownV2Message(admin_chat_id, text);
             if (newUserRequestResult) {
-                console.log(`✅ [TELEGRAM] Yangi foydalanuvchi so'rovi admin'ga yuborildi. User ID: ${user_id}, Message ID: ${newUserRequestResult.message_id}`);
+
             } else {
                 console.error(`❌ [TELEGRAM] Yangi foydalanuvchi so'rovi yuborilmadi. User ID: ${user_id}, Admin Chat ID: ${admin_chat_id}`);
             }
             break;
 
         case 'new_user_approval':
-            console.log(`🔔 [TELEGRAM] Yangi foydalanuvchi bildirishnomasi. User ID: ${user_id}, Admin Chat ID: ${admin_chat_id}`);
+
             text = `🔔 *${escapeMarkdownV2("Yangi Foydalanuvchi So'rovi!")}* \n\n${escapeMarkdownV2("Foydalanuvchi botga obuna bo'ldi va tasdiqlashingizni kutmoqda.")} \n\n👤 *${escapeMarkdownV2("To'liq ism:")}* ${escapeMarkdownV2(fullname)}\n🔑 *${escapeMarkdownV2("Login:")}* \`${escapeMarkdownV2(username)}\`\n\n${escapeMarkdownV2("Iltimos, admin panel orqali so'rovni tasdiqlang, rol va huquqlar bering.")}`;
             const newUserApprovalResult = await sendMarkdownV2Message(admin_chat_id, text);
             if (newUserApprovalResult) {
-                console.log(`✅ [TELEGRAM] Bildirishnoma admin'ga yuborildi. User ID: ${user_id}, Message ID: ${newUserApprovalResult.message_id}`);
+
             } else {
                 console.error(`❌ [TELEGRAM] Bildirishnoma yuborilmadi. User ID: ${user_id}, Admin Chat ID: ${admin_chat_id}`);
             }
             break;
 
         case 'user_approved_credentials':
-            console.log(`🎉 [TELEGRAM] Foydalanuvchi tasdiqlandi va kirish ma'lumotlari yuborilmoqda. User ID: ${user_id}, Chat ID: ${chat_id}`);
+
             text = `🎉 *${escapeMarkdownV2("Tabriklaymiz, " + fullname)}*\\! \n\n${escapeMarkdownV2("Sizning hisobot tizimidagi akkauntingiz tasdiqlandi.")} \n\n${escapeMarkdownV2("Quyidagi ma'lumotlar orqali tizimga kirishingiz mumkin. Ushbu xabar tizimga birinchi marta kirganingizdan so'ng ")}*${escapeMarkdownV2("avtomatik o'chib ketadi")}*${escapeMarkdownV2(".")} \n\n${escapeMarkdownV2("—".repeat(25))}\n\n*${escapeMarkdownV2("Login:")}* \`${escapeMarkdownV2(username)}\`\n*${escapeMarkdownV2("Parol:")}* \`${escapeMarkdownV2(password)}\`\n*${escapeMarkdownV2("Maxfiy so'z:")}* \`${escapeMarkdownV2(secret_word)}\`\n\n${escapeMarkdownV2("—".repeat(25))}\n\n⚠️ *${escapeMarkdownV2("Diqqat!")}* ${escapeMarkdownV2("Bu ma'lumotlarni hech kimga bermang.")}`;
             const sentMessage = await sendMarkdownV2Message(chat_id, text, {
                 disable_web_page_preview: true,
@@ -555,7 +544,7 @@ async function handleSecurityRequest(payload) {
             });
             if (sentMessage) {
                 await db('users').where({ id: user_id }).update({ creds_message_id: sentMessage.message_id });
-                console.log(`✅ [TELEGRAM] Kirish ma'lumotlari yuborildi. User ID: ${user_id}, Message ID: ${sentMessage.message_id}`);
+
             } else {
                 console.error(`❌ [TELEGRAM] Kirish ma'lumotlarini yuborib bo'lmadi. User ID: ${user_id}, Chat ID: ${chat_id}`);
             }
@@ -568,7 +557,7 @@ async function handleSecurityRequest(payload) {
                     await bot.deleteMessage(chat_id, user.creds_message_id);
                     await db('users').where({ id: user_id }).update({ creds_message_id: null });
                 } catch (error) {
-                    console.warn(`Eski kirish ma'lumotlari xabarini o'chirib bo'lmadi (chat_id: ${chat_id}, msg_id: ${user.creds_message_id}). Sabab: ${error.message}`);
+                    // Silent fail - old message deletion is optional
                 }
             }
             break;
@@ -579,14 +568,10 @@ async function handleSecurityRequest(payload) {
 async function sendToTelegram(payload) {
     try {
         const { type } = payload;
-        console.log(`📤 [TELEGRAM] sendToTelegram chaqirildi. Type: ${type}, Payload:`, JSON.stringify(payload, null, 2));
 
         if (type === 'new' || type === 'edit') {
             const groupIdSetting = await db('settings').where({ key: 'telegram_group_id' }).first();
             let groupId = groupIdSetting ? groupIdSetting.value : null;
-
-            console.log(`🔍 [TELEGRAM] Group ID sozlamasi:`, groupIdSetting);
-            console.log(`🔍 [TELEGRAM] Olingan Group ID: ${groupId} (type: ${typeof groupId})`);
 
             if (!groupId) {
                 console.error("❌ [TELEGRAM] Telegram guruh ID si topilmadi. Hisobot yuborilmadi.");
@@ -598,17 +583,13 @@ async function sendToTelegram(payload) {
                 const parsedId = parseInt(groupId, 10);
                 if (!isNaN(parsedId)) {
                     groupId = parsedId;
-                    console.log(`🔄 [TELEGRAM] Group ID string'dan number'ga o'tkazildi: ${groupId}`);
                 } else {
                     console.error(`❌ [TELEGRAM] Group ID noto'g'ri format: "${groupId}". Number bo'lishi kerak.`);
                     return;
                 }
             }
             
-            console.log(`📝 [TELEGRAM] formatAndSendReport chaqirilmoqda. Group ID: ${groupId} (type: ${typeof groupId})`);
             await formatAndSendReport({ ...payload, group_id: groupId });
-            console.log(`✅ [TELEGRAM] formatAndSendReport yakunlandi.`);
-
         } else if ([
             'secret_word_request', 
             'magic_link_request', 
@@ -624,7 +605,7 @@ async function sendToTelegram(payload) {
                 const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
                 const adminChatId = adminChatIdSetting ? adminChatIdSetting.value : null;
                 
-                console.log(`👤 [TELEGRAM] Admin chat ID tekshiruvi. Type: ${type}, Admin Chat ID: ${adminChatId}`);
+
                 
                 if (!adminChatId) {
                     console.error(`❌ [TELEGRAM] Admin chat ID topilmadi. Type: ${type}, Xabarni yuborib bo'lmaydi.`);
@@ -635,9 +616,9 @@ async function sendToTelegram(payload) {
                 payload.admin_chat_id = adminChatId;
             }
             
-            console.log(`🔄 [TELEGRAM] handleSecurityRequest chaqirilmoqda. Type: ${type}`);
+
             await handleSecurityRequest(payload);
-            console.log(`✅ [TELEGRAM] handleSecurityRequest yakunlandi. Type: ${type}`);
+
         }
 
     } catch (error) {
@@ -648,12 +629,12 @@ async function sendToTelegram(payload) {
 
 const initializeBot = async (botToken, options = { polling: true }) => {
     if (!botToken) {
-        console.warn("Bot tokeni berilmadi. Bot ishga tushirilmadi.");
+
         return;
     }
 
     if (bot && botIsInitialized) {
-        console.log("Bot qayta ishga tushirilmoqda...");
+
         if (bot.isPolling()) {
             await bot.stopPolling();
         }
@@ -666,11 +647,9 @@ const initializeBot = async (botToken, options = { polling: true }) => {
     botIsInitialized = true;
 
     if (options.polling) {
-        console.log("✅ Telegram bot (polling rejimi) muvaffaqiyatli ishga tushdi.");
+        // Bot polling rejimida ishga tushdi
     } else {
-        console.log("✅ Telegram bot (webhook rejimi) uchun tayyor.");
-        console.log("📝 [BOT] Event handler'lar o'rnatilmoqda...");
-        console.log(`📝 [BOT] Bot instance mavjud: ${!!bot}, Bot token: ${botToken?.substring(0, 10)}...`);
+        // Bot webhook rejimi uchun tayyor
     }
 
     bot.on('polling_error', (error) => {
@@ -678,13 +657,13 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         if (error.code === 'ETELEGRAM' && error.message && error.message.includes('409')) {
             if (!pollingConflictHandled) {
                 pollingConflictHandled = true;
-                console.warn('⚠️ [BOT] 409 Conflict: Boshqa bot instance allaqachon polling qilmoqda.');
-                console.warn('⚠️ [BOT] Bu bot instance polling rejimini to\'xtatmoqda. Webhook rejimiga o\'tish tavsiya etiladi.');
+
+
                 try {
                     if (bot && bot.isPolling && bot.isPolling()) {
                         bot.stopPolling();
                         botIsInitialized = false;
-                        console.log('✅ [BOT] Polling to\'xtatildi. Webhook rejimini ishlatish tavsiya etiladi.');
+
                     }
                 } catch (stopError) {
                     console.error('❌ [BOT] Polling to\'xtatishda xatolik:', stopError);
@@ -715,12 +694,11 @@ const initializeBot = async (botToken, options = { polling: true }) => {
             const chatId = msg.chat.id;
             const code = match[1];
             
-            console.log(`🤖 [BOT] /start komandasi qabul qilindi. Chat ID: ${chatId}, Code: ${code || 'yo\'q'}`);
+
 
             // Bot bog'lash tokeni tekshiruvi (bot_connect_*)
             if (code && code.startsWith('bot_connect_')) {
                 const token = code;
-                console.log(`🔗 [BOT] Bot bog'lash tokeni. Token: ${token.substring(0, 30)}..., Chat ID: ${chatId}`);
                 
                 try {
                     // Token tekshiruvi
@@ -761,7 +739,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     // Token o'chirish (bir marta ishlatiladi)
                     await db('magic_links').where({ token: token }).del();
 
-                    console.log(`✅ [BOT] Bot obunasi tasdiqlandi. User ID: ${user.id}, Username: ${user.username}, Chat ID: ${chatId}`);
+
                     
                     await safeSendMessage(chatId, `✅ <b>Muvaffaqiyatli!</b>\n\nSizning akkauntingiz (<b>${escapeHtml(user.username)}</b>) Telegram bot bilan bog'landi.\n\nEndi tizimga kirishingiz mumkin.`);
 
@@ -776,8 +754,6 @@ const initializeBot = async (botToken, options = { polling: true }) => {
             if (code && code.startsWith('subscribe_')) {
                 const newUserIdStr = code.split('_')[1];
                 const newUserId = parseInt(newUserIdStr, 10);
-                
-                console.log(`🔗 [BOT] Subscribe so'rovi. Code: ${code}, User ID (string): ${newUserIdStr}, User ID (int): ${newUserId}, Chat ID: ${chatId}`);
             
                 if (isNaN(newUserId) || newUserId <= 0) {
                     console.error(`❌ [BOT] Noto'g'ri User ID: ${newUserIdStr}`);
@@ -799,12 +775,10 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                                 return;
                             }
                             
-                            console.log(`🗑️ [BOT] Eski, keraksiz foydalanuvchi yozuvi (ID: ${existingUserWithTg.id}) tozalanmoqda...`);
                             await db('users').where({ id: existingUserWithTg.id }).del();
                         }
                     }
 
-                    console.log(`🔍 [BOT] Bazadan foydalanuvchini qidiryapman. User ID: ${newUserId} (type: ${typeof newUserId})`);
                     const user = await db('users').where({ id: newUserId }).first();
                     
                     if (!user) {
@@ -816,10 +790,10 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         return;
                     }
                     
-                    console.log(`✅ [BOT] Foydalanuvchi topildi: ID=${user.id}, Username=${user.username}, Status=${user.status}`);
+
 
                     if (user.status !== 'pending_telegram_subscription') {
-                        console.log(`⚠️ [BOT] Foydalanuvchi statusi noto'g'ri. Kutilgan: pending_telegram_subscription, Hozirgi: ${user.status}`);
+
                         await safeSendMessage(chatId, `✅ Siz allaqachon obuna bo'lgansiz yoki so'rovingiz ko'rib chiqilmoqda.`);
                         return;
                     }
@@ -830,7 +804,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         status: 'pending_approval'
                     });
 
-                    console.log(`✅ [BOT] Foydalanuvchi botga ulandi. User ID: ${newUserId}, Status: pending_approval`);
+
                     
                     await safeSendMessage(chatId, `✅ Rahmat! Siz botga muvaffaqiyatli obuna bo'ldingiz. \n\nSo'rovingiz ko'rib chiqish uchun adminga yuborildi. Tasdiqlanishini kuting.`);
 
@@ -840,7 +814,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         username: user.username,
                         fullname: user.fullname
                     });
-                    console.log(`✅ [BOT] Admin'ga tasdiqlash so'rovi yuborildi.`);
+
 
                 } catch (error) {
                 console.error("Yangi foydalanuvchi obunasida xatolik:", error);
@@ -860,7 +834,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         .insert({ key: 'telegram_admin_chat_id', value: String(chatId) })
                         .onConflict('key')
                         .merge();
-                    console.log(`✅ [BOT] Admin chat ID avtomatik saqlandi. Chat ID: ${chatId}, User: ${user.username}`);
+
                     await safeSendMessage(chatId, `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\nSizning Chat ID'ingiz avtomatik saqlandi.`);
                 } else {
                     await safeSendMessage(chatId, `Salom! Bu hisobot tizimining rasmiy boti.`);
@@ -887,9 +861,6 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         try {
             const chatId = msg.chat.id;
             const text = msg.text;
-            
-            console.log(`💬 [BOT] Xabar qabul qilindi. Chat ID: ${chatId}, Text: ${text?.substring(0, 50) || 'yo\'q'}`);
-            console.log(`💬 [BOT] message event handler ishga tushdi. Message:`, JSON.stringify(msg, null, 2));
 
         // Admin chat ID'ni avtomatik saqlash (super admin yoki admin uchun)
         try {
@@ -901,7 +872,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         .insert({ key: 'telegram_admin_chat_id', value: String(chatId) })
                         .onConflict('key')
                         .merge();
-                    console.log(`✅ [BOT] Admin chat ID avtomatik saqlandi. Chat ID: ${chatId}, User: ${user.username}`);
+
                 }
             }
         } catch (error) {
@@ -913,7 +884,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         const state = userStates[chatId];
         if (state && state.state === 'awaiting_secret_word') {
             const { user_id } = state;
-            console.log(`🔐 [BOT] Secret word kutilmoqda. User ID: ${user_id}, Chat ID: ${chatId}`);
+
             try {
                 const response = await fetch(new URL('api/telegram/verify-secret-word', NODE_SERVER_URL).href, {
                     method: 'POST',
@@ -923,24 +894,24 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                 const result = await response.json();
 
                 if (result.status === 'success') {
-                    console.log(`✅ [BOT] Secret word to'g'ri. Magic link yuborilmoqda. User ID: ${user_id}`);
+
                     const magicLink = new URL(path.join('api/verify-session/', result.magic_token), NODE_SERVER_URL).href;
                     const messageText = `Salom, <b>${escapeHtml(msg.from.username)}</b>! \n\nYangi qurilmadan kirishni tasdiqlash uchun quyidagi tugmani bosing. Bu havola 5 daqiqa amal qiladi.`;
                     const keyboard = { inline_keyboard: [[{ text: "✅ Yangi Qurilmada Kirish", url: magicLink }]] };
                     await safeSendMessage(chatId, messageText, { reply_markup: keyboard });
                     delete userStates[chatId];
-                    console.log(`✅ [BOT] Magic link yuborildi. User ID: ${user_id}`);
+
                 } else if (result.status === 'locked') {
-                    console.log(`🔒 [BOT] Secret word urinishlari bloklandi. User ID: ${user_id}`);
+
                     await safeSendMessage(chatId, "Xavfsizlik qoidasi buzildi. Kirishga urinish bloklandi. Administrator bilan bog'laning.");
                     delete userStates[chatId];
                 } else {
                     state.attempts_left--;
-                    console.log(`⚠️ [BOT] Secret word noto'g'ri. Qolgan urinishlar: ${state.attempts_left}, User ID: ${user_id}`);
+
                     if (state.attempts_left > 0) {
                         await safeSendMessage(chatId, `Maxfiy so'z noto'g'ri. Qayta urinib ko'ring. (Qolgan urinishlar: ${state.attempts_left})`);
                     } else {
-                        console.log(`🔒 [BOT] Secret word urinishlari tugadi. Admin'ga xabar yuborilmoqda. User ID: ${user_id}`);
+
                         await safeSendMessage(chatId, "Urinishlar soni tugadi. Jarayon bloklandi.");
                         fetch(new URL('api/telegram/notify-admin-lock', NODE_SERVER_URL).href, {
                             method: 'POST',
@@ -969,11 +940,10 @@ const initializeBot = async (botToken, options = { polling: true }) => {
     });
 
     bot.on('callback_query', async (query) => {
-        console.log(`🔄 [BOT] callback_query event handler ishga tushdi. Query:`, JSON.stringify(query, null, 2));
         const adminChatId = query.message.chat.id;
         const { data, message } = query;
         
-        console.log(`🔘 [BOT] Callback query qabul qilindi. Chat ID: ${adminChatId}, Data: ${data}`);
+
         
         const originalText = message.text;
 
@@ -1051,24 +1021,15 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     const text = `⚠️ <b>Obuna Bekor Qilindi!</b> \n\nFoydalanuvchi <b>${escapeHtml(user.fullname || user.username)}</b> botga obunani bekor qildi. \n\nUning tizimga kirish imkoniyatlari cheklanishi mumkin.`;
                     await safeSendMessage(adminChatId, text);
                 }
-                console.log(`Foydalanuvchi ${user.username} (ID: ${user.id}) botdan chiqib ketdi.`);
+                // User left bot
             }
         } else if (newStatus === 'member') {
             const user = await db('users').where({ telegram_chat_id: chatId }).first();
             if (user) {
-                console.log(`Foydalanuvchi ${user.username} (ID: ${user.id}) botga qayta qo'shildi.`);
+                // User rejoined bot
             }
         }
     });
-    
-    // Event handler'lar o'rnatilganligini tasdiqlash
-    console.log(`✅ [BOT] Barcha event handler'lar o'rnatildi. Bot ready: ${!!bot}, Initialized: ${botIsInitialized}`);
-    console.log(`✅ [BOT] Event handler'lar ro'yxati:`);
-    console.log(`   - onText(/\\/start/)`);
-    console.log(`   - on('message')`);
-    console.log(`   - on('callback_query')`);
-    console.log(`   - on('my_chat_member')`);
-    console.log(`   - on('polling_error')`);
 };
 
 const getBot = () => {

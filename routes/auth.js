@@ -146,11 +146,8 @@ router.post('/register', async (req, res) => {
     }
 
     try {
-        console.log(`📝 [REGISTER] Ro'yxatdan o'tish so'rovi. Username: ${username}, Fullname: ${fullname}`);
-        
         const existingUser = await db('users').where({ username: username }).first();
         if (existingUser) {
-            console.log(`❌ [REGISTER] Username allaqachon mavjud: ${username}`);
             return res.status(409).json({ message: "Bu nomdagi foydalanuvchi allaqachon mavjud." });
         }
 
@@ -172,16 +169,12 @@ router.post('/register', async (req, res) => {
         // SQLite'da insert qilganda ID qaytariladi
         const userId = Array.isArray(insertResult) ? insertResult[0] : insertResult;
         
-        console.log(`✅ [REGISTER] Foydalanuvchi yaratildi. User ID: ${userId} (type: ${typeof userId}), Status: pending_telegram_subscription`);
-        console.log(`🔍 [REGISTER] Insert result: ${JSON.stringify(insertResult)}`);
-        
         // Tekshirish: foydalanuvchi haqiqatan yaratildimi?
         const createdUser = await db('users').where({ id: userId }).first();
         if (!createdUser) {
             console.error(`❌ [REGISTER] XATOLIK: Foydalanuvchi yaratildi, lekin bazadan topilmadi! User ID: ${userId}`);
             return res.status(500).json({ message: "Foydalanuvchi yaratishda xatolik yuz berdi." });
         }
-        console.log(`✅ [REGISTER] Tekshiruv: Foydalanuvchi bazada mavjud. ID: ${createdUser.id}, Username: ${createdUser.username}, Status: ${createdUser.status}`);
         
         // Asl parolni vaqtinchalik saqlash
         await db('pending_registrations').insert({
@@ -190,27 +183,21 @@ router.post('/register', async (req, res) => {
             expires_at: new Date(Date.now() + 15 * 60 * 1000) // 15 daqiqa
         });
         
-        console.log(`💾 [REGISTER] Vaqtinchalik ma'lumotlar saqlandi. User ID: ${userId}`);
-
         const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
         const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
 
         if (!botUsername) {
-            console.log(`⚠️ [REGISTER] Bot username topilmadi. Status: pending_approval ga o'zgartirildi`);
         await db('users').where({ id: userId }).update({ status: 'pending_approval' });
         
-            console.log(`📤 [REGISTER] Admin'ga yangi foydalanuvchi so'rovi yuborilmoqda...`);
         await sendToTelegram({
             type: 'new_user_request',
             user_id: userId,
             username: username,
             fullname: fullname
         });
-            console.log(`✅ [REGISTER] Admin'ga so'rov yuborildi. User ID: ${userId}`);
         
             // WebSocket orqali realtime yuborish - yangi foydalanuvchi ro'yxatdan o'tdi
             if (global.broadcastWebSocket) {
-                console.log(`📡 [REGISTER] Yangi foydalanuvchi ro'yxatdan o'tdi, WebSocket orqali yuborilmoqda...`);
                 global.broadcastWebSocket('user_registered', {
                     user: {
                         id: userId,
@@ -221,7 +208,6 @@ router.post('/register', async (req, res) => {
                     },
                     username: username
                 });
-                console.log(`✅ [REGISTER] WebSocket yuborildi: user_registered`);
             }
         
             return res.status(201).json({ 
@@ -235,7 +221,6 @@ router.post('/register', async (req, res) => {
 
         // WebSocket orqali realtime yuborish - yangi foydalanuvchi ro'yxatdan o'tdi
         if (global.broadcastWebSocket) {
-            console.log(`📡 [REGISTER] Yangi foydalanuvchi ro'yxatdan o'tdi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('user_registered', {
                 user: {
                     id: userId,
@@ -246,11 +231,9 @@ router.post('/register', async (req, res) => {
                 },
                 username: username
             });
-            console.log(`✅ [REGISTER] WebSocket yuborildi: user_registered`);
         }
 
         const connectLink = `https://t.me/${botUsername}?start=subscribe_${userId}`;
-        console.log(`🔗 [REGISTER] Bot obuna havolasi yaratildi. Link: ${connectLink}, User ID: ${userId}`);
 
         res.status(201).json({
             status: 'subscription_required',
@@ -273,16 +256,12 @@ router.post('/login', async (req, res) => {
     const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const userAgent = req.headers['user-agent'];
 
-    console.log(`🔐 [LOGIN] Login so'rovi. Username: ${username}, IP: ${ipAddress}`);
-
     if (!username || !password) {
-        console.warn(`⚠️ [LOGIN] Login yoki parol kiritilmagan`);
         return res.status(400).json({ message: "Login va parol kiritilishi shart." });
     }
 
     try {
         const user = await userRepository.findByUsername(username);
-        console.log(`🔍 [LOGIN] User topildi: ${user ? `ID: ${user.id}, Status: ${user.status}` : 'topilmadi'}`);
 
         if (!user) {
             // Background'da log yozish
@@ -423,13 +402,11 @@ router.post('/login', async (req, res) => {
         
         // Online statusni real-time yangilash
         if (global.broadcastWebSocket) {
-            console.log(`📡 [LOGIN] Foydalanuvchi tizimga kirdi, online status yangilanmoqda...`);
             global.broadcastWebSocket('user_status_changed', {
                 userId: user.id,
                 username: user.username,
                 isOnline: true
             });
-            console.log(`✅ [LOGIN] WebSocket yuborildi: user_status_changed (online)`);
         }
 
         // Login attempts'ni reset qilish (agar kerak bo'lsa)
@@ -456,8 +433,6 @@ router.post('/login', async (req, res) => {
 
         if (!isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId)) {
             // Bot obunasi yo'q - bot bog'lash sahifasiga redirect
-            console.log(`⚠️ [LOGIN] Bot obunasi yo'q. User ID: ${user.id}, Username: ${user.username}`);
-            
             // Sessiya yaratiladi, lekin bot bog'languncha dashboard ochilmaydi
             req.session.user = {
                 id: user.id,
@@ -478,9 +453,6 @@ router.post('/login', async (req, res) => {
                 reason: 'Bot subscription required'
             }).catch(err => console.error('Log yozishda xatolik:', err));
 
-            const elapsedTime = Date.now() - startTime;
-            console.log(`✅ [LOGIN] Login muvaffaqiyatli, lekin bot obunasi kerak. User ID: ${user.id}, Vaqt: ${elapsedTime}ms`);
-            
             return res.json({ 
                 message: "Login muvaffaqiyatli, lekin Telegram bot bilan bog'lash kerak.", 
                 user: req.session.user, 
@@ -504,17 +476,12 @@ router.post('/login', async (req, res) => {
         
         // Online statusni real-time yangilash
         if (global.broadcastWebSocket) {
-            console.log(`📡 [LOGIN] Foydalanuvchi tizimga kirdi, online status yangilanmoqda...`);
             global.broadcastWebSocket('user_status_changed', {
                 userId: user.id,
                 username: user.username,
                 isOnline: true
             });
-            console.log(`✅ [LOGIN] WebSocket yuborildi: user_status_changed (online)`);
         }
-        
-        const elapsedTime = Date.now() - startTime;
-        console.log(`✅ [LOGIN] Login muvaffaqiyatli. User ID: ${user.id}, Vaqt: ${elapsedTime}ms, Redirect: ${redirectUrl}`);
         
         res.json({ message: "Tizimga muvaffaqiyatli kirildi.", user: req.session.user, redirectUrl });
 
@@ -614,13 +581,11 @@ router.post('/logout', isAuthenticated, async (req, res) => {
     
     // Online statusni real-time yangilash (sessiya o'chirilishidan oldin)
     if (global.broadcastWebSocket) {
-        console.log(`📡 [LOGOUT] Foydalanuvchi tizimdan chiqdi, online status yangilanmoqda...`);
         global.broadcastWebSocket('user_status_changed', {
             userId: userId,
             username: username,
             isOnline: false
         });
-        console.log(`✅ [LOGOUT] WebSocket yuborildi: user_status_changed (offline)`);
     }
     
     req.session.destroy(err => {
@@ -789,7 +754,6 @@ router.post('/bot-connect/generate-token', async (req, res) => {
     // Agar sessiya mavjud bo'lsa, sessiyadagi username'ni ishlatish
     if (req.session && req.session.user && req.session.user.username) {
         username = req.session.user.username;
-        console.log(`🔗 [BOT-CONNECT] Sessiyadagi username ishlatilmoqda: ${username}`);
     }
     
     if (!username) {
@@ -846,7 +810,6 @@ router.post('/bot-connect/generate-token', async (req, res) => {
         // Bot havolasi yaratish
         const botLink = `https://t.me/${botUsername}?start=${token}`;
 
-        console.log(`🔗 [BOT-CONNECT] Token yaratildi. User ID: ${user.id}, Username: ${username}, Token: ${token.substring(0, 20)}...`);
 
         res.json({
             success: true,
@@ -902,7 +865,6 @@ router.post('/bot-connect/verify', async (req, res) => {
         // Token o'chirish (bir marta ishlatiladi)
         await db('magic_links').where({ token: token }).del();
 
-        console.log(`✅ [BOT-CONNECT] Bot obunasi tasdiqlandi. User ID: ${user.id}, Username: ${user.username}`);
 
         res.json({
             success: true,
