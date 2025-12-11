@@ -4660,6 +4660,185 @@ let currentRequestsFilter = {
     sort: 'newest'
 };
 
+// View mode for requests (grid or list)
+let currentRequestsViewMode = localStorage.getItem('requestsViewMode') || 'grid';
+
+// Render request card (grid view)
+function renderRequestCard(request) {
+    const initials = getInitials(request.full_name || request.fullname || request.username);
+    const statusBadge = getRequestStatusBadge(request);
+    const createdDate = request.created_at ? formatDateTime(request.created_at) : 'Noma\'lum';
+    const fullName = request.full_name || request.fullname || 'Noma\'lum';
+    const username = request.username || 'noname';
+    const telegramId = request.telegram_id || request.telegram_chat_id;
+    const telegramUsername = request.telegram_username;
+    
+    return `
+        <div class="request-card" data-request-id="${request.id}">
+            <div class="request-card-header">
+                <div class="request-card-checkbox">
+                    <input type="checkbox" 
+                           class="request-checkbox" 
+                           data-request-id="${request.id}"
+                           ${selectedRequests.has(request.id) ? 'checked' : ''}>
+                </div>
+                <div class="request-avatar">${initials}</div>
+                <div class="request-card-info">
+                    <h3 class="request-card-name">${escapeHtml(fullName)}</h3>
+                    <p class="request-card-username">@${escapeHtml(username)}</p>
+                </div>
+                ${statusBadge}
+            </div>
+            
+            <div class="request-card-details">
+                ${telegramId ? `
+                    <div class="request-detail-item">
+                        <i data-feather="send"></i>
+                        <span>Telegram ID: <strong>${telegramId}</strong></span>
+                    </div>
+                ` : ''}
+                ${telegramUsername ? `
+                    <div class="request-detail-item">
+                        <i data-feather="user"></i>
+                        <span>Telegram: <strong>@${escapeHtml(telegramUsername)}</strong></span>
+                    </div>
+                ` : ''}
+                ${request.status ? `
+                    <div class="request-detail-item">
+                        <i data-feather="info"></i>
+                        <span>Holat: <strong>${getStatusText(request.status)}</strong></span>
+                    </div>
+                ` : ''}
+            </div>
+            
+            <div class="request-timeline">
+                <i data-feather="clock"></i>
+                <span class="request-timeline-text">
+                    So'rov yuborilgan: <span class="request-timeline-date">${createdDate}</span>
+                </span>
+            </div>
+            
+            <div class="request-card-actions">
+                <button class="btn btn-success" onclick="window.approveRequest(${request.id})">
+                    <i data-feather="check"></i>
+                    <span>Tasdiqlash</span>
+                </button>
+                <button class="btn btn-danger" onclick="window.rejectRequest(${request.id})">
+                    <i data-feather="x"></i>
+                    <span>Rad etish</span>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Render request list item (list view)
+function renderRequestListItem(request) {
+    const initials = getInitials(request.full_name || request.fullname || request.username);
+    const statusBadge = getRequestStatusBadge(request);
+    const createdDate = request.created_at ? formatDateTime(request.created_at) : 'Noma\'lum';
+    const fullName = request.full_name || request.fullname || 'Noma\'lum';
+    const username = request.username || 'noname';
+    const telegramId = request.telegram_id || request.telegram_chat_id;
+    const telegramUsername = request.telegram_username;
+    
+    return `
+        <div class="request-list-item" data-request-id="${request.id}">
+            <div class="request-list-checkbox">
+                <input type="checkbox" 
+                       class="request-checkbox" 
+                       data-request-id="${request.id}"
+                       ${selectedRequests.has(request.id) ? 'checked' : ''}>
+            </div>
+            <div class="request-list-avatar">${initials}</div>
+            <div class="request-list-info">
+                <div class="request-list-name-row">
+                    <h3 class="request-list-name">${escapeHtml(fullName)}</h3>
+                    ${statusBadge}
+                </div>
+                <div class="request-list-meta">
+                    <span class="request-list-username">@${escapeHtml(username)}</span>
+                    ${telegramId ? `<span class="request-list-telegram-id">Telegram ID: ${telegramId}</span>` : ''}
+                    ${telegramUsername ? `<span class="request-list-telegram-username">@${escapeHtml(telegramUsername)}</span>` : ''}
+                    <span class="request-list-date">
+                        <i data-feather="clock"></i>
+                        ${createdDate}
+                    </span>
+                </div>
+            </div>
+            <div class="request-list-actions">
+                <button class="btn btn-success btn-sm" onclick="window.approveRequest(${request.id})">
+                    <i data-feather="check"></i>
+                    <span>Tasdiqlash</span>
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="window.rejectRequest(${request.id})">
+                    <i data-feather="x"></i>
+                    <span>Rad etish</span>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Apply requests view mode (grid or list)
+function applyRequestsViewMode() {
+    const container = document.getElementById('pending-users-list');
+    if (!container) return;
+    
+    // Remove existing classes
+    container.classList.remove('requests-grid', 'requests-list');
+    
+    // Add appropriate class
+    if (currentRequestsViewMode === 'list') {
+        container.classList.add('requests-list');
+    } else {
+        container.classList.add('requests-grid');
+    }
+    
+    // Update toggle buttons
+    const gridBtn = document.getElementById('requests-view-toggle-grid');
+    const listBtn = document.getElementById('requests-view-toggle-list');
+    
+    if (gridBtn && listBtn) {
+        if (currentRequestsViewMode === 'list') {
+            gridBtn.classList.remove('active');
+            listBtn.classList.add('active');
+        } else {
+            gridBtn.classList.add('active');
+            listBtn.classList.remove('active');
+        }
+        
+        // Replace icons after class change
+        if (window.feather) {
+            setTimeout(() => {
+                const viewToggleContainer = document.querySelector('.requests-view-toggle-buttons');
+                if (viewToggleContainer) {
+                    feather.replace({ root: viewToggleContainer });
+                }
+            }, 10);
+        }
+    }
+}
+
+// Toggle requests view mode
+export function toggleRequestsViewMode(mode) {
+    if (mode && (mode === 'grid' || mode === 'list')) {
+        currentRequestsViewMode = mode;
+    } else {
+        // Toggle between grid and list
+        currentRequestsViewMode = currentRequestsViewMode === 'grid' ? 'list' : 'grid';
+    }
+    
+    // Save to localStorage
+    localStorage.setItem('requestsViewMode', currentRequestsViewMode);
+    
+    // Apply view mode
+    applyRequestsViewMode();
+    
+    // Re-render requests
+    renderModernRequests();
+}
+
 // Render modern requests cards
 function renderModernRequests() {
     const container = document.getElementById('pending-users-list');
@@ -4712,74 +4891,16 @@ function renderModernRequests() {
         return;
     }
 
-    // Render cards
+    // Apply view mode
+    applyRequestsViewMode();
+    
+    // Render based on view mode
     container.innerHTML = requests.map(request => {
-        const initials = getInitials(request.full_name || request.fullname || request.username);
-        const statusBadge = getRequestStatusBadge(request);
-        // Aniq vaqt ko'rsatish
-        const createdDate = request.created_at ? formatDateTime(request.created_at) : 'Noma\'lum';
-        const fullName = request.full_name || request.fullname || 'Noma\'lum';
-        const username = request.username || 'noname';
-        const telegramId = request.telegram_id || request.telegram_chat_id;
-        const telegramUsername = request.telegram_username;
-        
-        return `
-            <div class="request-card" data-request-id="${request.id}">
-                <div class="request-card-header">
-                    <div class="request-card-checkbox">
-                        <input type="checkbox" 
-                               class="request-checkbox" 
-                               data-request-id="${request.id}"
-                               ${selectedRequests.has(request.id) ? 'checked' : ''}>
-                    </div>
-                    <div class="request-avatar">${initials}</div>
-                    <div class="request-card-info">
-                        <h3 class="request-card-name">${escapeHtml(fullName)}</h3>
-                        <p class="request-card-username">@${escapeHtml(username)}</p>
-                    </div>
-                    ${statusBadge}
-                </div>
-                
-                <div class="request-card-details">
-                    ${telegramId ? `
-                        <div class="request-detail-item">
-                            <i data-feather="send"></i>
-                            <span>Telegram ID: <strong>${telegramId}</strong></span>
-                        </div>
-                    ` : ''}
-                    ${telegramUsername ? `
-                        <div class="request-detail-item">
-                            <i data-feather="user"></i>
-                            <span>Telegram: <strong>@${escapeHtml(telegramUsername)}</strong></span>
-                        </div>
-                    ` : ''}
-                    ${request.status ? `
-                        <div class="request-detail-item">
-                            <i data-feather="info"></i>
-                            <span>Holat: <strong>${getStatusText(request.status)}</strong></span>
-                        </div>
-                    ` : ''}
-                </div>
-                
-                <div class="request-timeline">
-                    <i data-feather="clock"></i>
-                    <span class="request-timeline-text">
-                        So'rov yuborilgan: <span class="request-timeline-date">${createdDate}</span>
-                    </span>
-                </div>
-                
-                <div class="request-card-actions">
-                    <button class="btn btn-success" onclick="window.approveRequest(${request.id})">
-                        <i data-feather="check"></i>
-                        <span>Tasdiqlash</span>
-                    </button>
-                    <button class="btn btn-danger" onclick="window.rejectRequest(${request.id})">
-                        <i data-feather="x"></i>
-                        <span>Rad etish</span>
-                    </button>
-                </div>
-            </div>
-        `;
+        if (currentRequestsViewMode === 'list') {
+            return renderRequestListItem(request);
+        } else {
+            return renderRequestCard(request);
+        }
     }).join('');
 
     feather.replace();
@@ -5020,6 +5141,35 @@ function setupRequestsFilters() {
             }
         });
     }
+    
+    // View toggle buttons
+    const requestsGridBtn = document.getElementById('requests-view-toggle-grid');
+    const requestsListBtn = document.getElementById('requests-view-toggle-list');
+    
+    if (requestsGridBtn) {
+        const newGridBtn = requestsGridBtn.cloneNode(true);
+        requestsGridBtn.parentNode.replaceChild(newGridBtn, requestsGridBtn);
+        
+        newGridBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleRequestsViewMode('grid');
+        });
+    }
+    
+    if (requestsListBtn) {
+        const newListBtn = requestsListBtn.cloneNode(true);
+        requestsListBtn.parentNode.replaceChild(newListBtn, requestsListBtn);
+        
+        newListBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleRequestsViewMode('list');
+        });
+    }
+    
+    // Apply initial view mode
+    applyRequestsViewMode();
     
     // Bulk actions for selected requests
     const bulkApproveBtn = document.getElementById('requests-bulk-approve-btn');

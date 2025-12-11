@@ -11391,6 +11391,13 @@ tr:hover .quick-actions {
     min-height: 200px;
 }
 
+.requests-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+}
+
 /* Request Card */
 .request-card {
     background: white;
@@ -11640,6 +11647,203 @@ tr:hover .quick-actions {
 }
 
 .request-card-actions .btn-secondary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(100, 116, 139, 0.2);
+}
+
+/* Request List Item (List View) */
+.requests-list .request-list-item {
+    background: white;
+    border-radius: 12px;
+    border: 2px solid #e5e7eb;
+    padding: 16px 20px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 20px;
+    position: relative;
+    min-height: 80px;
+}
+
+.requests-list .request-list-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: linear-gradient(180deg, #7c3aed 0%, #6366f1 100%);
+    border-radius: 12px 0 0 12px;
+    transition: width 0.3s ease;
+}
+
+.requests-list .request-list-item:hover {
+    border-color: #7c3aed;
+    box-shadow: 0 8px 24px rgba(124, 58, 237, 0.12);
+    transform: translateX(4px);
+}
+
+.requests-list .request-list-item:hover::before {
+    width: 6px;
+}
+
+.requests-list .request-list-checkbox {
+    flex-shrink: 0;
+}
+
+.requests-list .request-list-checkbox input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    accent-color: #7c3aed;
+}
+
+.requests-list .request-list-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: bold;
+    color: white;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+}
+
+.requests-list .request-list-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.requests-list .request-list-name-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.requests-list .request-list-name {
+    font-size: 17px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.requests-list .request-list-meta {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.requests-list .request-list-username {
+    font-family: 'Monaco', 'Courier New', monospace;
+    color: #64748b;
+}
+
+.requests-list .request-list-telegram-id,
+.requests-list .request-list-telegram-username {
+    color: #64748b;
+}
+
+.requests-list .request-list-date {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #64748b;
+}
+
+.requests-list .request-list-date i {
+    width: 14px;
+    height: 14px;
+    color: #7c3aed;
+}
+
+.requests-list .request-list-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.requests-list .request-list-actions .btn {
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 100px;
+}
+
+.requests-list .request-list-actions .btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Hide card details in list view */
+.requests-list .request-card-details,
+.requests-list .request-timeline {
+    display: none;
+}
+
+/* Hide list item elements in grid view */
+.requests-grid .request-list-item {
+    display: none;
+}
+
+/* View Toggle Buttons for Requests */
+.requests-view-toggle-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.requests-view-toggle-buttons .view-toggle-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    border: 2px solid #e5e7eb;
+    background: white;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.requests-view-toggle-buttons .view-toggle-btn:hover {
+    border-color: #7c3aed;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.05);
+}
+
+.requests-view-toggle-buttons .view-toggle-btn.active {
+    background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+    border-color: #7c3aed;
+    color: white;
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+}
+
+.requests-view-toggle-buttons .view-toggle-btn svg {
+    width: 18px;
+    height: 18px;
+}
     border-color: #7c3aed;
     color: #7c3aed;
     transform: translateY(-2px);
