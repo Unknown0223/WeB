@@ -227,9 +227,14 @@ const initializeDB = async () => {
     
     for (const setting of telegramSettings) {
         const existing = await db('settings').where({ key: setting.key }).first();
-        if (!existing && setting.value) {
+        if (!existing) {
+            // Yangi setting yaratish (hatto bo'sh bo'lsa ham)
             await db('settings').insert(setting);
             log.debug(`Telegram sozlamasi qo'shildi: ${setting.key}`);
+        } else if (setting.value && (!existing.value || existing.value === '')) {
+            // Mavjud bo'sh setting'ni env variable'dan yangilash
+            await db('settings').where({ key: setting.key }).update({ value: setting.value });
+            log.debug(`Telegram sozlamasi yangilandi (env'dan): ${setting.key}`);
         }
     }
     
