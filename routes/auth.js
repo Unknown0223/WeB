@@ -180,11 +180,15 @@ router.post('/register', async (req, res) => {
         }
         
         // Asl parolni vaqtinchalik saqlash
-        await db('pending_registrations').insert({
-            user_id: userId,
-            user_data: JSON.stringify({ password, secret_word }), // ASL PAROL VA MAXFIY SO'Z
-            expires_at: new Date(Date.now() + 15 * 60 * 1000) // 15 daqiqa
-        });
+        // Agar mavjud bo'lsa, yangilash; bo'lmasa, yangi qo'shish
+        await db('pending_registrations')
+            .insert({
+                user_id: userId,
+                user_data: JSON.stringify({ password, secret_word }), // ASL PAROL VA MAXFIY SO'Z
+                expires_at: new Date(Date.now() + 15 * 60 * 1000) // 15 daqiqa
+            })
+            .onConflict('user_id')
+            .merge(); // Mavjud bo'lsa, yangilash
         
         const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
         const botUsername = botUsernameSetting ? botUsernameSetting.value : null;

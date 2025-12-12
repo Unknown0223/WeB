@@ -49,26 +49,33 @@ const isAuthenticated = async (req, res, next) => {
 
         // === YANGI MANTIQ: MAJBURIY TELEGRAM OBUNASINI TEKSHIRISH ===
         // Superadmin (role='superadmin' yoki 'super_admin') uchun bu tekshiruv o'tkazib yuboriladi.
+        // Agar foydalanuvchi allaqachon ACTIVE statusga ega bo'lsa, telegram tekshiruvi o'tkazib yuboriladi
+        // (chunki admin tasdiqlaganda telegram ulanganligini tekshirgan)
         const userRole = userSessionData.role;
-        const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
-        const hasTelegramChatId = !!user.telegram_chat_id;
-        
-        if (userRole !== 'superadmin' && userRole !== 'super_admin' && (!isTelegramConnected || !hasTelegramChatId)) {
-            const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
-            const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
+        const userStatus = user.status;
 
-            // Sessiyani tugatish
-            req.session.destroy((err) => {
-                if (err) log.error("Majburiy obuna tufayli sessiyani tugatishda xatolik:", err);
-                
-                // Foydalanuvchiga maxsus javob yuborish
-                return res.status(403).json({
-                    message: "Tizimdan foydalanish uchun Telegram botga obuna bo'lishingiz shart. Iltimos, qayta obuna bo'lib, tizimga qayta kiring.",
-                    action: 'force_telegram_subscription',
-                    subscription_link: botUsername ? `https://t.me/${botUsername}` : null
-                } );
-            });
-            return; // Keyingi middleware'ga o'tishni to'xtatish
+        // Active foydalanuvchilar uchun telegram tekshiruvi o'tkazib yuboriladi
+        if (userStatus !== 'active' && userRole !== 'superadmin' && userRole !== 'super_admin') {
+            const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
+            const hasTelegramChatId = !!user.telegram_chat_id;
+
+            if (!isTelegramConnected || !hasTelegramChatId) {
+                const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
+                const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
+
+                // Sessiyani tugatish
+                req.session.destroy((err) => {
+                    if (err) log.error("Majburiy obuna tufayli sessiyani tugatishda xatolik:", err);
+
+                    // Foydalanuvchiga maxsus javob yuborish
+                    return res.status(403).json({
+                        message: "Tizimdan foydalanish uchun Telegram botga obuna bo'lishingiz shart. Iltimos, qayta obuna bo'lib, tizimga qayta kiring.",
+                        action: 'force_telegram_subscription',
+                        subscription_link: botUsername ? `https://t.me/${botUsername}` : null
+                    } );
+                });
+                return; // Keyingi middleware'ga o'tishni to'xtatish
+            }
         }
         // ==========================================================
 
