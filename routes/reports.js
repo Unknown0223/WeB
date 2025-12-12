@@ -4,6 +4,9 @@ const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { sendToTelegram } = require('../utils/bot.js');
 const { filterReportsByRole, getVisibleLocations, getVisibleBrands } = require('../utils/roleFiltering.js');
 const ExcelJS = require('exceljs');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('REPORTS');
+
 
 const router = express.Router();
 
@@ -65,7 +68,7 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 }
                 // Agar rol shartlari belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
             } catch (roleFilterError) {
-                console.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own):', roleFilterError);
+                log.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own):', roleFilterError);
                 // Xatolik bo'lsa ham, o'zi yaratgan hisobotlarni ko'rsatamiz
             }
         } else {
@@ -91,9 +94,9 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 .limit(limit)
                 .offset(offset);
         } catch (queryError) {
-            console.error('[reports] Query xatolik:', queryError);
-            console.error('[reports] Query error message:', queryError.message);
-            console.error('[reports] Query error stack:', queryError.stack);
+            log.error('[reports] Query xatolik:', queryError);
+            log.error('[reports] Query error message:', queryError.message);
+            log.error('[reports] Query error stack:', queryError.stack);
             // Agar query xatolik bo'lsa, bo'sh ro'yxat qaytaramiz
             reports = [];
         }
@@ -135,7 +138,7 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                     }
                     // Agar rol shartlari belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
                 } catch (roleFilterError) {
-                    console.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own count):', roleFilterError);
+                    log.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own count):', roleFilterError);
                     // Xatolik bo'lsa ham, o'zi yaratgan hisobotlarni ko'rsatamiz
                 }
             }
@@ -164,9 +167,9 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 }
             }
         } catch (countError) {
-            console.error('[reports] Count xatolik:', countError);
-            console.error('[reports] Count error message:', countError.message);
-            console.error('[reports] Count error stack:', countError.stack);
+            log.error('[reports] Count xatolik:', countError);
+            log.error('[reports] Count error message:', countError.message);
+            log.error('[reports] Count error stack:', countError.stack);
             // Agar count xatolik bo'lsa, reports sonini total sifatida ishlatamiz
             total = reports.length;
         }
@@ -186,7 +189,7 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                     return acc;
                 }, {});
             } catch (editCountError) {
-                console.error('[reports] Edit count xatolik:', editCountError);
+                log.error('[reports] Edit count xatolik:', editCountError);
                 editCountMap = {};
             }
         }
@@ -205,7 +208,7 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
         filteredReports.forEach(report => {
             try {
                 if (!report || !report.data || !report.settings) {
-                    console.warn('[reports] Noto\'g\'ri report formati:', report);
+                    log.warn('[reports] Noto\'g\'ri report formati:', report);
                     return;
                 }
                 const parsedData = JSON.parse(report.data);
@@ -228,19 +231,19 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                     updated_at: report.updated_at
                 };
             } catch (parseError) {
-                console.error(`[reports] Report ${report?.id || 'unknown'} parse xatolik:`, parseError);
+                log.error(`[reports] Report ${report?.id || 'unknown'} parse xatolik:`, parseError);
                 // Xatolik bo'lsa, bu report'ni o'tkazib yuboramiz
             }
         });
 
         res.json({ reports: formattedReports, total, pages, currentPage: page });
     } catch (error) {
-        console.error("/api/reports GET xatoligi:", error);
-        console.error("Error message:", error.message);
-        console.error("Error stack:", error.stack);
-        console.error("Error name:", error.name);
+        log.error("/api/reports GET xatoligi:", error);
+        log.error("Error message:", error.message);
+        log.error("Error stack:", error.stack);
+        log.error("Error name:", error.name);
         if (error.sql) {
-            console.error("SQL query:", error.sql);
+            log.error("SQL query:", error.sql);
         }
         res.status(500).json({ 
             message: "Hisobotlarni yuklashda xatolik",
@@ -294,7 +297,7 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
         
         await logAction(user.id, 'create_report', 'report', reportId, { date, location, brand_id, ip: req.session.ip_address, userAgent: req.session.user_agent });
         
-        console.log(`📊 [REPORTS] Yangi hisobot yaratildi. Telegramga yuborilmoqda... Report ID: ${reportId}, Location: ${location}, Date: ${date}`);
+        log.debug(`📊 [REPORTS] Yangi hisobot yaratildi. Telegramga yuborilmoqda... Report ID: ${reportId}, Location: ${location}, Date: ${date}`);
         sendToTelegram({ 
             type: 'new', 
             report_id: reportId, 
@@ -310,7 +313,7 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [REPORTS] Yangi hisobot yaratildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [REPORTS] Yangi hisobot yaratildi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('new_report', {
                 reportId: reportId,
                 date: date,
@@ -320,7 +323,7 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
                 created_by: user.id,
                 created_by_username: user.username
             });
-            console.log(`✅ [REPORTS] WebSocket yuborildi: new_report`);
+            log.debug(`✅ [REPORTS] WebSocket yuborildi: new_report`);
         }
         
         res.status(201).json({ message: "Hisobot muvaffaqiyatli saqlandi.", reportId: reportId });
@@ -328,7 +331,7 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
         if (error.code === 'SQLITE_CONSTRAINT' || (error.message && error.message.includes('UNIQUE constraint failed'))) {
             return res.status(409).json({ message: `Ushbu sana (${date}) uchun "${location}" filialida hisobot allaqachon mavjud.` });
         }
-        console.error("/api/reports POST xatoligi:", error);
+        log.error("/api/reports POST xatoligi:", error);
         res.status(500).json({ message: "Hisobotni saqlashda kutilmagan xatolik" });
     }
 });
@@ -409,7 +412,7 @@ router.put('/:id', isAuthenticated, async (req, res) => {
 
         // === O'ZGARTIRISH: sendToTelegram'ga eski sana va filialni ham yuborish ===
         if (isDataChanged || isMetaChanged) {
-            console.log(`📊 [REPORTS] Hisobot tahrirlandi. Telegramga yuborilmoqda... Report ID: ${reportId}, Location: ${location}, Date: ${date}`);
+            log.debug(`📊 [REPORTS] Hisobot tahrirlandi. Telegramga yuborilmoqda... Report ID: ${reportId}, Location: ${location}, Date: ${date}`);
             sendToTelegram({ 
                 type: 'edit', 
                 report_id: reportId, 
@@ -429,7 +432,7 @@ router.put('/:id', isAuthenticated, async (req, res) => {
             
             // WebSocket orqali realtime yuborish
             if (global.broadcastWebSocket) {
-                console.log(`📡 [REPORTS] Hisobot tahrirlandi, WebSocket orqali yuborilmoqda...`);
+                log.debug(`📡 [REPORTS] Hisobot tahrirlandi, WebSocket orqali yuborilmoqda...`);
                 global.broadcastWebSocket('report_edited', {
                     reportId: reportId,
                     date: date,
@@ -441,7 +444,7 @@ router.put('/:id', isAuthenticated, async (req, res) => {
                     old_date: oldReport.report_date,
                     old_location: oldReport.location
                 });
-                console.log(`✅ [REPORTS] WebSocket yuborildi: report_edited`);
+                log.debug(`✅ [REPORTS] WebSocket yuborildi: report_edited`);
             }
         }
         
@@ -450,7 +453,7 @@ router.put('/:id', isAuthenticated, async (req, res) => {
         if (error.code === 'SQLITE_CONSTRAINT' || (error.message && error.message.includes('UNIQUE constraint failed'))) {
             return res.status(409).json({ message: `Ushbu sana (${date}) uchun "${location}" filialida boshqa hisobot allaqachon mavjud.` });
         }
-        console.error(`/api/reports/${reportId} PUT xatoligi:`, error);
+        log.error(`/api/reports/${reportId} PUT xatoligi:`, error);
         res.status(500).json({ message: "Hisobotni yangilashda xatolik." });
     }
 });
@@ -476,7 +479,7 @@ router.delete('/:id', isAuthenticated, hasPermission('reports:delete'), async (r
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [REPORTS] Hisobot o'chirildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [REPORTS] Hisobot o'chirildi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('report_deleted', {
                 reportId: reportId,
                 date: report.report_date,
@@ -484,13 +487,13 @@ router.delete('/:id', isAuthenticated, hasPermission('reports:delete'), async (r
                 deleted_by: user.id,
                 deleted_by_username: user.username
             });
-            console.log(`✅ [REPORTS] WebSocket yuborildi: report_deleted`);
+            log.debug(`✅ [REPORTS] WebSocket yuborildi: report_deleted`);
         }
 
         res.json({ message: `Hisobot #${reportId} muvaffaqiyatli o'chirildi.` });
 
     } catch (error) {
-        console.error(`/api/reports/${reportId} DELETE xatoligi:`, error);
+        log.error(`/api/reports/${reportId} DELETE xatoligi:`, error);
         res.status(500).json({ message: "Hisobotni o'chirishda kutilmagan server xatoligi." });
     }
 });
@@ -533,7 +536,7 @@ router.get('/:id/history', isAuthenticated, async (req, res) => {
         
         res.json(fullHistory);
     } catch (error) {
-        console.error(`/api/reports/${req.params.id}/history GET xatoligi:`, error);
+        log.error(`/api/reports/${req.params.id}/history GET xatoligi:`, error);
         res.status(500).json({ message: "Hisobot tarixini olishda xatolik" });
     }
 });
@@ -547,7 +550,7 @@ router.post('/export', isAuthenticated, async (req, res) => {
             return res.status(400).json({ message: "Jadval ma'lumotlari topilmadi." });
         }
         
-        console.log('📊 [REPORTS EXPORT] Excel yaratilmoqda...', { rows: tableData.length, columns: columns?.length });
+        log.debug('📊 [REPORTS EXPORT] Excel yaratilmoqda...', { rows: tableData.length, columns: columns?.length });
         
         // Excel workbook yaratish
         const workbook = new ExcelJS.Workbook();
@@ -647,10 +650,10 @@ router.post('/export', isAuthenticated, async (req, res) => {
         await workbook.xlsx.write(res);
         res.end();
         
-        console.log('✅ [REPORTS EXPORT] Excel fayl muvaffaqiyatli yaratildi:', fileName);
+        log.debug('✅ [REPORTS EXPORT] Excel fayl muvaffaqiyatli yaratildi:', fileName);
     } catch (error) {
-        console.error('/api/reports/export POST xatoligi:', error);
-        console.error('Error stack:', error.stack);
+        log.error('/api/reports/export POST xatoligi:', error);
+        log.error('Error stack:', error.stack);
         res.status(500).json({ 
             message: "Excel faylni yaratishda xatolik.",
             error: process.env.NODE_ENV === 'development' ? error.message : undefined

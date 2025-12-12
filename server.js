@@ -3,6 +3,11 @@ const express = require('express');
 const path = require('path');
 const http = require('http');
 const WebSocket = require('ws');
+const { createLogger } = require('./utils/logger.js');
+
+const log = createLogger('SERVER');
+const wsLog = createLogger('WEBSOCKET');
+const botLog = createLogger('BOT');
 
 const app = express();
 const server = http.createServer(app);
@@ -63,9 +68,7 @@ app.post('/telegram-webhook/:token', async (req, res) => {
         const botToken = tokenSetting ? tokenSetting.value : null;
 
         if (!bot || !botToken) {
-            console.error(`❌ [WEBHOOK] Bot yoki token mavjud emas!`);
-            console.error(`   - Bot: ${!!bot}`);
-            console.error(`   - Token: ${!!botToken}`);
+            log.error('[WEBHOOK] Bot yoki token mavjud emas!', { bot: !!bot, token: !!botToken });
             return res.status(503).json({ error: 'Bot ishga tushirilmagan' });
         }
 
@@ -80,16 +83,13 @@ app.post('/telegram-webhook/:token', async (req, res) => {
         try {
             bot.processUpdate(req.body);
         } catch (error) {
-            console.error(`❌ [WEBHOOK] bot.processUpdate() xatolik:`, error);
-            console.error(`❌ [WEBHOOK] Error stack:`, error.stack);
+            log.error('[WEBHOOK] bot.processUpdate() xatolik:', error.message);
             return res.status(500).json({ error: 'Update processing failed' });
         }
         
         res.status(200).json({ ok: true });
     } catch (error) {
-        console.error('❌ [WEBHOOK] Endpoint xatoligi:', error.message);
-        console.error('❌ [WEBHOOK] Error stack:', error.stack);
-        console.error('❌ [WEBHOOK] Request body:', JSON.stringify(req.body, null, 2));
+        log.error('[WEBHOOK] Endpoint xatoligi:', error.message);
         
         // Xatolik bo'lsa ham 200 qaytaramiz, chunki Telegram qayta yuboradi
         res.status(200).json({ ok: false, error: error.message });
@@ -180,7 +180,7 @@ const canAccessAdminPanel = (req, res, next) => {
     const userPermissions = req.session.user?.permissions || [];
     
     // Super admin yoki admin barcha cheklovlardan ozod
-    if (userRole === 'super_admin' || userRole === 'admin') {
+    if (userRole === 'superadmin' || userRole === 'super_admin' || userRole === 'admin') {
         return next();
     }
     
@@ -229,7 +229,7 @@ wss.on('connection', (ws, req) => {
                 }
             });
         } catch (error) {
-            console.error(`❌ [WEBSOCKET] Xabarni qayta ishlashda xato:`, error);
+            wsLog.error('Xabarni qayta ishlashda xato:', error.message);
         }
     });
     
@@ -238,7 +238,7 @@ wss.on('connection', (ws, req) => {
     });
     
     ws.on('error', (error) => {
-        console.error(`❌ [WEBSOCKET] Xatolik. IP: ${clientIp}, Error:`, error.message);
+        wsLog.error(`Xatolik. IP: ${clientIp}`, error.message);
     });
     
     // Ping/Pong uchun
@@ -250,7 +250,7 @@ wss.on('connection', (ws, req) => {
 
 // WebSocket upgrade xatoliklarini boshqarish
 wss.on('error', (error) => {
-    console.error(`❌ [WEBSOCKET] Server xatosi:`, error);
+    wsLog.error('Server xatosi:', error.message);
 });
 
 // Har 30 soniyada ping yuborish (ulanish holatini tekshirish)
@@ -269,18 +269,14 @@ wss.on('close', () => {
 // Broadcast funksiyasi (boshqa routerlar uchun)
 global.broadcastWebSocket = (type, payload) => {
     const message = JSON.stringify({ type, payload });
-    let sentCount = 0;
-    let errorCount = 0;
     
     wss.clients.forEach((client) => {
         try {
             if (client.readyState === WebSocket.OPEN) {
                 client.send(message);
-                sentCount++;
             }
         } catch (error) {
-            errorCount++;
-            console.error(`❌ [BROADCAST] WebSocket yuborishda xatolik:`, error);
+            wsLog.error('WebSocket yuborishda xatolik:', error.message);
         }
     });
 };
@@ -295,7 +291,7 @@ global.broadcastWebSocket = (type, payload) => {
 
         // Serverni ishga tushirish
         server.listen(PORT, '0.0.0.0', () => {
-            // Server started successfully
+            log.info(`Server ${PORT} portda ishga tushdi`);
 
             // PM2 uchun ready signal
             if (process.send) {
@@ -332,9 +328,9 @@ global.broadcastWebSocket = (type, payload) => {
                         if (response.data.ok) {
                             // Webhook rejimida botni ishga tushirish
                             await initializeBot(botToken, { polling: false });
+                            botLog.success('Webhook muvaffaqiyatli o\'rnatildi');
                         } else {
-                            console.error(`❌ [BOT] Telegram webhookni o'rnatishda xatolik:`, response.data.description);
-                            console.error(`   - Response: ${JSON.stringify(response.data)}`);
+                            botLog.error('Telegram webhookni o\'rnatishda xatolik:', response.data.description);
                             
                             // Fallback: polling rejimi (faqat development uchun)
                             if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
@@ -342,14 +338,7 @@ global.broadcastWebSocket = (type, payload) => {
                             }
                         }
                     } catch (error) {
-                        console.error(`❌ [BOT] Telegram API'ga ulanishda xatolik:`, error.message);
-                        if (error.response) {
-                            console.error(`   - Status: ${error.response.status}`);
-                            console.error(`   - Data: ${JSON.stringify(error.response.data)}`);
-                        }
-                        if (error.request) {
-                            console.error(`   - Request: ${JSON.stringify(error.request)}`);
-                        }
+                        botLog.error('Telegram API\'ga ulanishda xatolik:', error.message);
                         
                         // Fallback: polling rejimi (faqat development uchun)
                         if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
@@ -360,25 +349,27 @@ global.broadcastWebSocket = (type, payload) => {
                     // Lokal yoki webhook sozlanmagan - polling rejimi (faqat development uchun)
                     if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
                         await initializeBot(botToken, { polling: true });
+                        botLog.info('Polling rejimida ishga tushdi');
                     }
                 }
                 })(); // Async IIFE - bot initialization server bloklamaydi
             }
         });
     } catch (err) {
-        console.error("❌ Serverni ishga tushirishda DB yoki Bot bilan bog'liq xatolik:", err);
+        log.error('Serverni ishga tushirishda xatolik:', err.message);
         process.exit(1);
     }
 })();
 
 // Graceful shutdown funksiyasi
 async function gracefulShutdown(signal) {
+    log.info(`${signal} signali qabul qilindi. Graceful shutdown...`);
     
     let shutdownTimeout;
     
     // Timeout - agar 10 soniyada to'xtatilmasa, majburiy to'xtatish
     shutdownTimeout = setTimeout(() => {
-        console.error('❌ [SERVER] Graceful shutdown vaqti tugadi. Majburiy to\'xtatish...');
+        log.error('Graceful shutdown vaqti tugadi. Majburiy to\'xtatish...');
         process.exit(1);
     }, 10000);
     
@@ -390,7 +381,7 @@ async function gracefulShutdown(signal) {
             try {
                 await bot.stopPolling();
             } catch (botError) {
-                console.error('⚠️ [SERVER] Bot polling to\'xtatishda xatolik:', botError.message);
+                log.warn('Bot polling to\'xtatishda xatolik:', botError.message);
             }
         }
         
@@ -426,16 +417,16 @@ async function gracefulShutdown(signal) {
             try {
                 await db.destroy();
             } catch (dbError) {
-                console.error('⚠️ [SERVER] Database yopishda xatolik:', dbError.message);
+                log.warn('Database yopishda xatolik:', dbError.message);
             }
         }
         
         clearTimeout(shutdownTimeout);
-        // Graceful shutdown completed
+        log.success('Graceful shutdown completed');
         process.exit(0);
         
     } catch (error) {
-        console.error('❌ [SERVER] Graceful shutdown xatolik:', error);
+        log.error('Graceful shutdown xatolik:', error.message);
         clearTimeout(shutdownTimeout);
         process.exit(1);
     }
@@ -452,11 +443,11 @@ process.on('SIGTERM', () => {
 
 // Unhandled promise rejection
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ [SERVER] Unhandled Rejection at:', promise, 'reason:', reason);
+    log.error('Unhandled Rejection:', reason);
 });
 
 // Uncaught exception
 process.on('uncaughtException', (error) => {
-    console.error('❌ [SERVER] Uncaught Exception:', error);
+    log.error('Uncaught Exception:', error.message);
     process.exit(1);
 });

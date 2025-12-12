@@ -1,4 +1,7 @@
 const { db } = require('../db.js');
+const { createLogger } = require('./logger.js');
+const log = createLogger('USERACCESSFILTER');
+
 
 /**
  * Universal foydalanuvchi access filter

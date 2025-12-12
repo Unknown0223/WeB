@@ -1,6 +1,9 @@
 const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated } = require('../middleware/auth.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('SECURITY');
+
 
 const router = express.Router();
 
@@ -44,7 +47,7 @@ router.get('/statistics', isAuthenticated, async (req, res) => {
             blocked_ips: blockedIpsCount
         });
     } catch (error) {
-        console.error('GET /api/security/statistics xatoligi:', error);
+        log.error('GET /api/security/statistics xatoligi:', error);
         res.status(500).json({ message: "Statistikani yuklashda xatolik." });
     }
 });
@@ -133,7 +136,7 @@ router.get('/logs', isAuthenticated, async (req, res) => {
 
         res.json(formattedLogs);
     } catch (error) {
-        console.error('GET /api/security/logs xatoligi:', error);
+        log.error('GET /api/security/logs xatoligi:', error);
         res.status(500).json({ message: "Loglarni yuklashda xatolik." });
     }
 });
@@ -166,7 +169,7 @@ router.get('/settings', isAuthenticated, async (req, res) => {
 
         res.json(settings);
     } catch (error) {
-        console.error('GET /api/security/settings xatoligi:', error);
+        log.error('GET /api/security/settings xatoligi:', error);
         res.status(500).json({ message: "Sozlamalarni yuklashda xatolik." });
     }
 });
@@ -203,7 +206,7 @@ router.post('/settings', isAuthenticated, async (req, res) => {
         }
 
         // Hozircha console'ga yozib qo'yamiz, keyinchalik database'ga saqlaymiz
-        console.log('Yangi xavfsizlik sozlamalari:', settings);
+        log.debug('Yangi xavfsizlik sozlamalari:', settings);
         
         // Keyinroq settings jadvalida saqlaymiz
         // await db('settings').where({ key: 'security' }).update({ value: JSON.stringify(settings) });
@@ -213,7 +216,7 @@ router.post('/settings', isAuthenticated, async (req, res) => {
             settings: settings
         });
     } catch (error) {
-        console.error('POST /api/security/settings xatoligi:', error);
+        log.error('POST /api/security/settings xatoligi:', error);
         res.status(500).json({ message: "Sozlamalarni saqlashda xatolik." });
     }
 });

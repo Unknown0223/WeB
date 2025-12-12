@@ -6,6 +6,9 @@ const { refreshUserSessions } = require('../utils/sessionManager.js');
 const { sendToTelegram } = require('../utils/bot.js');
 const geoip = require('geoip-lite');
 const ExcelJS = require('exceljs');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('USERS');
+
 
 const router = express.Router();
 
@@ -71,7 +74,7 @@ router.get('/', isAuthenticated, hasPermission('users:view'), async (req, res) =
         });
         res.json(filteredUsers);
     } catch (error) {
-        console.error("/api/users GET xatoligi:", error);
+        log.error("/api/users GET xatoligi:", error);
         res.status(500).json({ message: "Foydalanuvchilarni olishda xatolik." });
     }
 });
@@ -108,7 +111,7 @@ router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req,
         
         res.json(formattedUsers);
     } catch (error) {
-        console.error("/api/users/pending GET xatoligi:", error);
+        log.error("/api/users/pending GET xatoligi:", error);
         res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
     }
 });
@@ -234,9 +237,9 @@ router.get('/pending/export', isAuthenticated, hasPermission('users:edit'), asyn
         await workbook.xlsx.write(res);
         res.end();
     } catch (error) {
-        console.error("/api/users/pending/export GET xatoligi:", error);
-        console.error("Error stack:", error.stack);
-        console.error("Error message:", error.message);
+        log.error("/api/users/pending/export GET xatoligi:", error);
+        log.error("Error stack:", error.stack);
+        log.error("Error message:", error.message);
         res.status(500).json({ 
             message: "Excel faylni yaratishda xatolik.",
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -272,7 +275,7 @@ router.get('/me/sessions', isAuthenticated, async (req, res) => {
 
         res.json(userSessions);
     } catch (error) {
-        console.error(`/api/users/me/sessions GET xatoligi:`, error);
+        log.error(`/api/users/me/sessions GET xatoligi:`, error);
         res.status(500).json({ message: "Sessiyalarni olishda xatolik." });
     }
 });
@@ -294,7 +297,7 @@ router.get('/:id/settings', isAuthenticated, hasPermission('users:view'), async 
             requires_brands: settings.requires_brands
         });
     } catch (error) {
-        console.error(`/api/users/${userId}/settings GET xatoligi:`, error);
+        log.error(`/api/users/${userId}/settings GET xatoligi:`, error);
         res.status(500).json({ message: "Sozlamalarni olishda xatolik." });
     }
 });
@@ -323,7 +326,7 @@ router.get('/:id/sessions', isAuthenticated, hasPermission('users:manage_session
 
         res.json(userSessions);
     } catch (error) {
-        console.error(`/api/users/${userId}/sessions GET xatoligi:`, error);
+        log.error(`/api/users/${userId}/sessions GET xatoligi:`, error);
         res.status(500).json({ message: "Sessiyalarni olishda xatolik." });
     }
 });
@@ -427,7 +430,7 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
         
         // WebSocket orqali realtime yuborish - yangi foydalanuvchi yaratildi
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Yangi foydalanuvchi yaratildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Yangi foydalanuvchi yaratildi, WebSocket orqali yuborilmoqda...`);
             const newUser = await db('users').where('id', userId).first();
             global.broadcastWebSocket('user_created', {
                 userId: userId,
@@ -439,14 +442,14 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
                 locations: locations,
                 brands: brands
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: user_created`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: user_created`);
         }
         
         // Superadmin yaratilganda avtomatik login qilish imkoniyati
         // Superadmin yaratilganda, login ma'lumotlarini qaytarish (faqat bir marta)
         if (role === 'superadmin' || role === 'super_admin') {
             if (global.broadcastWebSocket) {
-                console.log(`📡 [USERS] Yangi superadmin yaratildi, WebSocket orqali yuborilmoqda...`);
+                log.debug(`📡 [USERS] Yangi superadmin yaratildi, WebSocket orqali yuborilmoqda...`);
                 const newUser = await db('users').where('id', userId).first();
                 global.broadcastWebSocket('user_created', {
                     userId: userId,
@@ -455,7 +458,7 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
                     role: role,
                     created_by: adminId
                 });
-                console.log(`✅ [USERS] WebSocket yuborildi: user_created`);
+                log.debug(`✅ [USERS] WebSocket yuborildi: user_created`);
             }
             
             return res.status(201).json({ 
@@ -471,7 +474,7 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Yangi foydalanuvchi yaratildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Yangi foydalanuvchi yaratildi, WebSocket orqali yuborilmoqda...`);
             const newUser = await db('users').where('id', userId).first();
             global.broadcastWebSocket('user_created', {
                 userId: userId,
@@ -481,7 +484,7 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
                 status: 'active',
                 created_by: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: user_created`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: user_created`);
         }
         
         res.status(201).json({ 
@@ -491,14 +494,14 @@ router.post('/', isAuthenticated, hasPermission('users:create'), async (req, res
         if (error.code === 'SQLITE_CONSTRAINT' || (error.message && error.message.includes('UNIQUE constraint failed'))) {
             return res.status(409).json({ message: "Bu nomdagi foydalanuvchi allaqachon mavjud." });
         }
-        console.error("/api/users POST xatoligi:", error);
+        log.error("/api/users POST xatoligi:", error);
         res.status(500).json({ message: "Foydalanuvchi qo'shishda xatolik." });
     }
 });
 
 // Foydalanuvchini tahrirlash
 router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
-    console.log('🔍 [USERS] PUT /:id - Foydalanuvchini tahrirlash so\'rovi kelindi');
+    log.debug('🔍 [USERS] PUT /:id - Foydalanuvchini tahrirlash so\'rovi kelindi');
     const userId = req.params.id;
     const { role, locations = [], device_limit, fullname, brands = [], user_settings } = req.body;
     const adminId = req.session.user.id;
@@ -506,7 +509,7 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     const ipAddress = req.session.ip_address;
     const userAgent = req.session.user_agent;
 
-    console.log(`📝 [USERS] So'rov ma'lumotlari:`, {
+    log.debug(`📝 [USERS] So'rov ma'lumotlari:`, {
         userId,
         requestedRole: role,
         adminId,
@@ -516,14 +519,14 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     });
 
     if (!role) {
-        console.error(`❌ [USERS] Rol kiritilmagan`);
+        log.error(`❌ [USERS] Rol kiritilmagan`);
         return res.status(400).json({ message: "Rol kiritilishi shart." });
     }
     
     // Foydalanuvchi ma'lumotlarini olish
     const targetUser = await db('users').where('id', userId).first();
     if (!targetUser) {
-        console.error(`❌ [USERS] Foydalanuvchi topilmadi: ${userId}`);
+        log.error(`❌ [USERS] Foydalanuvchi topilmadi: ${userId}`);
         return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
     }
     
@@ -531,7 +534,7 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     const isTargetSuperadmin = targetUserRole === 'superadmin' || targetUserRole === 'super_admin';
     const isCurrentUserSuperadmin = currentUserRole === 'superadmin' || currentUserRole === 'super_admin';
     
-    console.log(`🔐 [USERS] Rol tekshiruvi:`, {
+    log.debug(`🔐 [USERS] Rol tekshiruvi:`, {
         targetUserRole,
         isTargetSuperadmin,
         isCurrentUserSuperadmin,
@@ -543,17 +546,17 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     if (isTargetSuperadmin) {
         // Agar superadmin o'zini tahrirlayotgan bo'lsa, faqat login, to'liq ism, parol o'zgartirishga ruxsat berish
         if (isEditingSelf) {
-            console.log(`✅ [USERS] Superadmin o'zini tahrirlayapti - faqat login, to'liq ism, parol o'zgartirish mumkin`);
+            log.debug(`✅ [USERS] Superadmin o'zini tahrirlayapti - faqat login, to'liq ism, parol o'zgartirish mumkin`);
             // Rol o'zgartirishga ruxsat bermaslik
             if (role !== targetUserRole) {
-                console.error(`❌ [USERS] Superadmin o'z rolini o'zgartirishga urinish!`);
+                log.error(`❌ [USERS] Superadmin o'z rolini o'zgartirishga urinish!`);
                 return res.status(403).json({ message: "Superadmin o'z rolini o'zgartira olmaydi." });
             }
             // Filial va brendlarni o'zgartirishga ruxsat bermaslik (superadmin barchasini ko'radi)
             // locations va brands bo'sh bo'lishi kerak yoki e'tiborsiz qoldiriladi
         } else {
             // Superadmin boshqa superadminni tahrirlashga ruxsat bermaslik
-            console.error(`❌ [USERS] Superadmin boshqa superadminni tahrirlashga urinish!`);
+            log.error(`❌ [USERS] Superadmin boshqa superadminni tahrirlashga urinish!`);
             return res.status(403).json({ message: "Superadmin boshqa superadminni tahrirlash mumkin emas." });
         }
     }
@@ -561,7 +564,7 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     // Superadmin yaratish faqat superadmin tomonidan mumkin (lekin superadmin allaqachon mavjud bo'lsa, yaratish mumkin emas)
     if ((role === 'superadmin' || role === 'super_admin') && 
         currentUserRole !== 'superadmin' && currentUserRole !== 'super_admin') {
-        console.error(`❌ [USERS] Superadmin yaratishga urinish (ruxsat yo'q)!`);
+        log.error(`❌ [USERS] Superadmin yaratishga urinish (ruxsat yo'q)!`);
         return res.status(403).json({ message: "Superadmin yaratish faqat superadmin tomonidan mumkin." });
     }
     
@@ -572,8 +575,8 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
             .where('id', '!=', userId) // Joriy foydalanuvchini hisobga olmaslik
             .first();
         if (existingSuperAdmin) {
-            console.error(`❌ [USERS] Superadmin allaqachon mavjud!`);
-            console.error(`   - Existing superadmin: ${existingSuperAdmin.username} (ID: ${existingSuperAdmin.id})`);
+            log.error(`❌ [USERS] Superadmin allaqachon mavjud!`);
+            log.error(`   - Existing superadmin: ${existingSuperAdmin.username} (ID: ${existingSuperAdmin.id})`);
             return res.status(403).json({ message: "Superadmin faqat bitta bo'lishi mumkin. Mavjud superadmin: " + existingSuperAdmin.username });
         }
     }
@@ -604,12 +607,12 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     }
 
     try {
-        console.log(`💾 [USERS] Foydalanuvchi ma'lumotlarini yangilash...`);
-        console.log(`   - Oldingi rol: ${targetUserRole}`);
-        console.log(`   - Yangi rol: ${role}`);
-        console.log(`   - Filiallar: ${locations.length} ta`);
-        console.log(`   - Brendlar: ${brands.length} ta`);
-        console.log(`   - Superadmin o'zini tahrirlayapti: ${isTargetSuperadmin && isEditingSelf}`);
+        log.debug(`💾 [USERS] Foydalanuvchi ma'lumotlarini yangilash...`);
+        log.debug(`   - Oldingi rol: ${targetUserRole}`);
+        log.debug(`   - Yangi rol: ${role}`);
+        log.debug(`   - Filiallar: ${locations.length} ta`);
+        log.debug(`   - Brendlar: ${brands.length} ta`);
+        log.debug(`   - Superadmin o'zini tahrirlayapti: ${isTargetSuperadmin && isEditingSelf}`);
         
         // Superadmin o'zini tahrirlayotgan bo'lsa, login, to'liq ism, parol va device limit o'zgartirish
         if (isTargetSuperadmin && isEditingSelf) {
@@ -633,7 +636,7 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
                 const bcrypt = require('bcrypt');
                 const saltRounds = 10;
                 updateData.password = await bcrypt.hash(req.body.password, saltRounds);
-                console.log(`   ✅ Parol yangilandi`);
+                log.debug(`   ✅ Parol yangilandi`);
             }
             
             await db('users')
@@ -649,7 +652,7 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
                 userAgent 
             });
             
-            console.log(`   ✅ Superadmin o'z ma'lumotlari yangilandi (login, to'liq ism${req.body.password ? ', parol' : ''})`);
+            log.debug(`   ✅ Superadmin o'z ma'lumotlari yangilandi (login, to'liq ism${req.body.password ? ', parol' : ''})`);
         } else {
             // Oddiy foydalanuvchilar uchun to'liq yangilash
             await userRepository.updateUser(adminId, userId, role, device_limit, fullname, ipAddress, userAgent);
@@ -663,7 +666,7 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
                     brand_id: brandId
                 }));
                 await db('user_brands').insert(brandRecords);
-                console.log(`   ✅ Brendlar yangilandi: ${brands.length} ta`);
+                log.debug(`   ✅ Brendlar yangilandi: ${brands.length} ta`);
             }
         }
         
@@ -682,11 +685,11 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
                     requires_brands: user_settings.requires_brands,
                     updated_at: db.fn.now()
                 });
-            console.log(`   ✅ User-specific sozlamalar yangilandi`);
+            log.debug(`   ✅ User-specific sozlamalar yangilandi`);
         }
 
         await refreshUserSessions(parseInt(userId, 10));
-        console.log(`   ✅ Sessiyalar yangilandi`);
+        log.debug(`   ✅ Sessiyalar yangilandi`);
 
         // Cache'ni tozalash - user o'zgarganda
         const { clearUserCache } = require('../utils/userAccessFilter');
@@ -699,7 +702,7 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Foydalanuvchi yangilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Foydalanuvchi yangilandi, WebSocket orqali yuborilmoqda...`);
             const updatedUser = await db('users').where('id', userId).first();
             global.broadcastWebSocket('user_updated', {
                 userId: parseInt(userId),
@@ -709,18 +712,18 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
                 status: updatedUser?.status,
                 updated_by: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: user_updated`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: user_updated`);
         }
 
-        console.log(`✅ [USERS] Foydalanuvchi muvaffaqiyatli yangilandi!`);
-        console.log(`   - User ID: ${userId}`);
-        console.log(`   - Username: ${targetUser.username}`);
-        console.log(`   - Oldingi rol: ${targetUserRole} -> Yangi rol: ${role}`);
+        log.debug(`✅ [USERS] Foydalanuvchi muvaffaqiyatli yangilandi!`);
+        log.debug(`   - User ID: ${userId}`);
+        log.debug(`   - Username: ${targetUser.username}`);
+        log.debug(`   - Oldingi rol: ${targetUserRole} -> Yangi rol: ${role}`);
         
         res.json({ message: "Foydalanuvchi ma'lumotlari muvaffaqiyatli yangilandi." });
     } catch (error) {
-        console.error(`❌ [USERS] /api/users/${userId} PUT xatoligi:`, error);
-        console.error(`   - Error stack:`, error.stack);
+        log.error(`❌ [USERS] /api/users/${userId} PUT xatoligi:`, error);
+        log.error(`   - Error stack:`, error.stack);
         res.status(500).json({ message: "Foydalanuvchini yangilashda xatolik." });
     }
 });
@@ -748,7 +751,7 @@ router.put('/:id/status', isAuthenticated, hasPermission('users:change_status'),
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket && user) {
-            console.log(`📡 [USERS] Account status o'zgardi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Account status o'zgardi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('account_status_changed', {
                 userId: parseInt(userId),
                 username: user.username,
@@ -757,13 +760,13 @@ router.put('/:id/status', isAuthenticated, hasPermission('users:change_status'),
                 previousStatus: user.status,
                 changedBy: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: account_status_changed`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: account_status_changed`);
         }
         
         const message = status === 'active' ? "Foydalanuvchi muvaffaqiyatli aktivlashtirildi." : "Foydalanuvchi muvaffaqiyatli bloklandi va barcha sessiyalari tugatildi.";
         res.json({ message });
     } catch (error) {
-        console.error(`/api/users/${userId}/status PUT xatoligi:`, error);
+        log.error(`/api/users/${userId}/status PUT xatoligi:`, error);
         res.status(500).json({ message: "Foydalanuvchi holatini o'zgartirishda xatolik." });
     }
 });
@@ -773,19 +776,19 @@ router.put('/:id/status', isAuthenticated, hasPermission('users:change_status'),
 // ===================================================================
 // Middleware'lardan oldin log qo'shish
 router.put('/:id/approve', (req, res, next) => {
-    console.log('🔍 [BACKEND] PUT /:id/approve endpoint\'ga so\'rov kelindi');
-    console.log(`   - Method: ${req.method}`);
-    console.log(`   - Path: ${req.path}`);
-    console.log(`   - Original URL: ${req.originalUrl}`);
-    console.log(`   - User ID param: ${req.params.id}`);
-    console.log(`   - Body:`, JSON.stringify(req.body, null, 2));
-    console.log(`   - Session ID: ${req.sessionID}`);
-    console.log(`   - Session user: ${req.session?.user ? 'MAVJUD' : 'YO\'Q'}`);
+    log.debug('🔍 [BACKEND] PUT /:id/approve endpoint\'ga so\'rov kelindi');
+    log.debug(`   - Method: ${req.method}`);
+    log.debug(`   - Path: ${req.path}`);
+    log.debug(`   - Original URL: ${req.originalUrl}`);
+    log.debug(`   - User ID param: ${req.params.id}`);
+    log.debug(`   - Body:`, JSON.stringify(req.body, null, 2));
+    log.debug(`   - Session ID: ${req.sessionID}`);
+    log.debug(`   - Session user: ${req.session?.user ? 'MAVJUD' : 'YO\'Q'}`);
     next();
 }, isAuthenticated, hasPermission('users:edit'), async (req, res) => {
-    console.log('🚀 ========================================');
-    console.log('🚀 [BACKEND] Foydalanuvchi tasdiqlash so\'rovi kelindi');
-    console.log('🚀 ========================================');
+    log.debug('🚀 ========================================');
+    log.debug('🚀 [BACKEND] Foydalanuvchi tasdiqlash so\'rovi kelindi');
+    log.debug('🚀 ========================================');
     
     const userId = req.params.id;
     const { role, locations = [], brands = [] } = req.body;
@@ -794,59 +797,59 @@ router.put('/:id/approve', (req, res, next) => {
     const ipAddress = req.session.ip_address;
     const userAgent = req.session.user_agent;
 
-    console.log(`📝 [BACKEND] 1. So'rov ma'lumotlari:`);
-    console.log(`   - User ID: ${userId}`);
-    console.log(`   - Role: ${role}`);
-    console.log(`   - Locations: ${JSON.stringify(locations)}`);
-    console.log(`   - Brands: ${JSON.stringify(brands)}`);
-    console.log(`   - Admin ID: ${adminId}`);
-    console.log(`   - Admin Role: ${currentUserRole}`);
-    console.log(`   - IP Address: ${ipAddress}`);
+    log.debug(`📝 [BACKEND] 1. So'rov ma'lumotlari:`);
+    log.debug(`   - User ID: ${userId}`);
+    log.debug(`   - Role: ${role}`);
+    log.debug(`   - Locations: ${JSON.stringify(locations)}`);
+    log.debug(`   - Brands: ${JSON.stringify(brands)}`);
+    log.debug(`   - Admin ID: ${adminId}`);
+    log.debug(`   - Admin Role: ${currentUserRole}`);
+    log.debug(`   - IP Address: ${ipAddress}`);
 
     if (!role) {
-        console.error(`❌ [BACKEND] 2. XATOLIK: Rol tanlanmagan!`);
+        log.error(`❌ [BACKEND] 2. XATOLIK: Rol tanlanmagan!`);
         return res.status(400).json({ message: "Rol tanlanishi shart." });
     }
     
     // Superadmin yaratish faqat superadmin tomonidan mumkin
     if ((role === 'superadmin' || role === 'super_admin') && 
         currentUserRole !== 'superadmin' && currentUserRole !== 'super_admin') {
-        console.error(`❌ [BACKEND] 2. XATOLIK: Superadmin yaratishga urinish!`);
-        console.error(`   - Requested role: ${role}`);
-        console.error(`   - Current user role: ${currentUserRole}`);
+        log.error(`❌ [BACKEND] 2. XATOLIK: Superadmin yaratishga urinish!`);
+        log.error(`   - Requested role: ${role}`);
+        log.error(`   - Current user role: ${currentUserRole}`);
         return res.status(403).json({ message: "Superadmin yaratish faqat superadmin tomonidan mumkin." });
     }
     
     // Rol bazada mavjudligini tekshirish va talablarini olish
-    console.log(`🔍 [BACKEND] 3. Rol ma'lumotlarini bazadan olish...`);
+    log.debug(`🔍 [BACKEND] 3. Rol ma'lumotlarini bazadan olish...`);
     const roleData = await db('roles').where({ role_name: role }).first();
     if (!roleData) {
-        console.error(`❌ [BACKEND] 3. XATOLIK: Rol topilmadi!`);
-        console.error(`   - Requested role: ${role}`);
+        log.error(`❌ [BACKEND] 3. XATOLIK: Rol topilmadi!`);
+        log.error(`   - Requested role: ${role}`);
         return res.status(400).json({ message: "Tanlangan rol mavjud emas." });
     }
     
-    console.log(`✅ [BACKEND] 3. Rol topildi:`);
-    console.log(`   - Role Name: ${roleData.role_name}`);
-    console.log(`   - Requires Locations: ${roleData.requires_locations} (type: ${typeof roleData.requires_locations})`);
-    console.log(`   - Requires Brands: ${roleData.requires_brands} (type: ${typeof roleData.requires_brands})`);
-    console.log(`   - Requires Locations === null: ${roleData.requires_locations === null}`);
-    console.log(`   - Requires Brands === null: ${roleData.requires_brands === null}`);
-    console.log(`   - Requires Locations === undefined: ${roleData.requires_locations === undefined}`);
-    console.log(`   - Requires Brands === undefined: ${roleData.requires_brands === undefined}`);
-    console.log(`   - Full Role Data:`, JSON.stringify(roleData, null, 2));
+    log.debug(`✅ [BACKEND] 3. Rol topildi:`);
+    log.debug(`   - Role Name: ${roleData.role_name}`);
+    log.debug(`   - Requires Locations: ${roleData.requires_locations} (type: ${typeof roleData.requires_locations})`);
+    log.debug(`   - Requires Brands: ${roleData.requires_brands} (type: ${typeof roleData.requires_brands})`);
+    log.debug(`   - Requires Locations === null: ${roleData.requires_locations === null}`);
+    log.debug(`   - Requires Brands === null: ${roleData.requires_brands === null}`);
+    log.debug(`   - Requires Locations === undefined: ${roleData.requires_locations === undefined}`);
+    log.debug(`   - Requires Brands === undefined: ${roleData.requires_brands === undefined}`);
+    log.debug(`   - Full Role Data:`, JSON.stringify(roleData, null, 2));
     
     // Rol shartlarini tekshirish
     // SQLite'da 0 (false) va null o'rtasidagi farqni to'g'ri aniqlash
     // Agar qiymat null yoki undefined bo'lsa, bu "belgilanmagan" degan ma'noni anglatadi
-    console.log(`🔍 [BACKEND] 4. Rol shartlarini tekshirish...`);
+    log.debug(`🔍 [BACKEND] 4. Rol shartlarini tekshirish...`);
     
     // SQLite'da null tekshiruvi: agar qiymat null yoki undefined bo'lsa
     const isLocationsNull = (roleData.requires_locations === null || roleData.requires_locations === undefined);
     const isBrandsNull = (roleData.requires_brands === null || roleData.requires_brands === undefined);
     
-    console.log(`   - isLocationsNull: ${isLocationsNull}`);
-    console.log(`   - isBrandsNull: ${isBrandsNull}`);
+    log.debug(`   - isLocationsNull: ${isLocationsNull}`);
+    log.debug(`   - isBrandsNull: ${isBrandsNull}`);
     
     // Agar null bo'lsa, null qaytarish, aks holda boolean qiymatni qaytarish
     const isLocationsRequired = isLocationsNull 
@@ -856,25 +859,25 @@ router.put('/:id/approve', (req, res, next) => {
         ? null 
         : Boolean(roleData.requires_brands);
     
-    console.log(`   - isLocationsRequired: ${isLocationsRequired} (type: ${typeof isLocationsRequired})`);
-    console.log(`   - isBrandsRequired: ${isBrandsRequired} (type: ${typeof isBrandsRequired})`);
-    console.log(`   - isLocationsRequired === null: ${isLocationsRequired === null}`);
-    console.log(`   - isBrandsRequired === null: ${isBrandsRequired === null}`);
+    log.debug(`   - isLocationsRequired: ${isLocationsRequired} (type: ${typeof isLocationsRequired})`);
+    log.debug(`   - isBrandsRequired: ${isBrandsRequired} (type: ${typeof isBrandsRequired})`);
+    log.debug(`   - isLocationsRequired === null: ${isLocationsRequired === null}`);
+    log.debug(`   - isBrandsRequired === null: ${isBrandsRequired === null}`);
     
     // Agar shartlar belgilanmagan bo'lsa, tasdiqlashni to'xtatish
     const isLocationsUndefined = (isLocationsRequired === null || isLocationsRequired === undefined);
     const isBrandsUndefined = (isBrandsRequired === null || isBrandsRequired === undefined);
     const isRequirementsUndefined = isLocationsUndefined || isBrandsUndefined;
     
-    console.log(`   - isLocationsUndefined: ${isLocationsUndefined}`);
-    console.log(`   - isBrandsUndefined: ${isBrandsUndefined}`);
-    console.log(`   - isRequirementsUndefined: ${isRequirementsUndefined}`);
+    log.debug(`   - isLocationsUndefined: ${isLocationsUndefined}`);
+    log.debug(`   - isBrandsUndefined: ${isBrandsUndefined}`);
+    log.debug(`   - isRequirementsUndefined: ${isRequirementsUndefined}`);
     
     if (isRequirementsUndefined) {
-        console.error(`❌ [BACKEND] 4. XATOLIK: Rol shartlari belgilanmagan!`);
-        console.error(`   - Role: ${role}`);
-        console.error(`   - requires_locations: ${roleData.requires_locations} (${typeof roleData.requires_locations})`);
-        console.error(`   - requires_brands: ${roleData.requires_brands} (${typeof roleData.requires_brands})`);
+        log.error(`❌ [BACKEND] 4. XATOLIK: Rol shartlari belgilanmagan!`);
+        log.error(`   - Role: ${role}`);
+        log.error(`   - requires_locations: ${roleData.requires_locations} (${typeof roleData.requires_locations})`);
+        log.error(`   - requires_brands: ${roleData.requires_brands} (${typeof roleData.requires_brands})`);
         return res.status(400).json({ 
             message: `"${role}" roli uchun shartlar belgilanmagan. Avval shart belgilanishi kerak.`,
             requires_locations: roleData.requires_locations,
@@ -882,119 +885,119 @@ router.put('/:id/approve', (req, res, next) => {
         });
     }
     
-    console.log(`✅ [BACKEND] 4. Rol shartlari belgilangan. Validatsiyaga o'tilmoqda...`);
+    log.debug(`✅ [BACKEND] 4. Rol shartlari belgilangan. Validatsiyaga o'tilmoqda...`);
     
     // Validatsiya: Agar shartlar majburiy bo'lsa, tanlanganlar bo'lishi kerak
-    console.log(`🔍 [BACKEND] 5. Validatsiya tekshiruvi...`);
+    log.debug(`🔍 [BACKEND] 5. Validatsiya tekshiruvi...`);
     
     if (isLocationsRequired === true) {
-        console.log(`   - Filiallar majburiy (true)`);
-        console.log(`   - Tanlangan filiallar soni: ${locations.length}`);
+        log.debug(`   - Filiallar majburiy (true)`);
+        log.debug(`   - Tanlangan filiallar soni: ${locations.length}`);
         if (locations.length === 0) {
-            console.error(`   ❌ XATOLIK: Filiallar majburiy, lekin tanlanmagan!`);
+            log.error(`   ❌ XATOLIK: Filiallar majburiy, lekin tanlanmagan!`);
             return res.status(400).json({ 
                 message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.`,
                 requires_locations: true,
                 locations_provided: locations.length
             });
         }
-        console.log(`   ✅ Filiallar validatsiyasi o'tdi`);
+        log.debug(`   ✅ Filiallar validatsiyasi o'tdi`);
     } else {
         // false - filiallar kerak emas
-        console.log(`   - Filiallar kerak emas (false)`);
+        log.debug(`   - Filiallar kerak emas (false)`);
     }
     
     if (isBrandsRequired === true) {
-        console.log(`   - Brendlar majburiy (true)`);
-        console.log(`   - Tanlangan brendlar soni: ${brands.length}`);
+        log.debug(`   - Brendlar majburiy (true)`);
+        log.debug(`   - Tanlangan brendlar soni: ${brands.length}`);
         if (brands.length === 0) {
-            console.error(`   ❌ XATOLIK: Brendlar majburiy, lekin tanlanmagan!`);
+            log.error(`   ❌ XATOLIK: Brendlar majburiy, lekin tanlanmagan!`);
             return res.status(400).json({ 
                 message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.`,
                 requires_brands: true,
                 brands_provided: brands.length
             });
         }
-        console.log(`   ✅ Brendlar validatsiyasi o'tdi`);
+        log.debug(`   ✅ Brendlar validatsiyasi o'tdi`);
     } else {
         // false - brendlar kerak emas
-        console.log(`   - Brendlar kerak emas (false)`);
+        log.debug(`   - Brendlar kerak emas (false)`);
     }
     
-    console.log(`✅ [BACKEND] 5. Barcha validatsiyalar o'tdi.`);
+    log.debug(`✅ [BACKEND] 5. Barcha validatsiyalar o'tdi.`);
 
     try {
         // 1. Foydalanuvchi va uning vaqtinchalik ma'lumotlarini tekshirish
-        console.log(`🔍 [BACKEND] 6. Foydalanuvchi ma'lumotlarini bazadan olish...`);
+        log.debug(`🔍 [BACKEND] 6. Foydalanuvchi ma'lumotlarini bazadan olish...`);
         const user = await db('users').where({ id: userId }).first();
         if (!user || !['pending_approval', 'pending_telegram_subscription'].includes(user.status)) {
-            console.error(`❌ [BACKEND] 6. XATOLIK: Foydalanuvchi topilmadi yoki allaqachon tasdiqlangan!`);
-            console.error(`   - User ID: ${userId}`);
-            console.error(`   - User found: ${user ? 'HA' : 'YO\'Q'}`);
+            log.error(`❌ [BACKEND] 6. XATOLIK: Foydalanuvchi topilmadi yoki allaqachon tasdiqlangan!`);
+            log.error(`   - User ID: ${userId}`);
+            log.error(`   - User found: ${user ? 'HA' : 'YO\'Q'}`);
             if (user) {
-                console.error(`   - User status: ${user.status}`);
+                log.error(`   - User status: ${user.status}`);
             }
             return res.status(404).json({ message: "Foydalanuvchi topilmadi yoki allaqachon tasdiqlangan." });
         }
         
-        console.log(`✅ [BACKEND] 6. Foydalanuvchi topildi:`);
-        console.log(`   - Username: ${user.username}`);
-        console.log(`   - Fullname: ${user.fullname}`);
-        console.log(`   - Status: ${user.status}`);
-        console.log(`   - Telegram Chat ID: ${user.telegram_chat_id || 'YO\'Q'}`);
+        log.debug(`✅ [BACKEND] 6. Foydalanuvchi topildi:`);
+        log.debug(`   - Username: ${user.username}`);
+        log.debug(`   - Fullname: ${user.fullname}`);
+        log.debug(`   - Status: ${user.status}`);
+        log.debug(`   - Telegram Chat ID: ${user.telegram_chat_id || 'YO\'Q'}`);
 
         const tempReg = await db('pending_registrations').where({ user_id: userId }).first();
         if (!tempReg) {
-            console.error(`❌ [BACKEND] 6. XATOLIK: Ro'yxatdan o'tish so'rovi topilmadi!`);
-            console.error(`   - User ID: ${userId}`);
+            log.error(`❌ [BACKEND] 6. XATOLIK: Ro'yxatdan o'tish so'rovi topilmadi!`);
+            log.error(`   - User ID: ${userId}`);
             return res.status(404).json({ message: "Ro'yxatdan o'tish so'rovi topilmadi yoki eskirgan." });
         }
         
-        console.log(`✅ [BACKEND] 6. Ro'yxatdan o'tish so'rovi topildi`);
+        log.debug(`✅ [BACKEND] 6. Ro'yxatdan o'tish so'rovi topildi`);
         const userData = JSON.parse(tempReg.user_data);
         const { password, secret_word } = userData;
 
         // 2. Foydalanuvchini aktivlashtirish (bitta tranzaksiya ichida)
-        console.log(`💾 [BACKEND] 7. Ma'lumotlarni bazaga saqlash...`);
+        log.debug(`💾 [BACKEND] 7. Ma'lumotlarni bazaga saqlash...`);
         await db.transaction(async trx => {
-            console.log(`   - Foydalanuvchi statusini yangilash: active, role: ${role}`);
+            log.debug(`   - Foydalanuvchi statusini yangilash: active, role: ${role}`);
             await trx('users').where({ id: userId }).update({
                 status: 'active',
                 role: role,
                 must_delete_creds: true // Kirish ma'lumotlari yuborilgach, xabarni o'chirish uchun belgi
             });
 
-            console.log(`   - Eski filiallarni o'chirish...`);
+            log.debug(`   - Eski filiallarni o'chirish...`);
             await trx('user_locations').where({ user_id: userId }).del();
             if (locations && locations.length > 0) {
-                console.log(`   - Yangi filiallarni qo'shish: ${locations.length} ta`);
+                log.debug(`   - Yangi filiallarni qo'shish: ${locations.length} ta`);
                 const locationsToInsert = locations.map(loc => ({ user_id: userId, location_name: loc }));
                 await trx('user_locations').insert(locationsToInsert);
-                console.log(`   ✅ Filiallar saqlandi:`, locations);
+                log.debug(`   ✅ Filiallar saqlandi:`, locations);
             } else {
-                console.log(`   - Filiallar qo'shilmadi (bo'sh)`);
+                log.debug(`   - Filiallar qo'shilmadi (bo'sh)`);
             }
             
             // Brendlarni saqlash (agar rol shartlari bo'yicha kerak bo'lsa)
-            console.log(`   - Eski brendlarni o'chirish...`);
+            log.debug(`   - Eski brendlarni o'chirish...`);
             await trx('user_brands').where({ user_id: userId }).del();
             if (brands && brands.length > 0) {
-                console.log(`   - Yangi brendlarni qo'shish: ${brands.length} ta`);
+                log.debug(`   - Yangi brendlarni qo'shish: ${brands.length} ta`);
                 const brandRecords = brands.map(brandId => ({
                     user_id: userId,
                     brand_id: brandId
                 }));
                 await trx('user_brands').insert(brandRecords);
-                console.log(`   ✅ Brendlar saqlandi:`, brands);
+                log.debug(`   ✅ Brendlar saqlandi:`, brands);
             } else {
-                console.log(`   - Brendlar qo'shilmadi (bo'sh)`);
+                log.debug(`   - Brendlar qo'shilmadi (bo'sh)`);
             }
         });
-        console.log(`✅ [BACKEND] 7. Ma'lumotlar muvaffaqiyatli saqlandi`);
+        log.debug(`✅ [BACKEND] 7. Ma'lumotlar muvaffaqiyatli saqlandi`);
 
         // WebSocket orqali realtime yuborish - foydalanuvchi tasdiqlandi
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Foydalanuvchi tasdiqlandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Foydalanuvchi tasdiqlandi, WebSocket orqali yuborilmoqda...`);
             const updatedUser = await db('users').where('id', userId).first();
             global.broadcastWebSocket('account_status_changed', {
                 userId: parseInt(userId),
@@ -1004,14 +1007,14 @@ router.put('/:id/approve', (req, res, next) => {
                 previousStatus: 'pending_approval',
                 changedBy: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: account_status_changed (approved)`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: account_status_changed (approved)`);
         }
 
         // 3. Foydalanuvchiga kirish ma'lumotlarini Telegram orqali yuborish
-        console.log(`📨 [BACKEND] 8. Telegram orqali kirish ma'lumotlarini yuborish...`);
+        log.debug(`📨 [BACKEND] 8. Telegram orqali kirish ma'lumotlarini yuborish...`);
         let credentialsSent = false;
         if (user.telegram_chat_id) {
-            console.log(`   - Telegram Chat ID: ${user.telegram_chat_id}`);
+            log.debug(`   - Telegram Chat ID: ${user.telegram_chat_id}`);
             try {
                 await sendToTelegram({
                     type: 'user_approved_credentials',
@@ -1023,21 +1026,21 @@ router.put('/:id/approve', (req, res, next) => {
                     secret_word: secret_word
                 });
                 credentialsSent = true;
-                console.log(`   ✅ Kirish ma'lumotlari Telegramga yuborildi`);
+                log.debug(`   ✅ Kirish ma'lumotlari Telegramga yuborildi`);
             } catch (telegramError) {
-                console.error(`   ❌ Telegram yuborishda xatolik:`, telegramError);
+                log.error(`   ❌ Telegram yuborishda xatolik:`, telegramError);
             }
         } else {
-            console.log(`   - Telegram Chat ID yo'q, kirish ma'lumotlari yuborilmaydi`);
+            log.debug(`   - Telegram Chat ID yo'q, kirish ma'lumotlari yuborilmaydi`);
         }
 
         // 4. Vaqtinchalik ma'lumotlarni tozalash
-        console.log(`🗑️ [BACKEND] 9. Vaqtinchalik ma'lumotlarni tozalash...`);
+        log.debug(`🗑️ [BACKEND] 9. Vaqtinchalik ma'lumotlarni tozalash...`);
         await db('pending_registrations').where({ user_id: userId }).del();
-        console.log(`   ✅ Vaqtinchalik ma'lumotlar tozalandi`);
+        log.debug(`   ✅ Vaqtinchalik ma'lumotlar tozalandi`);
 
         // 5. Audit jurnaliga yozish
-        console.log(`📝 [BACKEND] 10. Audit jurnaliga yozish...`);
+        log.debug(`📝 [BACKEND] 10. Audit jurnaliga yozish...`);
         await userRepository.logAction(adminId, 'approve_user', 'user', userId, { 
             approved_role: role, 
             locations, 
@@ -1047,20 +1050,20 @@ router.put('/:id/approve', (req, res, next) => {
             ip: ipAddress, 
             userAgent 
         });
-        console.log(`   ✅ Audit jurnaliga yozildi`);
+        log.debug(`   ✅ Audit jurnaliga yozildi`);
         
         // 6. Adminga yakuniy javobni qaytarish
         const message = `Foydalanuvchi muvaffaqiyatli tasdiqlandi. ${credentialsSent ? "Kirish ma'lumotlari uning Telegramiga yuborildi." : "Foydalanuvchi botga ulanmaganligi sababli kirish ma'lumotlari yuborilmadi."}`;
         
-        console.log(`✅ [BACKEND] 11. Muvaffaqiyatli yakunlandi!`);
-        console.log(`   - User ID: ${userId}`);
-        console.log(`   - Role: ${role}`);
-        console.log(`   - Locations: ${locations.length} ta`);
-        console.log(`   - Brands: ${brands.length} ta`);
-        console.log(`   - Credentials Sent: ${credentialsSent}`);
-        console.log('✅ ========================================');
-        console.log('✅ [BACKEND] Tasdiqlash jarayoni muvaffaqiyatli yakunlandi!');
-        console.log('✅ ========================================');
+        log.debug(`✅ [BACKEND] 11. Muvaffaqiyatli yakunlandi!`);
+        log.debug(`   - User ID: ${userId}`);
+        log.debug(`   - Role: ${role}`);
+        log.debug(`   - Locations: ${locations.length} ta`);
+        log.debug(`   - Brands: ${brands.length} ta`);
+        log.debug(`   - Credentials Sent: ${credentialsSent}`);
+        log.debug('✅ ========================================');
+        log.debug('✅ [BACKEND] Tasdiqlash jarayoni muvaffaqiyatli yakunlandi!');
+        log.debug('✅ ========================================');
         
         res.json({ 
             message: message,
@@ -1068,14 +1071,14 @@ router.put('/:id/approve', (req, res, next) => {
         });
 
     } catch (error) {
-        console.error('❌ ========================================');
-        console.error(`❌ [BACKEND] XATOLIK YUZ BERDI!`);
-        console.error(`❌ [BACKEND] Endpoint: /api/users/${userId}/approve`);
-        console.error(`❌ [BACKEND] Method: PUT`);
-        console.error(`❌ [BACKEND] Error:`, error);
-        console.error(`❌ [BACKEND] Error Stack:`, error.stack);
-        console.error(`❌ [BACKEND] Request Body:`, JSON.stringify(req.body, null, 2));
-        console.error('❌ ========================================');
+        log.error('❌ ========================================');
+        log.error(`❌ [BACKEND] XATOLIK YUZ BERDI!`);
+        log.error(`❌ [BACKEND] Endpoint: /api/users/${userId}/approve`);
+        log.error(`❌ [BACKEND] Method: PUT`);
+        log.error(`❌ [BACKEND] Error:`, error);
+        log.error(`❌ [BACKEND] Error Stack:`, error.stack);
+        log.error(`❌ [BACKEND] Request Body:`, JSON.stringify(req.body, null, 2));
+        log.error('❌ ========================================');
         res.status(500).json({ message: "Foydalanuvchini tasdiqlashda kutilmagan xatolik." });
     }
 });
@@ -1104,7 +1107,7 @@ router.put('/:id/reject', isAuthenticated, hasPermission('users:edit'), async (r
 
         // WebSocket orqali realtime yuborish - foydalanuvchi rad etildi
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Foydalanuvchi rad etildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Foydalanuvchi rad etildi, WebSocket orqali yuborilmoqda...`);
             const rejectedUser = await db('users').where('id', userId).first();
             global.broadcastWebSocket('account_status_changed', {
                 userId: parseInt(userId),
@@ -1114,12 +1117,12 @@ router.put('/:id/reject', isAuthenticated, hasPermission('users:edit'), async (r
                 previousStatus: rejectedUser?.status || 'pending_approval',
                 changedBy: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: account_status_changed (rejected)`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: account_status_changed (rejected)`);
         }
 
         res.json({ message: "Foydalanuvchi so'rovi muvaffaqiyatli rad etildi va arxivlandi." });
     } catch (error) {
-        console.error(`/api/users/${userId}/reject PUT xatoligi:`, error);
+        log.error(`/api/users/${userId}/reject PUT xatoligi:`, error);
         res.status(500).json({ message: "Foydalanuvchini rad etishda xatolik." });
     }
 });
@@ -1139,19 +1142,19 @@ router.put('/:id/password', isAuthenticated, hasPermission('users:change_passwor
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Parol o'zgartirildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Parol o'zgartirildi, WebSocket orqali yuborilmoqda...`);
             const user = await db('users').where('id', req.params.id).first();
             global.broadcastWebSocket('user_password_changed', {
                 userId: parseInt(req.params.id),
                 username: user?.username,
                 changed_by: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: user_password_changed`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: user_password_changed`);
         }
         
         res.json({ message: "Parol muvaffaqiyatli yangilandi." });
     } catch (error) {
-        console.error(`/api/users/${req.params.id}/password PUT xatoligi:`, error);
+        log.error(`/api/users/${req.params.id}/password PUT xatoligi:`, error);
         res.status(500).json({ message: "Parolni yangilashda xatolik." });
     }
 });
@@ -1171,19 +1174,19 @@ router.put('/:id/secret-word', isAuthenticated, hasPermission('users:set_secret_
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Maxfiy so'z o'zgartirildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Maxfiy so'z o'zgartirildi, WebSocket orqali yuborilmoqda...`);
             const user = await db('users').where('id', req.params.id).first();
             global.broadcastWebSocket('user_secret_word_changed', {
                 userId: parseInt(req.params.id),
                 username: user?.username,
                 changed_by: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: user_secret_word_changed`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: user_secret_word_changed`);
         }
         
         res.json({ message: "Maxfiy so'z muvaffaqiyatli o'rnatildi/yangilandi." });
     } catch (error) {
-        console.error(`/api/users/${req.params.id}/secret-word PUT xatoligi:`, error);
+        log.error(`/api/users/${req.params.id}/secret-word PUT xatoligi:`, error);
         res.status(500).json({ message: "Maxfiy so'zni saqlashda xatolik." });
     }
 });
@@ -1214,7 +1217,7 @@ router.get('/:id/permissions', isAuthenticated, hasPermission('roles:manage'), a
             restricted: restricted
         });
     } catch (error) {
-        console.error('Get user permissions error:', error);
+        log.error('Get user permissions error:', error);
         res.status(500).json({ message: 'Huquqlarni yuklashda xatolik' });
     }
 });
@@ -1259,7 +1262,7 @@ router.post('/:id/permissions', isAuthenticated, hasPermission('roles:manage'), 
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Foydalanuvchi huquqlari yangilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Foydalanuvchi huquqlari yangilandi, WebSocket orqali yuborilmoqda...`);
             const user = await db('users').where('id', userId).first();
             global.broadcastWebSocket('user_permissions_updated', {
                 userId: parseInt(userId),
@@ -1268,12 +1271,12 @@ router.post('/:id/permissions', isAuthenticated, hasPermission('roles:manage'), 
                 permissions_count: permissions.length,
                 updated_by: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: user_permissions_updated`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: user_permissions_updated`);
         }
 
         res.json({ message: 'Huquqlar muvaffaqiyatli saqlandi' });
     } catch (error) {
-        console.error('Save user permissions error:', error);
+        log.error('Save user permissions error:', error);
         res.status(500).json({ message: 'Huquqlarni saqlashda xatolik' });
     }
 });
@@ -1304,19 +1307,19 @@ router.delete('/:id/permissions', isAuthenticated, hasPermission('roles:manage')
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [USERS] Foydalanuvchi huquqlari tiklandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [USERS] Foydalanuvchi huquqlari tiklandi, WebSocket orqali yuborilmoqda...`);
             const user = await db('users').where('id', userId).first();
             global.broadcastWebSocket('user_permissions_reset', {
                 userId: parseInt(userId),
                 username: user?.username,
                 reset_by: adminId
             });
-            console.log(`✅ [USERS] WebSocket yuborildi: user_permissions_reset`);
+            log.debug(`✅ [USERS] WebSocket yuborildi: user_permissions_reset`);
         }
 
         res.json({ message: 'Barcha maxsus huquqlar o\'chirildi' });
     } catch (error) {
-        console.error('Reset user permissions error:', error);
+        log.error('Reset user permissions error:', error);
         res.status(500).json({ message: 'Huquqlarni tiklashda xatolik' });
     }
 });
@@ -1329,7 +1332,7 @@ router.get('/me/avatar', isAuthenticated, async (req, res) => {
         const user = await db('users').where('id', req.session.user.id).first();
         res.json({ avatar_url: user.avatar_url || null });
     } catch (error) {
-        console.error('Avatar olishda xatolik:', error);
+        log.error('Avatar olishda xatolik:', error);
         res.status(500).json({ message: 'Avatar olishda xatolik' });
     }
 });
@@ -1374,7 +1377,7 @@ router.put('/me/avatar', isAuthenticated, async (req, res) => {
             avatar_url: avatar 
         });
     } catch (error) {
-        console.error('Avatar yangilashda xatolik:', error);
+        log.error('Avatar yangilashda xatolik:', error);
         res.status(500).json({ message: 'Avatar yangilashda xatolik' });
     }
 });
@@ -1405,7 +1408,7 @@ router.delete('/me/avatar', isAuthenticated, async (req, res) => {
 
         res.json({ message: 'Avatar muvaffaqiyatli o\'chirildi' });
     } catch (error) {
-        console.error('Avatar o\'chirishda xatolik:', error);
+        log.error('Avatar o\'chirishda xatolik:', error);
         res.status(500).json({ message: 'Avatar o\'chirishda xatolik' });
     }
 });
@@ -1426,7 +1429,7 @@ router.get('/password-change-requests', isAuthenticated, hasPermission('users:ch
         
         res.json(requests);
     } catch (error) {
-        console.error("Parol so'rovlarini olish xatoligi:", error);
+        log.error("Parol so'rovlarini olish xatoligi:", error);
         res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
     }
 });
@@ -1485,7 +1488,7 @@ router.post('/password-change-requests/:id/approve', isAuthenticated, hasPermiss
         
         res.json({ message: "Parol o'zgartirish so'rovi tasdiqlandi." });
     } catch (error) {
-        console.error("So'rovni tasdiqlash xatoligi:", error);
+        log.error("So'rovni tasdiqlash xatoligi:", error);
         res.status(500).json({ message: "So'rovni tasdiqlashda xatolik." });
     }
 });
@@ -1526,8 +1529,243 @@ router.post('/password-change-requests/:id/reject', isAuthenticated, hasPermissi
         
         res.json({ message: "So'rov rad etildi." });
     } catch (error) {
-        console.error("So'rovni rad etish xatoligi:", error);
+        log.error("So'rovni rad etish xatoligi:", error);
         res.status(500).json({ message: "So'rovni rad etishda xatolik." });
+    }
+});
+
+// ===================================================================
+// === TELEGRAM BOG'LANISHNI TOZALASH (FAQAT SUPERADMIN) ===
+// ===================================================================
+router.post('/:id/clear-telegram', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    const userId = parseInt(req.params.id, 10);
+    const adminId = req.session.user?.id;
+    const adminRole = req.session.user?.role;
+    
+    // Faqat superadmin uchun
+    if (adminRole !== 'superadmin' && adminRole !== 'super_admin') {
+        return res.status(403).json({ message: "Bu amalni faqat superadmin bajara oladi." });
+    }
+    
+    try {
+        const user = await db('users').where({ id: userId }).first();
+        
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+        
+        // O'zini tozalashga ruxsat yo'q
+        if (userId === adminId) {
+            return res.status(400).json({ message: "O'z Telegram bog'lanishingizni tozalay olmaysiz." });
+        }
+        
+        // Telegram ma'lumotlarini tozalash
+        await db('users').where({ id: userId }).update({
+            telegram_chat_id: null,
+            telegram_username: null,
+            is_telegram_connected: false
+        });
+        
+        log.debug(`✅ [USERS] Telegram bog'lanish tozalandi. User ID: ${userId}, Admin: ${req.session.user?.username}`);
+        
+        // Audit log
+        await db('audit_logs').insert({
+            user_id: adminId,
+            action: 'clear_telegram',
+            entity_type: 'user',
+            entity_id: userId,
+            details: JSON.stringify({
+                username: user.username,
+                old_telegram_chat_id: user.telegram_chat_id,
+                old_telegram_username: user.telegram_username
+            }),
+            timestamp: new Date().toISOString()
+        });
+        
+        // WebSocket orqali yuborish
+        if (global.broadcastWebSocket) {
+            global.broadcastWebSocket('user_updated', {
+                userId: userId,
+                username: user.username,
+                action: 'telegram_cleared'
+            });
+        }
+        
+        res.json({ 
+            success: true, 
+            message: "Telegram bog'lanish muvaffaqiyatli tozalandi. Foydalanuvchi qaytadan bot obunasini qilishi kerak." 
+        });
+        
+    } catch (error) {
+        log.error("Telegram tozalash xatoligi:", error);
+        res.status(500).json({ message: "Telegram bog'lanishni tozalashda xatolik." });
+    }
+});
+
+// ===================================================================
+// === FOYDALANUVCHI MA'LUMOTLARINI TEKSHIRISH (O'CHIRISH UCHUN) ===
+// ===================================================================
+router.get('/:id/check-data', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    const userId = parseInt(req.params.id, 10);
+    const adminRole = req.session.user?.role;
+    
+    // Faqat superadmin uchun
+    if (adminRole !== 'superadmin' && adminRole !== 'super_admin') {
+        return res.status(403).json({ message: "Bu amalni faqat superadmin bajara oladi." });
+    }
+    
+    try {
+        const user = await db('users').where({ id: userId }).first();
+        
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+        
+        // Foydalanuvchi kiritgan ma'lumotlarni tekshirish
+        const reports = await db('reports').where({ user_id: userId }).count('* as count').first();
+        const history = await db('report_history').where({ user_id: userId }).count('* as count').first();
+        const comparisons = await db('comparisons').where({ user_id: userId }).count('* as count').first();
+        const auditLogs = await db('audit_logs').where({ user_id: userId }).count('* as count').first();
+        
+        const hasData = {
+            reports: reports?.count || 0,
+            history: history?.count || 0,
+            comparisons: comparisons?.count || 0,
+            auditLogs: auditLogs?.count || 0
+        };
+        
+        const totalData = hasData.reports + hasData.history + hasData.comparisons;
+        const canDeleteSafely = totalData === 0;
+        
+        res.json({
+            userId: userId,
+            username: user.username,
+            fullname: user.fullname,
+            role: user.role,
+            status: user.status,
+            hasData: hasData,
+            totalDataCount: totalData,
+            canDeleteSafely: canDeleteSafely,
+            message: canDeleteSafely 
+                ? "Bu foydalanuvchi hech qanday ma'lumot kiritmagan. Xavfsiz o'chirish mumkin." 
+                : `Bu foydalanuvchi ${totalData} ta ma'lumot kiritgan. O'chirish kelajakdagi tarixlarga ta'sir qilishi mumkin.`
+        });
+        
+    } catch (error) {
+        log.error("Ma'lumotlarni tekshirish xatoligi:", error);
+        res.status(500).json({ message: "Ma'lumotlarni tekshirishda xatolik." });
+    }
+});
+
+// ===================================================================
+// === FOYDALANUVCHINI TO'LIQ O'CHIRISH (FAQAT SUPERADMIN) ===
+// ===================================================================
+router.delete('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    const userId = parseInt(req.params.id, 10);
+    const adminId = req.session.user?.id;
+    const adminRole = req.session.user?.role;
+    const { forceDelete } = req.query; // ?forceDelete=true - majburiy o'chirish
+    
+    // Faqat superadmin uchun
+    if (adminRole !== 'superadmin' && adminRole !== 'super_admin') {
+        return res.status(403).json({ message: "Bu amalni faqat superadmin bajara oladi." });
+    }
+    
+    try {
+        const user = await db('users').where({ id: userId }).first();
+        
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+        
+        // O'zini o'chirishga ruxsat yo'q
+        if (userId === adminId) {
+            return res.status(400).json({ message: "O'zingizni o'chira olmaysiz." });
+        }
+        
+        // Superadmin'ni o'chirishga ruxsat yo'q
+        if (user.role === 'superadmin' || user.role === 'super_admin') {
+            return res.status(400).json({ message: "Superadmin akkauntini o'chirib bo'lmaydi." });
+        }
+        
+        // Ma'lumotlarni tekshirish
+        const reports = await db('reports').where({ user_id: userId }).count('* as count').first();
+        const history = await db('report_history').where({ user_id: userId }).count('* as count').first();
+        const comparisons = await db('comparisons').where({ user_id: userId }).count('* as count').first();
+        
+        const totalData = (reports?.count || 0) + (history?.count || 0) + (comparisons?.count || 0);
+        
+        // Agar ma'lumot bor va majburiy o'chirish so'ralmagan bo'lsa
+        if (totalData > 0 && forceDelete !== 'true') {
+            return res.status(409).json({ 
+                requiresConfirmation: true,
+                message: `Bu foydalanuvchi ${totalData} ta ma'lumot kiritgan. O'chirish kelajakdagi tarixlarga ta'sir qilishi mumkin.`,
+                dataCount: {
+                    reports: reports?.count || 0,
+                    history: history?.count || 0,
+                    comparisons: comparisons?.count || 0
+                }
+            });
+        }
+        
+        // Tranzaksiya bilan o'chirish
+        await db.transaction(async trx => {
+            // Bog'liq jadvallarni tozalash
+            await trx('user_locations').where({ user_id: userId }).del();
+            await trx('user_brands').where({ user_id: userId }).del();
+            await trx('user_permissions').where({ user_id: userId }).del();
+            await trx('pending_registrations').where({ user_id: userId }).del();
+            await trx('magic_links').where({ user_id: userId }).del();
+            await trx('password_change_requests').where({ user_id: userId }).del();
+            await trx('notifications').where({ user_id: userId }).del();
+            
+            // Agar majburiy o'chirish bo'lsa, hisobotlardagi user_id ni null qilish
+            if (forceDelete === 'true' && totalData > 0) {
+                await trx('reports').where({ user_id: userId }).update({ user_id: null });
+                await trx('report_history').where({ user_id: userId }).update({ user_id: null });
+                await trx('comparisons').where({ user_id: userId }).update({ user_id: null });
+            }
+            
+            // Foydalanuvchini o'chirish
+            await trx('users').where({ id: userId }).del();
+        });
+        
+        log.debug(`🗑️ [USERS] Foydalanuvchi o'chirildi. User ID: ${userId}, Username: ${user.username}, Admin: ${req.session.user?.username}, Force: ${forceDelete === 'true'}`);
+        
+        // Audit log (alohida, chunki user_id o'chirildi)
+        await db('audit_logs').insert({
+            user_id: adminId,
+            action: 'delete_user',
+            entity_type: 'user',
+            entity_id: userId,
+            details: JSON.stringify({
+                deleted_username: user.username,
+                deleted_fullname: user.fullname,
+                deleted_role: user.role,
+                force_delete: forceDelete === 'true',
+                had_data: totalData > 0
+            }),
+            timestamp: new Date().toISOString()
+        });
+        
+        // WebSocket orqali yuborish
+        if (global.broadcastWebSocket) {
+            global.broadcastWebSocket('user_deleted', {
+                userId: userId,
+                username: user.username
+            });
+        }
+        
+        res.json({ 
+            success: true, 
+            message: forceDelete === 'true' 
+                ? "Foydalanuvchi va unga tegishli bog'lanishlar o'chirildi. Hisobotlar saqlab qolindi (user_id = null)." 
+                : "Foydalanuvchi muvaffaqiyatli o'chirildi." 
+        });
+        
+    } catch (error) {
+        log.error("Foydalanuvchini o'chirish xatoligi:", error);
+        res.status(500).json({ message: "Foydalanuvchini o'chirishda xatolik." });
     }
 });
 

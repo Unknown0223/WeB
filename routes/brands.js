@@ -3,6 +3,9 @@ const router = express.Router();
 const { db } = require('../db');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
 const { getVisibleBrands, filterBrandsByRole } = require('../utils/roleFiltering.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('BRANDS');
+
 
 // GET /api/brands - Barcha brendlarni olish (barcha autentifikatsiya qilingan foydalanuvchilar uchun)
 // Query parameter: location - faqat shu filialdagi brendlarni olish
@@ -52,7 +55,7 @@ router.get('/', isAuthenticated, async (req, res) => {
 
         res.json(brands);
     } catch (error) {
-        console.error('/api/brands GET xatoligi:', error);
+        log.error('/api/brands GET xatoligi:', error);
         res.status(500).json({ message: "Brendlarni olishda xatolik" });
     }
 });
@@ -77,7 +80,7 @@ router.get('/for-user', isAuthenticated, async (req, res) => {
 
         res.json(brands);
     } catch (error) {
-        console.error('/api/brands/for-user GET xatoligi:', error);
+        log.error('/api/brands/for-user GET xatoligi:', error);
         res.status(500).json({ message: "Brendlarni olishda xatolik" });
     }
 });
@@ -117,7 +120,7 @@ router.post('/', isAuthenticated, hasPermission('settings:edit_table'), async (r
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [BRANDS] Yangi brend yaratildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [BRANDS] Yangi brend yaratildi, WebSocket orqali yuborilmoqda...`);
             const newBrand = await db('brands').where('id', brandId).first();
             global.broadcastWebSocket('brand_updated', {
                 action: 'created',
@@ -128,7 +131,7 @@ router.post('/', isAuthenticated, hasPermission('settings:edit_table'), async (r
                     emoji: newBrand.emoji
                 }
             });
-            console.log(`✅ [BRANDS] WebSocket yuborildi: brand_updated (created)`);
+            log.debug(`✅ [BRANDS] WebSocket yuborildi: brand_updated (created)`);
         }
         
         res.json({ 
@@ -136,7 +139,7 @@ router.post('/', isAuthenticated, hasPermission('settings:edit_table'), async (r
             id: brandId
         });
     } catch (error) {
-        console.error('/api/brands POST xatoligi:', error);
+        log.error('/api/brands POST xatoligi:', error);
         res.status(500).json({ message: "Brendni yaratishda xatolik" });
     }
 });
@@ -182,7 +185,7 @@ router.put('/:id', isAuthenticated, hasPermission('settings:edit_table'), async 
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [BRANDS] Brend yangilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [BRANDS] Brend yangilandi, WebSocket orqali yuborilmoqda...`);
             const updatedBrand = await db('brands').where('id', id).first();
             global.broadcastWebSocket('brand_updated', {
                 action: 'updated',
@@ -193,12 +196,12 @@ router.put('/:id', isAuthenticated, hasPermission('settings:edit_table'), async 
                     emoji: updatedBrand.emoji
                 }
             });
-            console.log(`✅ [BRANDS] WebSocket yuborildi: brand_updated (updated)`);
+            log.debug(`✅ [BRANDS] WebSocket yuborildi: brand_updated (updated)`);
         }
         
         res.json({ message: "Brend muvaffaqiyatli yangilandi" });
     } catch (error) {
-        console.error(`/api/brands/${req.params.id} PUT xatoligi:`, error);
+        log.error(`/api/brands/${req.params.id} PUT xatoligi:`, error);
         res.status(500).json({ message: "Brendni yangilashda xatolik" });
     }
 });
@@ -216,7 +219,7 @@ router.delete('/:id', isAuthenticated, hasPermission('settings:edit_table'), asy
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket && deletedBrand) {
-            console.log(`📡 [BRANDS] Brend o'chirildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [BRANDS] Brend o'chirildi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('brand_updated', {
                 action: 'deleted',
                 brand: {
@@ -224,12 +227,12 @@ router.delete('/:id', isAuthenticated, hasPermission('settings:edit_table'), asy
                     name: deletedBrand.name
                 }
             });
-            console.log(`✅ [BRANDS] WebSocket yuborildi: brand_updated (deleted)`);
+            log.debug(`✅ [BRANDS] WebSocket yuborildi: brand_updated (deleted)`);
         }
 
         res.json({ message: "Brend muvaffaqiyatli o'chirildi" });
     } catch (error) {
-        console.error(`/api/brands/${req.params.id} DELETE xatoligi:`, error);
+        log.error(`/api/brands/${req.params.id} DELETE xatoligi:`, error);
         res.status(500).json({ message: "Brendni o'chirishda xatolik" });
     }
 });
@@ -246,7 +249,7 @@ router.get('/user/:userId', isAuthenticated, hasPermission('users:view'), async 
 
         res.json(brands);
     } catch (error) {
-        console.error(`/api/brands/user/${req.params.userId} GET xatoligi:`, error);
+        log.error(`/api/brands/user/${req.params.userId} GET xatoligi:`, error);
         res.status(500).json({ message: "Brendlarni olishda xatolik" });
     }
 });
@@ -271,7 +274,7 @@ router.post('/user/:userId', isAuthenticated, hasPermission('users:edit'), async
 
         res.json({ message: "Brendlar muvaffaqiyatli biriktirildi" });
     } catch (error) {
-        console.error(`/api/brands/user/${req.params.userId} POST xatoligi:`, error);
+        log.error(`/api/brands/user/${req.params.userId} POST xatoligi:`, error);
         res.status(500).json({ message: "Brendlarni biriktirishda xatolik" });
     }
 });
@@ -288,7 +291,7 @@ router.get('/:id/locations', isAuthenticated, async (req, res) => {
         
         res.json(locations.map(l => l.location_name));
     } catch (error) {
-        console.error(`/api/brands/${req.params.id}/locations GET xatoligi:`, error);
+        log.error(`/api/brands/${req.params.id}/locations GET xatoligi:`, error);
         res.status(500).json({ message: "Filiallarni olishda xatolik" });
     }
 });
@@ -306,7 +309,7 @@ router.get('/by-location/:locationName', isAuthenticated, async (req, res) => {
         
         res.json(brands);
     } catch (error) {
-        console.error(`/api/brands/by-location/${req.params.locationName} GET xatoligi:`, error);
+        log.error(`/api/brands/by-location/${req.params.locationName} GET xatoligi:`, error);
         res.status(500).json({ message: "Brendlarni olishda xatolik" });
     }
 });

@@ -1,6 +1,8 @@
 const axios = require('axios');
 const { db } = require('../db.js');
+const { createLogger } = require('./logger.js');
 
+const log = createLogger('EXCHANGE');
 const BASE_CURRENCY = 'UZS';
 const SUPPORTED_CURRENCIES = ['USD', 'EUR', 'RUB', 'KZT'];
 
@@ -75,7 +77,7 @@ async function fetchExchangeRatesFromAPI() {
             return exchangeRates;
         }
     } catch (error) {
-        console.error('Exchange rate API xatolik:', error.message);
+        log.error('Exchange rate API xatolik:', error.message);
         return await fetchFromAlternativeAPI();
     }
     
@@ -106,7 +108,7 @@ async function fetchFromAlternativeAPI() {
             };
         }
     } catch (error) {
-        console.error('Alternativ API xatolik:', error.message);
+        log.error('Alternativ API xatolik:', error.message);
     }
     
     // Eng oxirgi fallback - default kurslar
@@ -139,7 +141,7 @@ async function getTodayExchangeRates() {
     }
     
     // Agar bazada yo'q bo'lsa, API dan olamiz
-    console.log('📊 Kurslarni API dan olish...');
+    log.debug('📊 Kurslarni API dan olish...');
     const apiRates = await fetchExchangeRatesFromAPI();
     
     if (apiRates) {
@@ -208,7 +210,7 @@ async function convertCurrency(amount, fromCurrency, toCurrency, rates = null) {
         // Agar fromCurrency UZS bo'lmasa, UZS ga konvertatsiya qilamiz
         const fromRate = rates[fromCurrency];
         if (!fromRate) {
-            console.warn(`Kurs topilmadi: ${fromCurrency}`);
+            log.warn(`Kurs topilmadi: ${fromCurrency}`);
             return amount; // Kurs topilmasa, o'zgartirmaymiz
         }
         // 1 fromCurrency = fromRate UZS
@@ -223,7 +225,7 @@ async function convertCurrency(amount, fromCurrency, toCurrency, rates = null) {
     
     const toRate = rates[toCurrency];
     if (!toRate) {
-        console.warn(`Kurs topilmadi: ${toCurrency}`);
+        log.warn(`Kurs topilmadi: ${toCurrency}`);
         return amountInUZS; // Kurs topilmasa, UZS da qaytaramiz
     }
     

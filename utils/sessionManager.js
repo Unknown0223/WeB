@@ -1,5 +1,8 @@
 const { db } = require('../db.js');
 const userRepository = require('../data/userRepository.js');
+const { createLogger } = require('./logger.js');
+const log = createLogger('SESSIONMANAGER');
+
 
 /**
  * Muayyan foydalanuvchining yoki barcha foydalanuvchilarning aktiv sessiyalarini yangilaydi.
@@ -7,7 +10,7 @@ const userRepository = require('../data/userRepository.js');
  */
 async function refreshUserSessions(userId = null) {
     try {
-        console.log(`Sessiyalarni yangilash boshlandi. Foydalanuvchi ID: ${userId || 'Barcha'}`);
+        log.debug(`Sessiyalarni yangilash boshlandi. Foydalanuvchi ID: ${userId || 'Barcha'}`);
 
         // Barcha aktiv sessiyalarni bazadan olamiz
         const sessions = await db('sessions').select('sid', 'sess');
@@ -17,7 +20,7 @@ async function refreshUserSessions(userId = null) {
             try {
                 sessionData = JSON.parse(session.sess);
             } catch (e) {
-                console.warn(`Sessiya (sid: ${session.sid}) ma'lumotini parse qilib bo'lmadi.`);
+                log.warn(`Sessiya (sid: ${session.sid}) ma'lumotini parse qilib bo'lmadi.`);
                 continue;
             }
 
@@ -35,7 +38,7 @@ async function refreshUserSessions(userId = null) {
                 if (!user) {
                     // Agar foydalanuvchi o'chirilgan bo'lsa, uning sessiyasini tugatamiz
                     await db('sessions').where({ sid: session.sid }).del();
-                    console.log(`O'chirilgan foydalanuvchi (ID: ${sessionUserId}) sessiyasi (sid: ${session.sid}) tugatildi.`);
+                    log.debug(`O'chirilgan foydalanuvchi (ID: ${sessionUserId}) sessiyasi (sid: ${session.sid}) tugatildi.`);
                     continue;
                 }
 
@@ -81,11 +84,11 @@ async function refreshUserSessions(userId = null) {
                     .where({ sid: session.sid })
                     .update({ sess: JSON.stringify(sessionData) });
                     
-                console.log(`Foydalanuvchi (ID: ${sessionUserId}) sessiyasi (sid: ${session.sid}) muvaffaqiyatli yangilandi.`);
+                log.debug(`Foydalanuvchi (ID: ${sessionUserId}) sessiyasi (sid: ${session.sid}) muvaffaqiyatli yangilandi.`);
             }
         }
     } catch (error) {
-        console.error("Sessiyalarni yangilashda kutilmagan xatolik:", error);
+        log.error("Sessiyalarni yangilashda kutilmagan xatolik:", error);
     }
 }
 
@@ -95,11 +98,11 @@ async function refreshUserSessions(userId = null) {
  */
 async function refreshSessionsByRole(roleName) {
     try {
-        console.log(`"${roleName}" rolidagi foydalanuvchilar uchun sessiyalar yangilanmoqda...`);
+        log.debug(`"${roleName}" rolidagi foydalanuvchilar uchun sessiyalar yangilanmoqda...`);
         // Shu roldagi barcha foydalanuvchilarni topamiz
         const usersInRole = await db('users').where({ role: roleName }).select('id');
         if (usersInRole.length === 0) {
-            console.log(`"${roleName}" rolida aktiv foydalanuvchilar topilmadi.`);
+            log.debug(`"${roleName}" rolida aktiv foydalanuvchilar topilmadi.`);
             return;
         }
 
@@ -108,7 +111,7 @@ async function refreshSessionsByRole(roleName) {
             await refreshUserSessions(user.id);
         }
     } catch (error) {
-        console.error(`"${roleName}" roli uchun sessiyalarni yangilashda xatolik:`, error);
+        log.error(`"${roleName}" roli uchun sessiyalarni yangilashda xatolik:`, error);
     }
 }
 

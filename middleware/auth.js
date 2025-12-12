@@ -1,4 +1,6 @@
 const { db } = require('../db.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('AUTH');
 
 /**
  * Foydalanuvchi tizimga kirganligini, sessiyasi aktiv ekanligini va
@@ -21,7 +23,7 @@ const isAuthenticated = async (req, res, next) => {
         const sessionExists = await db('sessions').where({ sid: req.sessionID }).first();
         if (!sessionExists) {
             req.session.destroy((err) => {
-                if (err) console.error("Sessiyani tugatishda xatolik:", err);
+                if (err) log.error("Sessiyani tugatishda xatolik:", err);
                 return res.status(401).json({ 
                     message: "Sessiyangiz tugatildi. Iltimos, qayta kiring.",
                     action: 'logout'
@@ -36,7 +38,7 @@ const isAuthenticated = async (req, res, next) => {
         // Agar foydalanuvchi bazadan o'chirilgan bo'lsa
         if (!user) {
              req.session.destroy((err) => {
-                if (err) console.error("Sessiyani tugatishda xatolik:", err);
+                if (err) log.error("Sessiyani tugatishda xatolik:", err);
                 return res.status(401).json({ 
                     message: "Foydalanuvchi topilmadi. Sessiya tugatildi.",
                     action: 'logout'
@@ -57,7 +59,7 @@ const isAuthenticated = async (req, res, next) => {
 
             // Sessiyani tugatish
             req.session.destroy((err) => {
-                if (err) console.error("Majburiy obuna tufayli sessiyani tugatishda xatolik:", err);
+                if (err) log.error("Majburiy obuna tufayli sessiyani tugatishda xatolik:", err);
                 
                 // Foydalanuvchiga maxsus javob yuborish
                 return res.status(403).json({
@@ -75,7 +77,7 @@ const isAuthenticated = async (req, res, next) => {
         next();
 
     } catch (error) {
-        console.error("isAuthenticated middleware xatoligi:", error);
+        log.error("isAuthenticated middleware xatoligi:", error);
         res.status(500).json({ message: "Sessiyani tekshirishda ichki xatolik." });
     }
 };

@@ -1,6 +1,9 @@
 const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission, isManagerOrAdmin } = require('../middleware/auth.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('PIVOT');
+
 
 const router = express.Router();
 
@@ -21,7 +24,7 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
         try {
             exchangeRates = await getTodayExchangeRates();
         } catch (error) {
-            console.error('Kurslarni olishda xatolik:', error);
+            log.error('Kurslarni olishda xatolik:', error);
         }
     }
 
@@ -84,10 +87,10 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
                             // convertCurrency funksiyasidan foydalanish
                             value = await convertCurrency(value, reportCurrency, targetCurrency, exchangeRates);
                             if (originalValue !== value) {
-                                console.log(`💰 Konvertatsiya: ${originalValue} ${reportCurrency} → ${value.toFixed(2)} ${targetCurrency}`);
+                                log.debug(`💰 Konvertatsiya: ${originalValue} ${reportCurrency} → ${value.toFixed(2)} ${targetCurrency}`);
                             }
                         } catch (error) {
-                            console.error(`Konvertatsiya xatolik (report #${report.id}, key: ${key}):`, error);
+                            log.error(`Konvertatsiya xatolik (report #${report.id}, key: ${key}):`, error);
                             // Xatolik bo'lsa, qiymatni o'zgartirmaslik
                         }
                     }
@@ -113,14 +116,14 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
                     });
                 }
             } catch (error) {
-                console.error(`Ошибка парсинга данных отчета #${report.id}:`, error);
+                log.error(`Ошибка парсинга данных отчета #${report.id}:`, error);
             }
         }
 
         res.json(flatData);
 
     } catch (error) {
-        console.error("Ошибка в /api/pivot/data:", error);
+        log.error("Ошибка в /api/pivot/data:", error);
         res.status(500).json({ 
             message: "Ошибка загрузки данных для сводной таблицы.",
             error: error.message 
@@ -161,7 +164,7 @@ router.get('/templates', isManagerOrAdmin, async (req, res) => {
         res.json(templates);
         
     } catch (error) {
-        console.error("Ошибка загрузки шаблонов:", error);
+        log.error("Ошибка загрузки шаблонов:", error);
         res.status(500).json({ 
             message: "Ошибка загрузки шаблонов", 
             error: error.message 
@@ -196,7 +199,7 @@ router.post('/templates', isManagerOrAdmin, async (req, res) => {
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [PIVOT] Yangi template yaratildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [PIVOT] Yangi template yaratildi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('pivot_template_created', {
                 templateId: templateId,
                 name: name,
@@ -204,7 +207,7 @@ router.post('/templates', isManagerOrAdmin, async (req, res) => {
                 created_by: req.session.user.id,
                 created_by_username: req.session.user.username
             });
-            console.log(`✅ [PIVOT] WebSocket yuborildi: pivot_template_created`);
+            log.debug(`✅ [PIVOT] WebSocket yuborildi: pivot_template_created`);
         }
         
         res.status(201).json({ 
@@ -213,7 +216,7 @@ router.post('/templates', isManagerOrAdmin, async (req, res) => {
         });
         
     } catch (error) {
-        console.error("Ошибка сохранения шаблона:", error);
+        log.error("Ошибка сохранения шаблона:", error);
         res.status(500).json({ 
             message: "Ошибка сохранения шаблона", 
             error: error.message 
@@ -240,7 +243,7 @@ router.get('/templates/:id', isManagerOrAdmin, async (req, res) => {
         res.json(JSON.parse(template.report));
         
     } catch (error) {
-        console.error("Ошибка получения шаблона:", error);
+        log.error("Ошибка получения шаблона:", error);
         res.status(500).json({ 
             message: "Ошибка получения шаблона", 
             error: error.message 
@@ -293,7 +296,7 @@ router.put('/templates/:id', isManagerOrAdmin, async (req, res) => {
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [PIVOT] Template yangilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [PIVOT] Template yangilandi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('pivot_template_updated', {
                 templateId: parseInt(req.params.id),
                 name: name,
@@ -301,13 +304,13 @@ router.put('/templates/:id', isManagerOrAdmin, async (req, res) => {
                 updated_by: req.session.user.id,
                 updated_by_username: req.session.user.username
             });
-            console.log(`✅ [PIVOT] WebSocket yuborildi: pivot_template_updated`);
+            log.debug(`✅ [PIVOT] WebSocket yuborildi: pivot_template_updated`);
         }
         
         res.json({ message: "Шаблон успешно обновлён." });
         
     } catch (error) {
-        console.error("Ошибка обновления шаблона:", error);
+        log.error("Ошибка обновления шаблона:", error);
         res.status(500).json({ 
             message: "Ошибка обновления шаблона", 
             error: error.message 
@@ -346,20 +349,20 @@ router.delete('/templates/:id', isManagerOrAdmin, async (req, res) => {
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [PIVOT] Template o'chirildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [PIVOT] Template o'chirildi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('pivot_template_deleted', {
                 templateId: parseInt(req.params.id),
                 name: templateName,
                 deleted_by: req.session.user.id,
                 deleted_by_username: req.session.user.username
             });
-            console.log(`✅ [PIVOT] WebSocket yuborildi: pivot_template_deleted`);
+            log.debug(`✅ [PIVOT] WebSocket yuborildi: pivot_template_deleted`);
         }
         
         res.json({ message: "Шаблон успешно удален." });
         
     } catch (error) {
-        console.error("Ошибка удаления шаблона:", error);
+        log.error("Ошибка удаления шаблона:", error);
         res.status(500).json({ 
             message: "Ошибка удаления шаблона", 
             error: error.message 
@@ -416,7 +419,7 @@ router.get('/used-currencies', isAuthenticated, hasPermission('reports:view_all'
             lastUpdated: new Date().toISOString()
         });
     } catch (error) {
-        console.error('Ishlatilgan valyutalarni olishda xatolik:', error);
+        log.error('Ishlatilgan valyutalarni olishda xatolik:', error);
         res.status(500).json({ error: 'Xatolik yuz berdi' });
     }
 });

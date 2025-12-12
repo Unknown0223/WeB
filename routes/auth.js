@@ -5,6 +5,9 @@ const { isAuthenticated } = require('../middleware/auth.js');
 const { sendToTelegram } = require('../utils/bot.js');
 const userRepository = require('../data/userRepository.js');
 const similarity = require('string-similarity');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('AUTH');
+
 
 const router = express.Router();
 
@@ -102,7 +105,7 @@ router.get('/public/settings/branding', async (req, res) => {
         
         res.json(settings);
     } catch (error) {
-        console.error("Public branding settings xatoligi:", error);
+        log.error("Public branding settings xatoligi:", error);
         res.status(500).json({ 
             logo: {
                 text: 'MANUS', 
@@ -172,7 +175,7 @@ router.post('/register', async (req, res) => {
         // Tekshirish: foydalanuvchi haqiqatan yaratildimi?
         const createdUser = await db('users').where({ id: userId }).first();
         if (!createdUser) {
-            console.error(`❌ [REGISTER] XATOLIK: Foydalanuvchi yaratildi, lekin bazadan topilmadi! User ID: ${userId}`);
+            log.error(`❌ [REGISTER] XATOLIK: Foydalanuvchi yaratildi, lekin bazadan topilmadi! User ID: ${userId}`);
             return res.status(500).json({ message: "Foydalanuvchi yaratishda xatolik yuz berdi." });
         }
         
@@ -242,7 +245,7 @@ router.post('/register', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("/api/register xatoligi:", error);
+        log.error("/api/register xatoligi:", error);
         res.status(500).json({ message: "Registratsiyada kutilmagan xatolik." });
     }
 });
@@ -265,7 +268,7 @@ router.post('/login', async (req, res) => {
 
         if (!user) {
             // Background'da log yozish
-            logAction(null, 'login_fail', 'user', null, { username, reason: 'User not found', ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+            logAction(null, 'login_fail', 'user', null, { username, reason: 'User not found', ip: ipAddress, userAgent }).catch(err => log.error('Log yozishda xatolik:', err));
             return res.status(401).json({ message: "Login yoki parol noto'g'ri." });
         }
 
@@ -279,7 +282,7 @@ router.post('/login', async (req, res) => {
                 reason = "Bu akkaunt arxivlangan. Qayta tiklash uchun administrator bilan bog'laning.";
             }
             // Background'da log yozish
-            logAction(user.id, 'login_fail', 'user', user.id, { username, reason: `Account status: ${user.status}`, ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+            logAction(user.id, 'login_fail', 'user', user.id, { username, reason: `Account status: ${user.status}`, ip: ipAddress, userAgent }).catch(err => log.error('Log yozishda xatolik:', err));
             return res.status(403).json({ message: reason });
         }
 
@@ -301,14 +304,14 @@ router.post('/login', async (req, res) => {
                         user_id: user.id,
                         username: user.username
                     })
-                ]).catch(err => console.error('Background operatsiyalarda xatolik:', err));
+                ]).catch(err => log.error('Background operatsiyalarda xatolik:', err));
                 
                 return res.status(403).json({ message: "Xavfsizlik tufayli akkauntingiz bloklandi. Administratorga xabar berildi." });
             } else {
                 // Increment'ni kutamiz (muhim)
                 await userRepository.incrementLoginAttempts(user.id, newAttempts);
                 // Background'da log yozish
-                logAction(user.id, 'login_fail', 'user', user.id, { username, reason: 'Invalid password', ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+                logAction(user.id, 'login_fail', 'user', user.id, { username, reason: 'Invalid password', ip: ipAddress, userAgent }).catch(err => log.error('Log yozishda xatolik:', err));
                 const attemptsLeft = MAX_LOGIN_ATTEMPTS - newAttempts;
                 return res.status(401).json({ message: `Login yoki parol noto'g'ri. Qolgan urinishlar soni: ${attemptsLeft}.` });
             }
@@ -349,7 +352,7 @@ router.post('/login', async (req, res) => {
             if (activeSessionsCount >= user.device_limit) {
                 if (!user.telegram_chat_id) {
                     // Background'da log yozish (await qilmaslik)
-                    logAction(user.id, 'login_fail', 'user', user.id, { username, reason: 'Device limit reached, no Telegram', ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+                    logAction(user.id, 'login_fail', 'user', user.id, { username, reason: 'Device limit reached, no Telegram', ip: ipAddress, userAgent }).catch(err => log.error('Log yozishda xatolik:', err));
                     return res.status(403).json({ 
                         message: `Qurilmalar limiti (${user.device_limit}) to'lgan. Yangi qurilmadan kirish uchun Telegram botga ulanmagansiz. Iltimos, adminga murojaat qiling.` 
                     });
@@ -363,10 +366,10 @@ router.post('/login', async (req, res) => {
                     username: user.username,
                     ip: ipAddress,
                     device: userAgent
-                }).catch(err => console.error('Telegram xabar yuborishda xatolik:', err));
+                }).catch(err => log.error('Telegram xabar yuborishda xatolik:', err));
                 
                 // Background'da log yozish
-                logAction(user.id, '2fa_sent', 'user', user.id, { username, reason: 'Device limit reached', ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+                logAction(user.id, '2fa_sent', 'user', user.id, { username, reason: 'Device limit reached', ip: ipAddress, userAgent }).catch(err => log.error('Log yozishda xatolik:', err));
 
                 return res.status(429).json({
                     secretWordRequired: true,
@@ -412,7 +415,7 @@ router.post('/login', async (req, res) => {
         // Login attempts'ni reset qilish (agar kerak bo'lsa)
         if (user.login_attempts > 0 || user.lock_reason) {
             // Background'da reset qilish
-            userRepository.resetLoginAttempts(user.id).catch(err => console.error('Login attempts reset xatolik:', err));
+            userRepository.resetLoginAttempts(user.id).catch(err => log.error('Login attempts reset xatolik:', err));
         }
 
         // Telegram xabarni o'chirish (agar kerak bo'lsa) - background'da
@@ -421,8 +424,8 @@ router.post('/login', async (req, res) => {
                 type: 'delete_credentials',
                 chat_id: user.telegram_chat_id,
                 user_id: user.id
-            }).catch(err => console.error('Telegram xabar yuborishda xatolik:', err));
-            db('users').where({ id: user.id }).update({ must_delete_creds: false }).catch(err => console.error('Update xatolik:', err));
+            }).catch(err => log.error('Telegram xabar yuborishda xatolik:', err));
+            db('users').where({ id: user.id }).update({ must_delete_creds: false }).catch(err => log.error('Update xatolik:', err));
         }
 
         // === BOT OBUNASI TEKSHIRUVI (VARIANT A: MAJBURIY) ===
@@ -451,7 +454,7 @@ router.post('/login', async (req, res) => {
                 ip: ipAddress, 
                 userAgent,
                 reason: 'Bot subscription required'
-            }).catch(err => console.error('Log yozishda xatolik:', err));
+            }).catch(err => log.error('Log yozishda xatolik:', err));
 
             return res.json({ 
                 message: "Login muvaffaqiyatli, lekin Telegram bot bilan bog'lash kerak.", 
@@ -472,7 +475,7 @@ router.post('/login', async (req, res) => {
         }
         
         // Background'da log yozish (javobni kutmaslik)
-        logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+        logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent }).catch(err => log.error('Log yozishda xatolik:', err));
         
         // Online statusni real-time yangilash
         if (global.broadcastWebSocket) {
@@ -487,8 +490,8 @@ router.post('/login', async (req, res) => {
 
     } catch (error) {
         const elapsedTime = Date.now() - startTime;
-        console.error(`❌ [LOGIN] Login xatoligi. Username: ${username}, Vaqt: ${elapsedTime}ms`, error);
-        console.error(`❌ [LOGIN] Error stack:`, error.stack);
+        log.error(`❌ [LOGIN] Login xatoligi. Username: ${username}, Vaqt: ${elapsedTime}ms`, error);
+        log.error(`❌ [LOGIN] Error stack:`, error.stack);
         res.status(500).json({ message: "Serverda kutilmagan xatolik yuz berdi." });
     }
 });
@@ -543,7 +546,7 @@ router.get('/verify-session/:token', async (req, res) => {
 
         req.session.regenerate(async (err) => {
             if (err) {
-                console.error("Sessiyani qayta yaratishda xatolik:", err);
+                log.error("Sessiyani qayta yaratishda xatolik:", err);
                 return res.status(500).send("<h1>Ichki xatolik</h1><p>Sessiyani yaratib bo'lmadi.</p>");
             }
 
@@ -566,7 +569,7 @@ router.get('/verify-session/:token', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("/verify-session xatoligi:", error);
+        log.error("/verify-session xatoligi:", error);
         res.status(500).send("<h1>Serverda kutilmagan xatolik</h1>");
     }
 });
@@ -608,7 +611,7 @@ router.get('/current-user', isAuthenticated, async (req, res) => {
         };
         res.json(userWithSession);
     } catch (error) {
-        console.error('Current user fetch error:', error);
+        log.error('Current user fetch error:', error);
         const userWithSession = {
             ...req.session.user,
             preferred_currency: null,
@@ -625,7 +628,7 @@ router.get('/user/preferred-currency', isAuthenticated, async (req, res) => {
         const preferredCurrency = user?.preferred_currency || null;
         res.json({ currency: preferredCurrency });
     } catch (error) {
-        console.error('Currency fetch error:', error);
+        log.error('Currency fetch error:', error);
         res.status(500).json({ message: "Valyuta sozlamasini olishda xatolik." });
     }
 });
@@ -653,7 +656,7 @@ router.post('/user/preferred-currency', isAuthenticated, async (req, res) => {
         
         res.json({ message: "Valyuta sozlamasi saqlandi.", currency });
     } catch (error) {
-        console.error('Currency save error:', error);
+        log.error('Currency save error:', error);
         res.status(500).json({ message: "Valyuta sozlamasini saqlashda xatolik." });
     }
 });
@@ -722,7 +725,7 @@ router.post('/request-password-change', isAuthenticated, async (req, res) => {
             success: true 
         });
     } catch (error) {
-        console.error("Parol o'zgartirish so'rovi xatoligi:", error);
+        log.error("Parol o'zgartirish so'rovi xatoligi:", error);
         res.status(500).json({ message: "So'rov yuborishda xatolik yuz berdi." });
     }
 });
@@ -754,7 +757,7 @@ router.post('/verify-secret', async (req, res) => {
             res.status(401).json({ message: "Maxfiy so'z noto'g'ri." });
         }
     } catch (error) {
-        console.error("Maxfiy so'zni tekshirish xatoligi:", error);
+        log.error("Maxfiy so'zni tekshirish xatoligi:", error);
         res.status(500).json({ message: "Tekshirishda xatolik yuz berdi." });
     }
 });
@@ -832,7 +835,7 @@ router.post('/bot-connect/generate-token', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Bot bog'lash token yaratish xatoligi:", error);
+        log.error("Bot bog'lash token yaratish xatoligi:", error);
         res.status(500).json({ message: "Token yaratishda xatolik yuz berdi." });
     }
 });
@@ -888,7 +891,7 @@ router.post('/bot-connect/verify', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Bot bog'lash token tekshirish xatoligi:", error);
+        log.error("Bot bog'lash token tekshirish xatoligi:", error);
         res.status(500).json({ message: "Token tekshirishda xatolik yuz berdi." });
     }
 });
@@ -919,7 +922,7 @@ router.get('/bot-connect/status', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Bot obunasi holati tekshirish xatoligi:", error);
+        log.error("Bot obunasi holati tekshirish xatoligi:", error);
         res.status(500).json({ message: "Holatni tekshirishda xatolik yuz berdi." });
     }
 });

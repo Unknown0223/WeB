@@ -1,6 +1,9 @@
 const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('EXCHANGERATES');
+
 const { 
     getTodayExchangeRates, 
     convertCurrency, 
@@ -18,7 +21,7 @@ router.get('/', isAuthenticated, async (req, res) => {
         const rates = await getTodayExchangeRates();
         res.json({ success: true, rates, base_currency: BASE_CURRENCY });
     } catch (error) {
-        console.error('Exchange rates GET xatolik:', error);
+        log.error('Exchange rates GET xatolik:', error);
         res.status(500).json({ message: 'Kurslarni olishda xatolik' });
     }
 });
@@ -45,7 +48,7 @@ router.post('/convert', isAuthenticated, async (req, res) => {
             formatted: formatCurrency(converted, toCurrency)
         });
     } catch (error) {
-        console.error('Currency convert xatolik:', error);
+        log.error('Currency convert xatolik:', error);
         res.status(500).json({ message: 'Konvertatsiya qilishda xatolik' });
     }
 });
@@ -53,7 +56,7 @@ router.post('/convert', isAuthenticated, async (req, res) => {
 // POST /api/exchange-rates/refresh - Kurslarni API dan yangilash (admin)
 router.post('/refresh', isAuthenticated, hasPermission('settings:edit_general'), async (req, res) => {
     try {
-        console.log('🔄 Kurslarni API dan yangilash...');
+        log.debug('🔄 Kurslarni API dan yangilash...');
         const rates = await fetchExchangeRatesFromAPI();
         
         if (rates) {
@@ -75,14 +78,14 @@ router.post('/refresh', isAuthenticated, hasPermission('settings:edit_general'),
             
             // WebSocket orqali realtime yuborish
             if (global.broadcastWebSocket) {
-                console.log(`📡 [EXCHANGE_RATES] Kurslar yangilandi, WebSocket orqali yuborilmoqda...`);
+                log.debug(`📡 [EXCHANGE_RATES] Kurslar yangilandi, WebSocket orqali yuborilmoqda...`);
                 global.broadcastWebSocket('exchange_rates_updated', {
                     rates: rates,
                     date: today,
                     updated_by: req.session.user.id,
                     updated_by_username: req.session.user.username
                 });
-                console.log(`✅ [EXCHANGE_RATES] WebSocket yuborildi: exchange_rates_updated`);
+                log.debug(`✅ [EXCHANGE_RATES] WebSocket yuborildi: exchange_rates_updated`);
             }
             
             res.json({ 
@@ -94,7 +97,7 @@ router.post('/refresh', isAuthenticated, hasPermission('settings:edit_general'),
             res.status(500).json({ message: 'Kurslarni API dan olishda xatolik' });
         }
     } catch (error) {
-        console.error('Exchange rates refresh xatolik:', error);
+        log.error('Exchange rates refresh xatolik:', error);
         res.status(500).json({ message: 'Kurslarni yangilashda xatolik' });
     }
 });
@@ -117,7 +120,7 @@ router.get('/history', isAuthenticated, hasPermission('settings:edit_general'), 
         
         res.json({ success: true, rates });
     } catch (error) {
-        console.error('Exchange rates history xatolik:', error);
+        log.error('Exchange rates history xatolik:', error);
         res.status(500).json({ message: 'Kurslar tarixini olishda xatolik' });
     }
 });

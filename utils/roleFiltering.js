@@ -2,6 +2,9 @@
 // Rol shartlari bo'yicha ma'lumotlarni filtrlash funksiyalari
 
 const { db } = require('../db.js');
+const { createLogger } = require('./logger.js');
+const log = createLogger('ROLEFILTERING');
+
 
 /**
  * Foydalanuvchi roliga qarab ko'rinadigan filiallarni aniqlash
@@ -11,7 +14,7 @@ const { db } = require('../db.js');
 async function getVisibleLocations(user) {
     // User va role tekshiruvi
     if (!user || !user.role) {
-        console.warn('[roleFiltering] User yoki role topilmadi:', user);
+        log.warn('[roleFiltering] User yoki role topilmadi:', user);
         return [];
     }
     
@@ -40,7 +43,7 @@ async function getVisibleLocations(user) {
     // Rol ma'lumotlarini olish
     const roleData = await db('roles').where('role_name', user.role).first();
     if (!roleData) {
-        console.warn(`[roleFiltering] Rol topilmadi: ${user.role}`);
+        log.warn(`[roleFiltering] Rol topilmadi: ${user.role}`);
         return []; // Rol topilmasa, hech narsa ko'rinmaydi
     }
     
@@ -96,7 +99,7 @@ async function getVisibleLocations(user) {
 async function getVisibleBrands(user) {
     // User va role tekshiruvi
     if (!user || !user.role) {
-        console.warn('[roleFiltering] User yoki role topilmadi (getVisibleBrands):', user);
+        log.warn('[roleFiltering] User yoki role topilmadi (getVisibleBrands):', user);
         return [];
     }
     
@@ -109,7 +112,7 @@ async function getVisibleBrands(user) {
     // Rol ma'lumotlarini olish
     const roleData = await db('roles').where('role_name', user.role).first();
     if (!roleData) {
-        console.warn(`[roleFiltering] Rol topilmadi (getVisibleBrands): ${user.role}`);
+        log.warn(`[roleFiltering] Rol topilmadi (getVisibleBrands): ${user.role}`);
         return []; // Rol topilmasa, hech narsa ko'rinmaydi
     }
     
@@ -167,7 +170,7 @@ async function filterReportsByRole(query, user) {
     try {
         // User va role tekshiruvi
         if (!user || !user.role) {
-            console.warn('[filterReportsByRole] User yoki role topilmadi:', user);
+            log.warn('[filterReportsByRole] User yoki role topilmadi:', user);
             // Agar user yoki role yo'q bo'lsa, hech narsa qaytarmaslik
             return query.whereRaw('1 = 0');
         }
@@ -198,7 +201,7 @@ async function filterReportsByRole(query, user) {
         
         return query;
     } catch (error) {
-        console.error('[filterReportsByRole] Xatolik:', error);
+        log.error('[filterReportsByRole] Xatolik:', error);
         // Xatolik bo'lsa, hech narsa qaytarmaslik
         return query.whereRaw('1 = 0');
     }

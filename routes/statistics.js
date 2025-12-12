@@ -5,6 +5,9 @@ const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 // ===== MUAMMO TUZATILGAN JOY (1): Importni aniqlashtirish =====
 const { endOfMonth, startOfMonth, eachDayOfInterval, format } = require('date-fns');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('STATISTICS');
+
 
 const router = express.Router();
 
@@ -95,7 +98,7 @@ router.get('/employees', isAuthenticated, hasPermission('dashboard:view'), async
         res.json(statistics);
 
     } catch (error) {
-        console.error("/api/statistics/employees GET xatoligi:", error);
+        log.error("/api/statistics/employees GET xatoligi:", error);
         res.status(500).json({ message: "Xodimlar statistikasini yuklashda xatolik." });
     }
 });
@@ -166,7 +169,7 @@ router.get('/employee/:id', isAuthenticated, hasPermission('dashboard:view'), as
         res.json(dailyDetails);
 
     } catch (error) {
-        console.error(`/api/statistics/employee/${req.params.id} GET xatoligi:`, error);
+        log.error(`/api/statistics/employee/${req.params.id} GET xatoligi:`, error);
         res.status(500).json({ message: "Xodimning batafsil statistikasini olishda xatolik." });
     }
 });
@@ -224,14 +227,14 @@ router.get('/report/:reportId/history', isAuthenticated, hasPermission('dashboar
                     });
                 }
             } catch (parseError) {
-                console.error('old_data parse error:', parseError);
+                log.error('old_data parse error:', parseError);
             }
         }
         
         res.json(detailedHistory);
         
     } catch (error) {
-        console.error(`/api/statistics/report/${req.params.reportId}/history GET xatoligi:`, error);
+        log.error(`/api/statistics/report/${req.params.reportId}/history GET xatoligi:`, error);
         res.status(500).json({ message: "Hisobot tahrir tarixini olishda xatolik." });
     }
 });

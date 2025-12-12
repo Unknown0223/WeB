@@ -1,6 +1,9 @@
 const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated } = require('../middleware/auth.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('NOTIFICATIONS');
+
 
 const router = express.Router();
 
@@ -15,10 +18,10 @@ async function cleanupOldNotifications() {
             .del();
         
         if (deleted > 0) {
-            console.log(`✅ [NOTIFICATIONS] ${deleted} ta eski bildirishnoma o'chirildi`);
+            log.debug(`✅ [NOTIFICATIONS] ${deleted} ta eski bildirishnoma o'chirildi`);
         }
     } catch (error) {
-        console.error('❌ [NOTIFICATIONS] Eski bildirishnomalarni o\'chirishda xatolik:', error);
+        log.error('❌ [NOTIFICATIONS] Eski bildirishnomalarni o\'chirishda xatolik:', error);
     }
 }
 
@@ -103,13 +106,13 @@ router.put('/:id/read', isAuthenticated, async (req, res) => {
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [NOTIFICATIONS] Bildirishnoma o'qilgan deb belgilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [NOTIFICATIONS] Bildirishnoma o'qilgan deb belgilandi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('notification_read', {
                 notificationId: parseInt(notificationId),
                 userId: userId,
                 is_read: true
             });
-            console.log(`✅ [NOTIFICATIONS] WebSocket yuborildi: notification_read`);
+            log.debug(`✅ [NOTIFICATIONS] WebSocket yuborildi: notification_read`);
         }
 
         res.json({
@@ -142,12 +145,12 @@ router.put('/read-all', isAuthenticated, async (req, res) => {
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket && updatedCount > 0) {
-            console.log(`📡 [NOTIFICATIONS] Barcha bildirishnomalar o'qilgan deb belgilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [NOTIFICATIONS] Barcha bildirishnomalar o'qilgan deb belgilandi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('notifications_read_all', {
                 userId: userId,
                 count: updatedCount
             });
-            console.log(`✅ [NOTIFICATIONS] WebSocket yuborildi: notifications_read_all`);
+            log.debug(`✅ [NOTIFICATIONS] WebSocket yuborildi: notifications_read_all`);
         }
 
         res.json({
