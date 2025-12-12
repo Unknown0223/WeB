@@ -50,7 +50,7 @@ import {
     toggleAccordion
 } from './modules/settings.js';
 import { setupAuditLogFilters, setupAuditPagination } from './modules/audit.js';
-import { applyBranding, setupBrandingControls, saveBrandingSettings } from './modules/branding.js';
+import { applyBranding, setupBrandingControls, saveBrandingSettings } from './modules/appearance.js';
 import { initializeUserPermissions } from './modules/userPermissions.js';
 import { initRealTime } from './modules/realtime.js';
 import { initEnhancedSecurity } from './modules/security.js';
