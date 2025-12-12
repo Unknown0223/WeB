@@ -38,11 +38,11 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
         if (user.permissions.includes('reports:view_all')) {
             // Barcha hisobotlarni ko'rish huquqi bor
             // Rol shartlari bo'yicha filtrlash
-            query = await filterReportsByRole(query, user);
+            await filterReportsByRole(query, user);
         } else if (user.permissions.includes('reports:view_assigned')) {
             // Biriktirilgan filiallar hisobotlarini ko'rish
             // Rol shartlari bo'yicha filtrlash
-            query = await filterReportsByRole(query, user);
+            await filterReportsByRole(query, user);
         } else if (user.permissions.includes('reports:view_own')) {
             // Faqat o'zi yaratgan hisobotlarni ko'rish
             query.where('r.created_by', user.id);

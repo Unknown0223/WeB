@@ -618,6 +618,18 @@ router.get('/current-user', isAuthenticated, async (req, res) => {
     }
 });
 
+// GET /api/user/preferred-currency - Foydalanuvchi valyuta sozlamasini olish
+router.get('/user/preferred-currency', isAuthenticated, async (req, res) => {
+    try {
+        const user = await db('users').where({ id: req.session.user.id }).first();
+        const preferredCurrency = user?.preferred_currency || null;
+        res.json({ currency: preferredCurrency });
+    } catch (error) {
+        console.error('Currency fetch error:', error);
+        res.status(500).json({ message: "Valyuta sozlamasini olishda xatolik." });
+    }
+});
+
 // POST /api/user/preferred-currency - Foydalanuvchi valyuta sozlamasini saqlash
 router.post('/user/preferred-currency', isAuthenticated, async (req, res) => {
     const { currency } = req.body;
