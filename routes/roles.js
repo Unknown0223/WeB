@@ -68,6 +68,76 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
     }
 });
 
+// ===== STATIK ROUTE'LAR (dinamik :role_name dan OLDIN bo'lishi kerak) =====
+
+// Get all available permissions
+router.get('/permissions', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const permissions = await db('permissions')
+            .select('*')
+            .orderBy('category', 'permission_key');
+        res.json(permissions);
+    } catch (error) {
+        log.error('Get permissions error:', error);
+        res.status(500).json({ message: 'Huquqlarni yuklashda xatolik' });
+    }
+});
+
+// Get permissions overview with roles that have each permission
+router.get('/permissions/overview', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const permissions = await db('permissions')
+            .select('*')
+            .orderBy('category', 'permission_key');
+        
+        res.json(permissions);
+    } catch (error) {
+        log.error('Get permissions overview error:', error);
+        res.status(500).json({ message: 'Huquqlar ko\'rinishini yuklashda xatolik' });
+    }
+});
+
+// Admin rolining ma'lumotlarini olish
+router.get('/admin', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        log.debug('📋 [ROLES] /api/roles/admin endpointiga so\'rov keldi');
+        log.debug('📋 [ROLES] User:', req.session.user?.username, 'Role:', req.session.user?.role);
+        
+        const [adminRole, rolePermissions] = await Promise.all([
+            db('roles').where('role_name', 'admin').first(),
+            db('role_permissions').where('role_name', 'admin').select('permission_key')
+        ]);
+
+        if (!adminRole) {
+            log.debug('⚠️ [ROLES] Admin roli topilmadi');
+            return res.status(404).json({ message: "Admin roli topilmadi." });
+        }
+
+        const assignedPermissions = rolePermissions.map(rp => rp.permission_key);
+        
+        const requiresBrands = (adminRole.requires_brands === null || adminRole.requires_brands === undefined) 
+            ? null 
+            : Boolean(adminRole.requires_brands);
+        const requiresLocations = (adminRole.requires_locations === null || adminRole.requires_locations === undefined) 
+            ? null 
+            : Boolean(adminRole.requires_locations);
+
+        log.debug('✅ [ROLES] Admin roli ma\'lumotlari yuklandi');
+        res.json({
+            role_name: adminRole.role_name,
+            permissions: assignedPermissions,
+            requires_brands: requiresBrands,
+            requires_locations: requiresLocations
+        });
+
+    } catch (error) {
+        log.error("❌ [ROLES] /api/roles/admin GET xatoligi:", error);
+        res.status(500).json({ message: "Admin roli ma'lumotlarini yuklashda xatolik." });
+    }
+});
+
+// ===== DINAMIK ROUTE'LAR =====
+
 // Rol ma'lumotlarini olish (GET /api/roles/:role_name)
 router.get('/:role_name', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     const { role_name } = req.params;
@@ -111,46 +181,6 @@ router.get('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
     } catch (error) {
         log.error(`/api/roles/${role_name} GET xatoligi:`, error);
         res.status(500).json({ message: "Rol ma'lumotlarini yuklashda xatolik." });
-    }
-});
-
-// Admin rolining ma'lumotlarini olish (404 xatosini oldini olish uchun)
-// Bu endpoint /api/roles/:role_name dan oldin bo'lishi kerak
-router.get('/admin', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
-    try {
-        log.debug('📋 [ROLES] /api/roles/admin endpointiga so\'rov keldi');
-        log.debug('📋 [ROLES] User:', req.session.user?.username, 'Role:', req.session.user?.role);
-        
-        const [adminRole, rolePermissions] = await Promise.all([
-            db('roles').where('role_name', 'admin').first(),
-            db('role_permissions').where('role_name', 'admin').select('permission_key')
-        ]);
-
-        if (!adminRole) {
-            log.debug('⚠️ [ROLES] Admin roli topilmadi');
-            return res.status(404).json({ message: "Admin roli topilmadi." });
-        }
-
-        const assignedPermissions = rolePermissions.map(rp => rp.permission_key);
-        
-        const requiresBrands = (adminRole.requires_brands === null || adminRole.requires_brands === undefined) 
-            ? null 
-            : Boolean(adminRole.requires_brands);
-        const requiresLocations = (adminRole.requires_locations === null || adminRole.requires_locations === undefined) 
-            ? null 
-            : Boolean(adminRole.requires_locations);
-
-        log.debug('✅ [ROLES] Admin roli ma\'lumotlari yuklandi');
-        res.json({
-            role_name: adminRole.role_name,
-            permissions: assignedPermissions,
-            requires_brands: requiresBrands,
-            requires_locations: requiresLocations
-        });
-
-    } catch (error) {
-        log.error("❌ [ROLES] /api/roles/admin GET xatoligi:", error);
-        res.status(500).json({ message: "Admin roli ma'lumotlarini yuklashda xatolik." });
     }
 });
 
@@ -202,33 +232,6 @@ router.put('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
     } catch (error) {
         log.error(`/api/roles/${role_name} PUT xatoligi:`, error);
         res.status(500).json({ message: "Rol huquqlarini yangilashda xatolik." });
-    }
-});
-
-// Get all available permissions
-router.get('/permissions', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
-    try {
-        const permissions = await db('permissions')
-            .select('*')
-            .orderBy('category', 'permission_key');
-        res.json(permissions);
-    } catch (error) {
-        log.error('Get permissions error:', error);
-        res.status(500).json({ message: 'Huquqlarni yuklashda xatolik' });
-    }
-});
-
-// Get permissions overview with roles that have each permission
-router.get('/permissions/overview', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
-    try {
-        const permissions = await db('permissions')
-            .select('*')
-            .orderBy('category', 'permission_key');
-        
-        res.json(permissions);
-    } catch (error) {
-        log.error('Get permissions overview error:', error);
-        res.status(500).json({ message: 'Huquqlar ko\'rinishini yuklashda xatolik' });
     }
 });
 
