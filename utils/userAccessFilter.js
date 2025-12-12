@@ -29,8 +29,8 @@ function clearUserCache(userId) {
 }
 
 async function getUserAccessFilter(user) {
-    // Super admin uchun cheklov yo'q
-    if (user.role === 'super_admin') {
+    // Super admin uchun cheklov yo'q (ikkala variant: superadmin va super_admin)
+    if (user.role === 'superadmin' || user.role === 'super_admin') {
         return {
             allowedLocations: null, // null = barcha filiallar
             allowedBrandIds: null   // null = barcha brendlar
@@ -142,7 +142,6 @@ async function getUserAccessFilter(user) {
         
         // Agar ikkalasi ham false/null bo'lsa, hech narsa ko'rsatilmaydi
         if (isLocationsFalse && isBrandsFalse) {
-            console.log(`⚠️ [USER_ACCESS] Foydalanuvchi ${user.id} uchun hech narsa ko'rsatilmaydi (filial va brend ikkalasi ham tanlanmagan)`);
             return {
                 allowedLocations: [], // Bo'sh ro'yxat = hech narsa ko'rsatilmaydi
                 allowedBrandIds: []   // Bo'sh ro'yxat = hech narsa ko'rsatilmaydi
@@ -215,6 +214,11 @@ async function getUserAccessFilter(user) {
  * @param {string} brandIdColumn - Brand ID column nomi (default: 'r.brand_id')
  */
 async function applyReportsFilter(query, user, locationColumn = 'r.location', brandIdColumn = 'r.brand_id') {
+    // Superadmin uchun hech qanday filter qo'llanmaydi
+    if (user.role === 'superadmin' || user.role === 'super_admin') {
+        return; // Hech qanday filter qo'llanmaydi, barcha ma'lumotlar ko'rsatiladi
+    }
+    
     const filter = await getUserAccessFilter(user);
     
     if (filter.allowedLocations !== null && filter.allowedLocations.length > 0) {
@@ -240,6 +244,11 @@ async function applyReportsFilter(query, user, locationColumn = 'r.location', br
  * @param {Object} user - Foydalanuvchi ma'lumotlari
  */
 async function applyBrandsFilter(query, user) {
+    // Superadmin uchun hech qanday filter qo'llanmaydi
+    if (user.role === 'superadmin' || user.role === 'super_admin') {
+        return; // Hech qanday filter qo'llanmaydi, barcha brendlar ko'rsatiladi
+    }
+    
     const filter = await getUserAccessFilter(user);
     
     if (filter.allowedBrandIds !== null && filter.allowedBrandIds.length > 0) {
@@ -264,6 +273,11 @@ async function applyBrandsFilter(query, user) {
  * @returns {Array} Ruxsat etilgan filiallar ro'yxati
  */
 async function getFilteredLocations(user, allLocations) {
+    // Superadmin uchun barcha filiallar
+    if (user.role === 'superadmin' || user.role === 'super_admin') {
+        return allLocations; // Barcha filiallar
+    }
+    
     const filter = await getUserAccessFilter(user);
     
     if (filter.allowedLocations === null) {

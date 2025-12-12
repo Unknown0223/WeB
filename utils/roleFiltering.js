@@ -17,8 +17,22 @@ async function getVisibleLocations(user) {
     
     // Superadmin barcha filiallarni ko'radi
     if (user.role === 'superadmin' || user.role === 'super_admin') {
+        // Avval settings'dan filiallarni olish
+        const settingsRow = await db('settings').where({ key: 'app_settings' }).first();
+        if (settingsRow) {
+            try {
+                const appSettings = JSON.parse(settingsRow.value);
+                if (appSettings.locations && Array.isArray(appSettings.locations) && appSettings.locations.length > 0) {
+                    return appSettings.locations;
+                }
+            } catch (e) {
+                // JSON parse xatolik
+            }
+        }
+        // Agar settings'da topilmasa, reports jadvalidan olish
         const allLocations = await db('reports')
             .distinct('location')
+            .whereNotNull('location')
             .pluck('location');
         return allLocations;
     }

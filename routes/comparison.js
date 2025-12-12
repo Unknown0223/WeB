@@ -136,6 +136,7 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 const reportData = JSON.parse(rawData);
                 
                 let reportTotal = 0;
+                
                 for (const key in reportData) {
                     // Key format: {brandId}_{columnName}
                     const parts = key.split('_');
@@ -156,7 +157,7 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 
                 locationTotals[location].operator_amount += reportTotal;
             } catch (error) {
-                // Silent error handling
+                console.error(`[COMPARISON] Report parse xatolik (location: ${location}, report_id: ${report.id}):`, error.message);
             }
         }
 

@@ -41,7 +41,6 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
         ];
         
         if (global.broadcastWebSocket && importantActions.includes(action)) {
-            console.log(`📡 [AUDIT] Muhim action yozildi, WebSocket orqali yuborilmoqda... Action: ${action}`);
             global.broadcastWebSocket('audit_log_added', {
                 logId: logId,
                 userId: userId,
@@ -51,7 +50,6 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
                 details: details,
                 timestamp: new Date().toISOString()
             });
-            console.log(`✅ [AUDIT] WebSocket yuborildi: audit_log_added`);
         }
     } catch (error) {
         console.error("Audit log yozishda xatolik:", error);
@@ -59,11 +57,9 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
 };
 
 const initializeDB = async () => {
-    console.log('Ma\'lumotlar bazasi migratsiyalari tekshirilmoqda...');
     
     await db.migrate.latest();
     
-    console.log('Migratsiyalar muvaffaqiyatli yakunlandi.');
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
     // YANGI LOGIKA: Faqat superadmin standart rol bo'ladi, boshqa rollar superadmin tomonidan yaratiladi
@@ -117,7 +113,6 @@ const initializeDB = async () => {
                 // Import oldidan rollarni tekshirish
                 const rolesBefore = await trx('roles').select('role_name');
                 const roleNamesBefore = rolesBefore.map(r => r.role_name);
-                console.log(`🔍 [ROLES] Server ishga tushishdan oldin rollar (${roleNamesBefore.length} ta):`, roleNamesBefore);
                 
                 // Faqat superadmin rolini yaratish - retry bilan
                 try {
@@ -161,20 +156,11 @@ const initializeDB = async () => {
         // Import keyin rollarni tekshirish
         const rolesAfter = await trx('roles').select('role_name');
         const roleNamesAfter = rolesAfter.map(r => r.role_name);
-        console.log(`🔍 [ROLES] Server ishga tushishdan keyin rollar (${roleNamesAfter.length} ta):`, roleNamesAfter);
         
         // Yo'qolgan rollarni topish
         const lostRoles = roleNamesBefore.filter(role => !roleNamesAfter.includes(role));
         if (lostRoles.length > 0) {
-            console.log(`❌ [ROLES] XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
-        } else {
-            console.log(`✅ [ROLES] Barcha rollar saqlanib qoldi`);
-        }
-        
-        // Yangi qo'shilgan rollarni topish
-        const newRoles = roleNamesAfter.filter(role => !roleNamesBefore.includes(role));
-        if (newRoles.length > 0) {
-            console.log(`➕ [ROLES] Yangi qo'shilgan rollar (${newRoles.length} ta):`, newRoles);
+            console.error(`❌ [ROLES] XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
         }
             });
             
@@ -186,7 +172,6 @@ const initializeDB = async () => {
             retries--;
             
             if (error.code === 'SQLITE_BUSY' && retries > 0) {
-                console.warn(`⚠️ [DB] SQLite BUSY xatolik, qayta urinish... (${retries} qoldi)`);
                 // Qisqa kutish va qayta urinish
                 await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries))); // 100ms, 200ms, 300ms
             } else {
@@ -204,7 +189,6 @@ const initializeDB = async () => {
     try {
         const expandedPermissionsSeed = require('./seeds/02_expanded_permissions.js');
         await expandedPermissionsSeed.seed(db);
-        console.log('Kengaytirilgan permission\'lar qo\'shildi.');
     } catch (error) {
         console.error('Seeds faylini ishga tushirishda xatolik:', error.message);
         // Xatolik bo'lsa ham davom etamiz
@@ -222,7 +206,6 @@ const initializeDB = async () => {
             status: 'active',
             device_limit: 999 // Superadmin uchun cheksiz device limit
         });
-        console.log("Boshlang'ich superadmin yaratildi. Login: 'superadmin', Parol: 'superadmin123'");
     } else if (superAdminUser.role === 'super_admin') {
         // Eski super_admin ni superadmin ga o'zgartirish
         await db('users').where({ id: superAdminUser.id }).update({ role: 'superadmin' });

@@ -3,6 +3,7 @@ const { db, logAction } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { sendToTelegram } = require('../utils/bot.js');
 const { filterReportsByRole, getVisibleLocations, getVisibleBrands } = require('../utils/roleFiltering.js');
+const ExcelJS = require('exceljs');
 
 const router = express.Router();
 
@@ -534,6 +535,126 @@ router.get('/:id/history', isAuthenticated, async (req, res) => {
     } catch (error) {
         console.error(`/api/reports/${req.params.id}/history GET xatoligi:`, error);
         res.status(500).json({ message: "Hisobot tarixini olishda xatolik" });
+    }
+});
+
+// POST /api/reports/export - Hisobotni Excel formatida export qilish
+router.post('/export', isAuthenticated, async (req, res) => {
+    try {
+        const { tableData, columns, date, location, currency } = req.body;
+        
+        if (!tableData || !Array.isArray(tableData)) {
+            return res.status(400).json({ message: "Jadval ma'lumotlari topilmadi." });
+        }
+        
+        console.log('📊 [REPORTS EXPORT] Excel yaratilmoqda...', { rows: tableData.length, columns: columns?.length });
+        
+        // Excel workbook yaratish
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Hisobot');
+        
+        // Sarlavhalar
+        const headers = ['Brend', ...(columns || []), 'Jami'];
+        worksheet.columns = headers.map((header, index) => ({
+            header: header,
+            key: `col${index}`,
+            width: index === 0 ? 25 : 20
+        }));
+        
+        // Sarlavha qatorini formatlash (ko'k rang)
+        const headerRow = worksheet.getRow(1);
+        headerRow.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+        headerRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF1F4788' } // Ko'k rang
+        };
+        headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+        headerRow.height = 25;
+        
+        // Ma'lumotlarni qo'shish
+        let totalRowIndex = 0;
+        tableData.forEach((row, rowIndex) => {
+            const isTotalRow = row[0] && (row[0].toString().toLowerCase().includes('jami') || row[0].toString().toLowerCase().includes('total'));
+            
+            const excelRow = worksheet.addRow(row);
+            
+            if (isTotalRow) {
+                // Jami qatori - sariq rang
+                totalRowIndex = rowIndex + 2; // +2 chunki sarlavha 1-qator, ma'lumotlar 2-qatordan boshlanadi
+                excelRow.font = { bold: true, color: { argb: 'FF000000' } };
+                excelRow.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFFFEB3B' } // Sariq rang
+                };
+                excelRow.alignment = { vertical: 'middle', horizontal: 'right' };
+                excelRow.height = 20;
+            } else {
+                // Oddiy qatorlar
+                excelRow.alignment = { vertical: 'middle', horizontal: 'right' };
+                excelRow.height = 20;
+                // Birinchi ustun (Brend) chapga, qolganlari o'ngga
+                const firstCell = excelRow.getCell(1);
+                firstCell.alignment = { vertical: 'middle', horizontal: 'left' };
+            }
+            
+            // Sonlarni to'g'ri formatlash
+            row.forEach((cellValue, colIndex) => {
+                if (colIndex === 0) return; // Birinchi ustun (Brend) - matn
+                
+                const cell = excelRow.getCell(colIndex + 1);
+                const strValue = cellValue?.toString().replace(/\s/g, '').replace(',', '.') || '0';
+                const numValue = parseFloat(strValue);
+                
+                if (!isNaN(numValue) && strValue !== '') {
+                    cell.value = numValue;
+                    cell.numFmt = '# ##0,00'; // O'zbekiston formatida
+                }
+            });
+        });
+        
+        // Barcha qatorlar uchun border qo'shish
+        worksheet.eachRow((row) => {
+            row.eachCell((cell) => {
+                cell.border = {
+                    top: { style: 'thin', color: { argb: 'FF000000' } },
+                    left: { style: 'thin', color: { argb: 'FF000000' } },
+                    bottom: { style: 'thin', color: { argb: 'FF000000' } },
+                    right: { style: 'thin', color: { argb: 'FF000000' } }
+                };
+            });
+        });
+        
+        // Jami qatori uchun qalin border
+        if (totalRowIndex > 0) {
+            const totalRow = worksheet.getRow(totalRowIndex);
+            totalRow.eachCell((cell) => {
+                cell.border = {
+                    top: { style: 'medium', color: { argb: 'FF000000' } },
+                    left: { style: 'thin', color: { argb: 'FF000000' } },
+                    bottom: { style: 'thin', color: { argb: 'FF000000' } },
+                    right: { style: 'thin', color: { argb: 'FF000000' } }
+                };
+            });
+        }
+        
+        // Response
+        const fileName = `${location || 'hisobot'}_${date || new Date().toISOString().split('T')[0]}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        
+        await workbook.xlsx.write(res);
+        res.end();
+        
+        console.log('✅ [REPORTS EXPORT] Excel fayl muvaffaqiyatli yaratildi:', fileName);
+    } catch (error) {
+        console.error('/api/reports/export POST xatoligi:', error);
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ 
+            message: "Excel faylni yaratishda xatolik.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 

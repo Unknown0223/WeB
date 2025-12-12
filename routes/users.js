@@ -5,6 +5,7 @@ const userRepository = require('../data/userRepository.js');
 const { refreshUserSessions } = require('../utils/sessionManager.js');
 const { sendToTelegram } = require('../utils/bot.js');
 const geoip = require('geoip-lite');
+const ExcelJS = require('exceljs');
 
 const router = express.Router();
 
@@ -109,6 +110,137 @@ router.get('/pending', isAuthenticated, hasPermission('users:edit'), async (req,
     } catch (error) {
         console.error("/api/users/pending GET xatoligi:", error);
         res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
+    }
+});
+
+// GET /api/users/pending/export - Pending users ro'yxatini Excel formatida export qilish
+router.get('/pending/export', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    try {
+        const pendingUsers = await db('users')
+            .whereIn('status', ['pending_approval', 'pending_telegram_subscription', 'status_in_process'])
+            .select(
+                'id', 
+                'username', 
+                'fullname', 
+                'created_at', 
+                'status',
+                'telegram_chat_id',
+                'telegram_username'
+            )
+            .orderBy('created_at', 'desc');
+
+        // Excel workbook yaratish
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Yangi Foydalanuvchi So\'rovlari');
+
+        // Sarlavhalar
+        worksheet.columns = [
+            { header: 'ID', key: 'id', width: 10 },
+            { header: 'Foydalanuvchi nomi', key: 'username', width: 25 },
+            { header: 'To\'liq ism', key: 'fullname', width: 30 },
+            { header: 'Telegram ID', key: 'telegram_id', width: 15 },
+            { header: 'Telegram Username', key: 'telegram_username', width: 25 },
+            { header: 'Holat', key: 'status_text', width: 30 },
+            { header: 'So\'rov yuborilgan sana', key: 'created_at', width: 25 }
+        ];
+
+        // Status matnlari
+        const statusMap = {
+            'pending_approval': 'Admin tasdiqlashini kutmoqda',
+            'pending_telegram_subscription': 'Botga obuna bo\'lishni kutmoqda',
+            'status_in_process': 'Jarayonda'
+        };
+
+        // Ma'lumotlarni qo'shish
+        pendingUsers.forEach((user, index) => {
+            const row = worksheet.addRow({
+                id: user.id,
+                username: user.username || '-',
+                fullname: user.fullname || '-',
+                telegram_id: user.telegram_chat_id || '-',
+                telegram_username: user.telegram_username ? `@${user.telegram_username}` : '-',
+                status_text: statusMap[user.status] || user.status,
+                created_at: user.created_at ? new Date(user.created_at).toLocaleString('uz-UZ') : '-'
+            });
+
+            // Ranglar qo'shish - status bo'yicha
+            const statusCell = row.getCell('status_text');
+            if (user.status === 'pending_approval') {
+                statusCell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFFFE0B2' } // Sariq
+                };
+            } else if (user.status === 'pending_telegram_subscription') {
+                statusCell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFFFF59D' } // Yengil sariq
+                };
+            } else if (user.status === 'status_in_process') {
+                statusCell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFFFCC80' } // To'q sariq
+                };
+            }
+
+            // Qatorlar uchun alternativ ranglar
+            if (index % 2 === 0) {
+                row.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFF5F5F5' } // Yengil kulrang
+                };
+            }
+        });
+
+        // Sarlavha qatorini formatlash (ko'k rang - rasmdagidek)
+        const headerRow = worksheet.getRow(1);
+        headerRow.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+        headerRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF1F4788' } // Ko'k rang (rasmdagidek)
+        };
+        headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+        headerRow.height = 25;
+
+        // Barcha qatorlar uchun alignment
+        worksheet.eachRow((row, rowNumber) => {
+            if (rowNumber > 1) {
+                row.alignment = { vertical: 'middle', horizontal: 'left' };
+                row.height = 20;
+            }
+        });
+
+        // Border qo'shish
+        worksheet.eachRow((row) => {
+            row.eachCell((cell) => {
+                cell.border = {
+                    top: { style: 'thin' },
+                    left: { style: 'thin' },
+                    bottom: { style: 'thin' },
+                    right: { style: 'thin' }
+                };
+            });
+        });
+
+        // Response
+        const timestamp = new Date().toISOString().split('T')[0];
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="yangi_foydalanuvchi_so'rovlari_${timestamp}.xlsx"`);
+
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (error) {
+        console.error("/api/users/pending/export GET xatoligi:", error);
+        console.error("Error stack:", error.stack);
+        console.error("Error message:", error.message);
+        res.status(500).json({ 
+            message: "Excel faylni yaratishda xatolik.",
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
