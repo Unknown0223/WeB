@@ -166,7 +166,30 @@ async function safeSendMessage(chatId, text, options = {}) {
             await db('users').where({ telegram_chat_id: chatId }).update({ telegram_chat_id: null, telegram_username: null });
         } else if (body?.error_code === 400) {
             log.error(`❌ [TELEGRAM] Bad Request (400). Chat ID: ${chatId}, Description: ${body?.description}`);
-            if (body?.description?.includes("chat not found")) {
+            
+            // Supergroup'ga yangilangan guruhni avtomatik hal qilish
+            if (body?.description?.includes("upgraded to a supergroup")) {
+                const newChatId = body?.parameters?.migrate_to_chat_id || error.response?.body?.parameters?.migrate_to_chat_id;
+                if (newChatId) {
+                    log.info(`🔄 [TELEGRAM] Guruh supergroup'ga yangilandi. Eski ID: ${chatId}, Yangi ID: ${newChatId}`);
+                    // Yangi ID ni bazaga saqlash
+                    await db('settings')
+                        .where({ key: 'telegram_group_id' })
+                        .update({ value: String(newChatId) });
+                    log.info(`✅ [TELEGRAM] Yangi supergroup ID saqlandi: ${newChatId}`);
+                    
+                    // Xabarni yangi ID bilan qayta yuborish
+                    try {
+                        const retryResult = await bot.sendMessage(newChatId, text, { parse_mode: 'HTML', ...options });
+                        log.info(`✅ [TELEGRAM] Xabar yangi supergroup'ga yuborildi.`);
+                        return retryResult;
+                    } catch (retryError) {
+                        log.error(`❌ [TELEGRAM] Yangi supergroup'ga yuborishda xatolik:`, retryError.message);
+                    }
+                } else {
+                    log.error(`❌ [TELEGRAM] Guruh supergroup'ga yangilangan, lekin yangi ID topilmadi. Admin panelda yangi Group ID ni qo'lda kiriting.`);
+                }
+            } else if (body?.description?.includes("chat not found")) {
                 log.error(`❌ [TELEGRAM] Guruh topilmadi! Group ID noto'g'ri yoki bot guruhda yo'q.`);
             } else if (body?.description?.includes("not enough rights")) {
                 log.error(`❌ [TELEGRAM] Bot guruhda xabar yuborish huquqiga ega emas!`);
