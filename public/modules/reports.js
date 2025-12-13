@@ -114,10 +114,23 @@ export function renderSavedReports() {
     }
     DOM.savedReportsList.innerHTML = reportIds.map(id => {
         const report = state.savedReports[id];
+        console.log(`[FRONTEND] Rendering report ${id}:`, report);
+        
+        if (!report) {
+            console.warn(`[FRONTEND] Report ${id} topilmadi!`);
+            return '';
+        }
+        
         const editInfo = report.edit_count > 0 ? `<span class="edit-count">✏️ ${report.edit_count}</span>` : '';
         
         // Sanani formatlash
-        const dateObj = new Date(report.date);
+        const reportDate = report.date || report.report_date;
+        if (!reportDate) {
+            console.warn(`[FRONTEND] Report ${id} da sana yo'q!`);
+            return '';
+        }
+        
+        const dateObj = new Date(reportDate);
         const day = dateObj.getDate().toString().padStart(2, '0');
         const month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
         const year = dateObj.getFullYear();
@@ -129,7 +142,7 @@ export function renderSavedReports() {
                     <span class="report-date">${day}.${month}.${year}</span>
                 </div>
                 <div class="report-line-2">
-                    <span class="report-location">${report.location}</span>
+                    <span class="report-location">${report.location || 'Noma\'lum filial'}</span>
                     ${editInfo}
                 </div>
             </div>`;
