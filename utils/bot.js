@@ -277,7 +277,7 @@ async function formatAndSendReport(payload) {
         }
         
         // Har bir brend alohida qatorda
-        messageText += brandLines.join('\n') + `\n`;
+        messageText += brandLines.join('\n') + `\n\n`;
 
         // Jami summa - qiymat allaqachon tanlangan valyutada, konvertatsiya qilmaslik kerak
         messageText += `💰 <b>JAMI:</b> <code>${formatCurrency(grandTotal, reportCurrency)}</code>`;
@@ -398,7 +398,7 @@ async function formatAndSendReport(payload) {
         }
         
         // Har bir brend alohida qatorda
-        messageText += brandLines.join('\n') + `\n`;
+        messageText += brandLines.join('\n') + `\n\n`;
         
         // Jami summalar - qiymatlar allaqachon tanlangan valyutada, konvertatsiya qilmaslik kerak
         const difference = newGrandTotal - oldGrandTotal;
@@ -409,7 +409,7 @@ async function formatAndSendReport(payload) {
             diffText = `<b>▼ ${formatCurrency(Math.abs(difference), reportCurrency)}</b>`;
         }
 
-        messageText += `\n💰 <b>JAMI:</b> <code>${formatCurrency(newGrandTotal, reportCurrency)}</code>  ${diffText}`;
+        messageText += `💰 <b>JAMI:</b> <code>${formatCurrency(newGrandTotal, reportCurrency)}</code>  ${diffText}`;
     }
 
     if (messageText) {
@@ -729,6 +729,22 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         return;
                     }
 
+                    // Telegram chat_id'ni yangilashdan oldin, bu chat_id allaqachon boshqa foydalanuvchiga tegishli ekanligini tekshirish
+                    const existingUserWithChatId = await db('users').where({ telegram_chat_id: chatId }).where('id', '!=', user.id).first();
+                    
+                    if (existingUserWithChatId) {
+                        // Agar bu chat_id allaqachon boshqa foydalanuvchiga tegishli bo'lsa
+                        if (existingUserWithChatId.status === 'active') {
+                            await safeSendMessage(chatId, `❌ <b>Xatolik:</b> Sizning Telegram profilingiz allaqachon tizimdagi boshqa <b>aktiv akkauntga</b> bog'langan (${escapeHtml(existingUserWithChatId.username)}). Yangi akkaunt ochish uchun boshqa Telegram profildan foydalaning.`);
+                            return;
+                        }
+                        // Agar eski foydalanuvchi active emas bo'lsa, uning chat_id'sini tozalash
+                        await db('users').where({ id: existingUserWithChatId.id }).update({
+                            telegram_chat_id: null,
+                            is_telegram_connected: false
+                        });
+                    }
+
                     // Telegram chat_id va is_telegram_connected yangilash
                     await db('users').where({ id: user.id }).update({
                         telegram_chat_id: chatId,
@@ -739,13 +755,131 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     // Token o'chirish (bir marta ishlatiladi)
                     await db('magic_links').where({ token: token }).del();
 
-
+                    // Kirish uchun magic link yaratish (login/parolsiz kirish)
+                    const loginToken = uuidv4();
+                    const loginExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 daqiqa
                     
-                    await safeSendMessage(chatId, `✅ <b>Muvaffaqiyatli!</b>\n\nSizning akkauntingiz (<b>${escapeHtml(user.username)}</b>) Telegram bot bilan bog'landi.\n\nEndi tizimga kirishingiz mumkin.`);
+                    await db('magic_links').insert({
+                        token: loginToken,
+                        user_id: user.id,
+                        expires_at: loginExpiresAt.toISOString()
+                    });
+
+                    // Magic link havolasini yaratish
+                    const loginUrl = new URL(`/api/auth/verify-session/${loginToken}`, NODE_SERVER_URL).href;
+                    
+                    const isHttps = loginUrl.startsWith('https://');
+                    let sentMessage;
+                    
+                    if (isHttps) {
+                        // HTTPS bo'lsa, inline button qo'shamiz
+                        const messageOptions = {
+                            reply_markup: {
+                                inline_keyboard: [[
+                                    { text: '🔗 Tizimga kirish', url: loginUrl }
+                                ]]
+                            }
+                        };
+                        const messageText = `✅ <b>Muvaffaqiyatli!</b>\n\nSizning akkauntingiz (<b>${escapeHtml(user.username)}</b>) Telegram bot bilan bog'landi.\n\n🔗 <b>Kirish uchun ruxsat berilgan bo'lim:</b>\n\n⚠️ Bu havola 10 daqiqa amal qiladi.`;
+                        sentMessage = await safeSendMessage(chatId, messageText, messageOptions);
+                    } else {
+                        // HTTP bo'lsa, inline button ishlamaydi, oddiy URL ko'rsatamiz
+                        const messageText = `✅ <b>Muvaffaqiyatli!</b>\n\nSizning akkauntingiz (<b>${escapeHtml(user.username)}</b>) Telegram bot bilan bog'landi.\n\n🔗 <b>Kirish uchun ruxsat berilgan bo'lim:</b>\n\n${loginUrl}\n\n⚠️ Bu havola 10 daqiqa amal qiladi.`;
+                        sentMessage = await safeSendMessage(chatId, messageText, {});
+                    }
+                    
+                    // Xabarni yuborish va message_id'ni saqlash
+                    if (sentMessage && sentMessage.message_id) {
+                        await db('users').where({ id: user.id }).update({ 
+                            bot_login_message_id: sentMessage.message_id 
+                        });
+                    }
 
                 } catch (error) {
-                    console.error(`❌ [BOT] Bot bog'lashda xatolik:`, error);
-                    await safeSendMessage(chatId, `❌ Tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.`);
+                    // UNIQUE constraint xatolikni aniq tariflab yozish
+                    if (error.code === 'SQLITE_CONSTRAINT' && error.errno === 19) {
+                        console.error(`❌ [BOT] Bot bog'lashda UNIQUE constraint xatoligi:`, {
+                            error_code: error.code,
+                            errno: error.errno,
+                            message: 'telegram_chat_id allaqachon boshqa foydalanuvchiga tegishli',
+                            chat_id: chatId,
+                            user_id: user.id,
+                            error_message: error.message
+                        });
+                        
+                        // Bu chat_id'ga tegishli foydalanuvchini topish
+                        const conflictingUser = await db('users').where({ telegram_chat_id: chatId }).first();
+                        
+                        if (conflictingUser) {
+                            if (conflictingUser.status === 'active') {
+                                await safeSendMessage(chatId, `❌ <b>Xatolik:</b> Sizning Telegram profilingiz allaqachon tizimdagi boshqa <b>aktiv akkauntga</b> bog'langan (${escapeHtml(conflictingUser.username)}). Yangi akkaunt ochish uchun boshqa Telegram profildan foydalaning.`);
+                            } else {
+                                // Agar eski foydalanuvchi active emas bo'lsa, uning chat_id'sini tozalash va yangisini qo'shish
+                                try {
+                                    await db('users').where({ id: conflictingUser.id }).update({
+                                        telegram_chat_id: null,
+                                        is_telegram_connected: false
+                                    });
+                                    
+                                    await db('users').where({ id: user.id }).update({
+                                        telegram_chat_id: chatId,
+                                        telegram_username: msg.from.username,
+                                        is_telegram_connected: true
+                                    });
+                                    
+                                    await db('magic_links').where({ token: token }).del();
+                                    
+                                    // Kirish uchun magic link yaratish (login/parolsiz kirish)
+                                    const loginToken = uuidv4();
+                                    const loginExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 daqiqa
+                                    
+                                    await db('magic_links').insert({
+                                        token: loginToken,
+                                        user_id: user.id,
+                                        expires_at: loginExpiresAt.toISOString()
+                                    });
+
+                                    // Magic link havolasini yaratish
+                                    const loginUrl = new URL(`/api/auth/verify-session/${loginToken}`, NODE_SERVER_URL).href;
+                                    
+                                    const isHttps = loginUrl.startsWith('https://');
+                                    let sentMessage;
+                                    
+                                    if (isHttps) {
+                                        // HTTPS bo'lsa, inline button qo'shamiz
+                                        const messageOptions = {
+                                            reply_markup: {
+                                                inline_keyboard: [[
+                                                    { text: '🔗 Tizimga kirish', url: loginUrl }
+                                                ]]
+                                            }
+                                        };
+                                        const messageText = `✅ <b>Muvaffaqiyatli!</b>\n\nSizning akkauntingiz (<b>${escapeHtml(user.username)}</b>) Telegram bot bilan bog'landi.\n\n🔗 <b>Kirish uchun ruxsat berilgan bo'lim:</b>\n\n⚠️ Bu havola 10 daqiqa amal qiladi.`;
+                                        sentMessage = await safeSendMessage(chatId, messageText, messageOptions);
+                                    } else {
+                                        // HTTP bo'lsa, inline button ishlamaydi, oddiy URL ko'rsatamiz
+                                        const messageText = `✅ <b>Muvaffaqiyatli!</b>\n\nSizning akkauntingiz (<b>${escapeHtml(user.username)}</b>) Telegram bot bilan bog'landi.\n\n🔗 <b>Kirish uchun ruxsat berilgan bo'lim:</b>\n\n${loginUrl}\n\n⚠️ Bu havola 10 daqiqa amal qiladi.`;
+                                        sentMessage = await safeSendMessage(chatId, messageText, {});
+                                    }
+                                    
+                                    // Xabarni yuborish va message_id'ni saqlash
+                                    if (sentMessage && sentMessage.message_id) {
+                                        await db('users').where({ id: user.id }).update({ 
+                                            bot_login_message_id: sentMessage.message_id 
+                                        });
+                                    }
+                                } catch (retryError) {
+                                    console.error(`❌ [BOT] Retry qilishda xatolik:`, retryError);
+                                    await safeSendMessage(chatId, `❌ Tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.`);
+                                }
+                            }
+                        } else {
+                            await safeSendMessage(chatId, `❌ Tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.`);
+                        }
+                    } else {
+                        console.error(`❌ [BOT] Bot bog'lashda xatolik:`, error);
+                        await safeSendMessage(chatId, `❌ Tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.`);
+                    }
                 }
                 return;
             }
@@ -798,12 +932,28 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         return;
                     }
 
+                    // Telegram chat_id'ni yangilashdan oldin, bu chat_id allaqachon boshqa foydalanuvchiga tegishli ekanligini tekshirish
+                    const existingUserWithChatId = await db('users').where({ telegram_chat_id: chatId }).where('id', '!=', newUserId).first();
+                    
+                    if (existingUserWithChatId) {
+                        // Agar bu chat_id allaqachon boshqa foydalanuvchiga tegishli bo'lsa
+                        if (existingUserWithChatId.status === 'active') {
+                            await safeSendMessage(chatId, `❌ <b>Xatolik:</b> Sizning Telegram profilingiz allaqachon tizimdagi boshqa <b>aktiv akkauntga</b> bog'langan (${escapeHtml(existingUserWithChatId.username)}). Yangi akkaunt ochish uchun boshqa Telegram profildan foydalaning.`);
+                            return;
+                        }
+                        // Agar eski foydalanuvchi active emas bo'lsa, uning chat_id'sini tozalash
+                        await db('users').where({ id: existingUserWithChatId.id }).update({
+                            telegram_chat_id: null,
+                            is_telegram_connected: false
+                        });
+                    }
+
                     await db('users').where({ id: newUserId }).update({
                         telegram_chat_id: chatId,
                         telegram_username: msg.from.username,
+                        is_telegram_connected: true, // MUHIM: is_telegram_connected ni true ga o'rnatish
                         status: 'pending_approval'
                     });
-
 
                     
                     await safeSendMessage(chatId, `✅ Rahmat! Siz botga muvaffaqiyatli obuna bo'ldingiz. \n\nSo'rovingiz ko'rib chiqish uchun adminga yuborildi. Tasdiqlanishini kuting.`);
@@ -817,8 +967,57 @@ const initializeBot = async (botToken, options = { polling: true }) => {
 
 
                 } catch (error) {
-                console.error("Yangi foydalanuvchi obunasida xatolik:", error);
-                await safeSendMessage(chatId, "Tizimda vaqtinchalik xatolik. Iltimos, keyinroq qayta urinib ko'ring.");
+                    // UNIQUE constraint xatolikni aniq tariflab yozish
+                    if (error.code === 'SQLITE_CONSTRAINT' && error.errno === 19) {
+                        console.error(`❌ [BOT] Bot bog'lashda UNIQUE constraint xatoligi:`, {
+                            error_code: error.code,
+                            errno: error.errno,
+                            message: 'telegram_chat_id allaqachon boshqa foydalanuvchiga tegishli',
+                            chat_id: chatId,
+                            user_id: newUserId,
+                            error_message: error.message
+                        });
+                        
+                        // Bu chat_id'ga tegishli foydalanuvchini topish
+                        const conflictingUser = await db('users').where({ telegram_chat_id: chatId }).first();
+                        
+                        if (conflictingUser) {
+                            if (conflictingUser.status === 'active') {
+                                await safeSendMessage(chatId, `❌ <b>Xatolik:</b> Sizning Telegram profilingiz allaqachon tizimdagi boshqa <b>aktiv akkauntga</b> bog'langan (${escapeHtml(conflictingUser.username)}). Yangi akkaunt ochish uchun boshqa Telegram profildan foydalaning.`);
+                            } else {
+                                // Agar eski foydalanuvchi active emas bo'lsa, uning chat_id'sini tozalash va yangisini qo'shish
+                                try {
+                                    await db('users').where({ id: conflictingUser.id }).update({
+                                        telegram_chat_id: null,
+                                        is_telegram_connected: false
+                                    });
+                                    
+                                    await db('users').where({ id: newUserId }).update({
+                                        telegram_chat_id: chatId,
+                                        telegram_username: msg.from.username,
+                                        status: 'pending_approval'
+                                    });
+                                    
+                                    await safeSendMessage(chatId, `✅ Rahmat! Siz botga muvaffaqiyatli obuna bo'ldingiz. \n\nSo'rovingiz ko'rib chiqish uchun adminga yuborildi. Tasdiqlanishini kuting.`);
+                                    
+                                    await sendToTelegram({
+                                        type: 'new_user_approval',
+                                        user_id: user.id,
+                                        username: user.username,
+                                        fullname: user.fullname
+                                    });
+                                } catch (retryError) {
+                                    console.error(`❌ [BOT] Retry qilishda xatolik:`, retryError);
+                                    await safeSendMessage(chatId, "Tizimda vaqtinchalik xatolik. Iltimos, keyinroq qayta urinib ko'ring.");
+                                }
+                            }
+                        } else {
+                            await safeSendMessage(chatId, "Tizimda vaqtinchalik xatolik. Iltimos, keyinroq qayta urinib ko'ring.");
+                        }
+                    } else {
+                        console.error("Yangi foydalanuvchi obunasida xatolik:", error);
+                        await safeSendMessage(chatId, "Tizimda vaqtinchalik xatolik. Iltimos, keyinroq qayta urinib ko'ring.");
+                    }
             }
 
         } else {

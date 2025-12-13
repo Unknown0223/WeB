@@ -38,11 +38,38 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
         if (user.permissions.includes('reports:view_all')) {
             // Barcha hisobotlarni ko'rish huquqi bor
             // Rol shartlari bo'yicha filtrlash
-            query = await filterReportsByRole(query, user);
+            try {
+                const filteredQuery = await filterReportsByRole(query, user);
+                if (filteredQuery && typeof filteredQuery.select === 'function') {
+                    query = filteredQuery;
+                } else {
+                }
+            } catch (filterError) {
+                console.error('[reports] filterReportsByRole xatolik (view_all):', filterError);
+                // Xatolik bo'lsa, asl query'ni ishlatamiz
+            }
         } else if (user.permissions.includes('reports:view_assigned')) {
             // Biriktirilgan filiallar hisobotlarini ko'rish
-            // Rol shartlari bo'yicha filtrlash
-            query = await filterReportsByRole(query, user);
+            // reports:view_assigned uchun o'zi yaratgan hisobotlarni ham ko'rsatish kerak
+            // Va biriktirilgan filiallar hisobotlarini ham ko'rsatish kerak
+            const visibleLocations = await getVisibleLocations(user);
+            const visibleBrands = await getVisibleBrands(user);
+            
+            // O'zi yaratgan hisobotlar yoki biriktirilgan filiallar hisobotlari
+            query.where(function() {
+                // O'zi yaratgan hisobotlar
+                this.where('r.created_by', user.id);
+                
+                // Yoki biriktirilgan filiallar hisobotlari
+                if (visibleLocations.length > 0) {
+                    this.orWhereIn('r.location', visibleLocations);
+                }
+                
+                // Yoki biriktirilgan brendlar hisobotlari
+                if (visibleBrands.length > 0) {
+                    this.orWhereIn('r.brand_id', visibleBrands);
+                }
+            });
         } else if (user.permissions.includes('reports:view_own')) {
             // Faqat o'zi yaratgan hisobotlarni ko'rish
             query.where('r.created_by', user.id);
@@ -54,17 +81,16 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 const visibleBrands = await getVisibleBrands(user);
                 
                 // Agar rol shartlari belgilangan bo'lsa, ularni qo'llash
-                if (visibleLocations.length > 0 || visibleBrands.length > 0) {
-                    if (visibleLocations.length > 0) {
-                        query.whereIn('r.location', visibleLocations);
-                    }
-                    if (visibleBrands.length > 0) {
-                        query.whereIn('r.brand_id', visibleBrands);
-                    }
+                // Lekin agar hech qanday shart belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
+                if (visibleLocations.length > 0) {
+                    query.whereIn('r.location', visibleLocations);
                 }
-                // Agar rol shartlari belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
+                if (visibleBrands.length > 0) {
+                    query.whereIn('r.brand_id', visibleBrands);
+                }
+                // Agar visibleLocations va visibleBrands bo'sh bo'lsa, hech qanday qo'shimcha filtr qo'llanmaydi
+                // va foydalanuvchi o'zi yaratgan barcha hisobotlarni ko'radi
             } catch (roleFilterError) {
-                console.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own):', roleFilterError);
                 // Xatolik bo'lsa ham, o'zi yaratgan hisobotlarni ko'rsatamiz
             }
         } else {
@@ -84,6 +110,19 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
         // Avval reports'ni olish
         let reports = [];
         try {
+            // Query obyektini tekshirish
+            if (!query || typeof query.select !== 'function') {
+                console.error('[reports] Query obyekti to\'g\'ri emas:', typeof query, query);
+                // Agar query obyekti to'g'ri emas bo'lsa, yangi query yaratamiz
+                query = db('reports as r')
+                    .leftJoin('users as u', 'r.created_by', 'u.id')
+                    .leftJoin('brands as b', 'r.brand_id', 'b.id');
+                // Faqat o'zi yaratgan hisobotlarni ko'rsatish
+                if (user.permissions.includes('reports:view_own')) {
+                    query.where('r.created_by', user.id);
+                }
+            }
+            
             reports = await query
                 .select('r.*', 'u.username as created_by_username', 'b.name as brand_name')
                 .orderBy('r.id', 'desc')
@@ -115,7 +154,26 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
             if (user.permissions.includes('reports:view_all')) {
                 await filterReportsByRole(countQuery, user);
             } else if (user.permissions.includes('reports:view_assigned')) {
-                await filterReportsByRole(countQuery, user);
+                // reports:view_assigned uchun o'zi yaratgan hisobotlarni ham ko'rsatish kerak
+                // Va biriktirilgan filiallar hisobotlarini ham ko'rsatish kerak
+                const visibleLocations = await getVisibleLocations(user);
+                const visibleBrands = await getVisibleBrands(user);
+                
+                // O'zi yaratgan hisobotlar yoki biriktirilgan filiallar hisobotlari
+                countQuery.where(function() {
+                    // O'zi yaratgan hisobotlar
+                    this.where('r.created_by', user.id);
+                    
+                    // Yoki biriktirilgan filiallar hisobotlari
+                    if (visibleLocations.length > 0) {
+                        this.orWhereIn('r.location', visibleLocations);
+                    }
+                    
+                    // Yoki biriktirilgan brendlar hisobotlari
+                    if (visibleBrands.length > 0) {
+                        this.orWhereIn('r.brand_id', visibleBrands);
+                    }
+                });
             } else if (user.permissions.includes('reports:view_own')) {
                 countQuery.where('r.created_by', user.id);
                 // reports:view_own uchun rol shartlarini qo'llamaymiz, chunki foydalanuvchi o'zi yaratgan barcha hisobotlarni ko'rish huquqiga ega
@@ -124,17 +182,16 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                     const visibleBrands = await getVisibleBrands(user);
                     
                     // Agar rol shartlari belgilangan bo'lsa, ularni qo'llash
-                    if (visibleLocations.length > 0 || visibleBrands.length > 0) {
-                        if (visibleLocations.length > 0) {
-                            countQuery.whereIn('r.location', visibleLocations);
-                        }
-                        if (visibleBrands.length > 0) {
-                            countQuery.whereIn('r.brand_id', visibleBrands);
-                        }
+                    // Lekin agar hech qanday shart belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
+                    if (visibleLocations.length > 0) {
+                        countQuery.whereIn('r.location', visibleLocations);
                     }
-                    // Agar rol shartlari belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
+                    if (visibleBrands.length > 0) {
+                        countQuery.whereIn('r.brand_id', visibleBrands);
+                    }
+                    // Agar visibleLocations va visibleBrands bo'sh bo'lsa, hech qanday qo'shimcha filtr qo'llanmaydi
+                    // va foydalanuvchi o'zi yaratgan barcha hisobotlarni ko'radi
                 } catch (roleFilterError) {
-                    console.warn('[reports] Rol shartlarini tekshirishda xatolik (view_own count):', roleFilterError);
                     // Xatolik bo'lsa ham, o'zi yaratgan hisobotlarni ko'rsatamiz
                 }
             }

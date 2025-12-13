@@ -6,6 +6,7 @@ const router = express.Router();
 // Barcha routerlarni import qilish va ularni to'g'ri yo'llarga ulash
 // Auth route'larini /auth path bilan qo'shish (barcha auth endpoint'lari /api/auth/... formatida)
 router.use('/auth', require('./auth.js'));
+router.use('/user', require('./auth.js')); // User-specific endpoints (preferred-currency, etc.)
 router.use('/users', require('./users.js'));
 router.use('/sessions', require('./sessions.js'));
 router.use('/reports', require('./reports.js'));

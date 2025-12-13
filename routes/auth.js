@@ -425,13 +425,27 @@ router.post('/login', async (req, res) => {
             db('users').where({ id: user.id }).update({ must_delete_creds: false }).catch(err => console.error('Update xatolik:', err));
         }
 
-        // === BOT OBUNASI TEKSHIRUVI (VARIANT A: MAJBURIY) ===
-        // Superadmin uchun bot obunasi majburiy emas
+        // === BOT OBUNASI TEKSHIRUVI ===
+        // Bot obunasi tekshiruvi faqat quyidagi holatda ishlaydi:
+        // 1. Foydalanuvchi status === 'active' (ya'ni tasdiqlangan)
+        // 2. Va bot obunasi bekor qilingan (is_telegram_connected === false yoki telegram_chat_id === null)
+        // Bu shuni anglatadiki, foydalanuvchi avval bot obunasiga ega bo'lgan, keyin uni bekor qilgan
+        // 
+        // Ro'yxatdan o'tish jarayonida (pending_approval, pending_telegram_subscription) 
+        // bot obunasi tekshiruvi o'tkazilmaydi, chunki bu jarayon allaqachon bot obunasi bilan boshlandi
+        
         const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
         const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
         const hasTelegramChatId = !!user.telegram_chat_id;
+        const isActiveUser = user.status === 'active';
 
-        if (!isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId)) {
+        // Bot obunasi tekshiruvi faqat active foydalanuvchilar uchun
+        // Agar foydalanuvchi active bo'lsa va bot obunasi yo'q bo'lsa, bu shuni anglatadiki:
+        // - Foydalanuvchi tizimda ishlagan
+        // - Bot obunasini bekor qilgan
+        // - Tizimdan chiqib ketgan
+        // - Keyin qayta kirishga harakat qilgan
+        if (!isSuperAdmin && isActiveUser && (!isTelegramConnected || !hasTelegramChatId)) {
             // Bot obunasi yo'q - bot bog'lash sahifasiga redirect
             // Sessiya yaratiladi, lekin bot bog'languncha dashboard ochilmaydi
             req.session.user = {
@@ -450,7 +464,7 @@ router.post('/login', async (req, res) => {
             logAction(user.id, 'login_success_but_bot_required', 'user', user.id, { 
                 ip: ipAddress, 
                 userAgent,
-                reason: 'Bot subscription required'
+                reason: 'Bot subscription cancelled - reconnection required'
             }).catch(err => console.error('Log yozishda xatolik:', err));
 
             return res.json({ 
@@ -460,6 +474,7 @@ router.post('/login', async (req, res) => {
                 requiresBotConnection: true
             });
         }
+        
         // =======================================================
 
         // Super admin yoki admin uchun admin paneliga redirect
@@ -561,6 +576,20 @@ router.get('/verify-session/:token', async (req, res) => {
             await logAction(user.id, '2fa_success', 'magic_link', user.id, { ip: ipAddress, userAgent });
             await logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent, method: 'magic_link' });
 
+            // Bot login xabarini o'chirish (agar mavjud bo'lsa)
+            if (user.telegram_chat_id && user.bot_login_message_id) {
+                const { getBot } = require('../utils/bot.js');
+                const bot = getBot();
+                if (bot) {
+                    try {
+                        await bot.deleteMessage(user.telegram_chat_id, user.bot_login_message_id);
+                        await db('users').where({ id: user.id }).update({ bot_login_message_id: null });
+                    } catch (error) {
+                        // Silent fail - old message deletion is optional
+                    }
+                }
+            }
+
             await db('magic_links').where({ token: token }).del();
             res.redirect('/');
         });
@@ -619,7 +648,7 @@ router.get('/current-user', isAuthenticated, async (req, res) => {
 });
 
 // POST /api/user/preferred-currency - Foydalanuvchi valyuta sozlamasini saqlash
-router.post('/user/preferred-currency', isAuthenticated, async (req, res) => {
+router.post('/preferred-currency', isAuthenticated, async (req, res) => {
     const { currency } = req.body;
     
     if (!currency || typeof currency !== 'string') {

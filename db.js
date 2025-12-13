@@ -41,7 +41,6 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
         ];
         
         if (global.broadcastWebSocket && importantActions.includes(action)) {
-            console.log(`📡 [AUDIT] Muhim action yozildi, WebSocket orqali yuborilmoqda... Action: ${action}`);
             global.broadcastWebSocket('audit_log_added', {
                 logId: logId,
                 userId: userId,
@@ -51,7 +50,6 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
                 details: details,
                 timestamp: new Date().toISOString()
             });
-            console.log(`✅ [AUDIT] WebSocket yuborildi: audit_log_added`);
         }
     } catch (error) {
         console.error("Audit log yozishda xatolik:", error);
@@ -59,11 +57,9 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
 };
 
 const initializeDB = async () => {
-    console.log('Ma\'lumotlar bazasi migratsiyalari tekshirilmoqda...');
     
     await db.migrate.latest();
     
-    console.log('Migratsiyalar muvaffaqiyatli yakunlandi.');
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
     // YANGI LOGIKA: Faqat superadmin standart rol bo'ladi, boshqa rollar superadmin tomonidan yaratiladi
