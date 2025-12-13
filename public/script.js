@@ -584,7 +584,7 @@ const renderKpiCards = (stats) => {
             DOM.savedReportsList.innerHTML = '<div class="empty-state">Hisobotlar topilmadi.</div>';
             return;
         }
-        DOM.savedReportsList.innerHTML = reportIds.map(id => {
+        const htmlContent = reportIds.map(id => {
             const report = state.savedReports[id];
             console.log(`[FRONTEND] Rendering report ${id} (script.js):`, report);
             
@@ -619,6 +619,13 @@ const renderKpiCards = (stats) => {
                     </div>
                 </div>`;
         }).join('');
+        
+        console.log(`[FRONTEND] Generated HTML content length: ${htmlContent.length}, Content:`, htmlContent);
+        console.log(`[FRONTEND] DOM.savedReportsList element:`, DOM.savedReportsList);
+        
+        DOM.savedReportsList.innerHTML = htmlContent;
+        
+        console.log(`[FRONTEND] After setting innerHTML, DOM.savedReportsList.innerHTML length: ${DOM.savedReportsList.innerHTML.length}`);
     }
     
     function updateTableValues(reportData = {}) {
