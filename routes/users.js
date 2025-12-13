@@ -1324,5 +1324,130 @@ router.post('/password-change-requests/:id/reject', isAuthenticated, hasPermissi
     }
 });
 
+// Foydalanuvchi o'chirishdan oldin ma'lumotlarni tekshirish
+router.get('/:id/check-data', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        if (isNaN(userId)) {
+            return res.status(400).json({ message: 'Noto\'g\'ri foydalanuvchi ID' });
+        }
+
+        // Foydalanuvchi mavjudligini tekshirish
+        const user = await db('users').where({ id: userId }).first();
+        if (!user) {
+            return res.status(404).json({ message: 'Foydalanuvchi topilmadi' });
+        }
+
+        // Foydalanuvchi ma'lumotlarini tekshirish
+        const [reportsCount, historyCount, comparisonsCount] = await Promise.all([
+            db('reports').where({ user_id: userId }).count('* as count').first(),
+            db('report_history').where({ user_id: userId }).count('* as count').first(),
+            db('comparisons').where({ user_id: userId }).count('* as count').first()
+        ]);
+
+        const hasData = {
+            reports: parseInt(reportsCount.count) || 0,
+            history: parseInt(historyCount.count) || 0,
+            comparisons: parseInt(comparisonsCount.count) || 0
+        };
+
+        const canDeleteSafely = hasData.reports === 0 && hasData.history === 0 && hasData.comparisons === 0;
+
+        res.json({
+            canDeleteSafely,
+            hasData
+        });
+    } catch (error) {
+        console.error('Check data xatoligi:', error);
+        res.status(500).json({ message: 'Ma\'lumotlarni tekshirishda xatolik' });
+    }
+});
+
+// Foydalanuvchini o'chirish
+router.delete('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        const forceDelete = req.query.forceDelete === 'true';
+        const adminId = req.session.user.id;
+        const ipAddress = req.session.ip_address;
+        const userAgent = req.session.user_agent;
+
+        if (isNaN(userId)) {
+            return res.status(400).json({ message: 'Noto\'g\'ri foydalanuvchi ID' });
+        }
+
+        // Foydalanuvchi mavjudligini tekshirish
+        const user = await db('users').where({ id: userId }).first();
+        if (!user) {
+            return res.status(404).json({ message: 'Foydalanuvchi topilmadi' });
+        }
+
+        // O'zini o'chirishni oldini olish
+        if (userId === adminId) {
+            return res.status(403).json({ message: 'O\'zingizni o\'chira olmaysiz' });
+        }
+
+        // Superadmin o'chirishni oldini olish
+        if ((user.role === 'superadmin' || user.role === 'super_admin') && 
+            req.session.user.role !== 'superadmin' && req.session.user.role !== 'super_admin') {
+            return res.status(403).json({ message: 'Superadminni faqat superadmin o\'chira oladi' });
+        }
+
+        // Ma'lumotlarni tekshirish
+        const [reportsCount, historyCount, comparisonsCount] = await Promise.all([
+            db('reports').where({ user_id: userId }).count('* as count').first(),
+            db('report_history').where({ user_id: userId }).count('* as count').first(),
+            db('comparisons').where({ user_id: userId }).count('* as count').first()
+        ]);
+
+        const hasData = {
+            reports: parseInt(reportsCount.count) || 0,
+            history: parseInt(historyCount.count) || 0,
+            comparisons: parseInt(comparisonsCount.count) || 0
+        };
+
+        // Agar ma'lumot bor bo'lsa va forceDelete false bo'lsa, xatolik qaytarish
+        if (!forceDelete && (hasData.reports > 0 || hasData.history > 0 || hasData.comparisons > 0)) {
+            return res.status(400).json({ 
+                message: 'Foydalanuvchi ma\'lumotlari mavjud. Force delete parametri bilan o\'chirish mumkin.',
+                hasData 
+            });
+        }
+
+        // Foydalanuvchini o'chirish (yoki ma'lumotlarni null qilish)
+        if (forceDelete) {
+            // Ma'lumotlarni null qilish
+            await Promise.all([
+                db('reports').where({ user_id: userId }).update({ user_id: null }),
+                db('report_history').where({ user_id: userId }).update({ user_id: null }),
+                db('comparisons').where({ user_id: userId }).update({ user_id: null })
+            ]);
+        }
+
+        // Foydalanuvchini o'chirish
+        await db('users').where({ id: userId }).delete();
+
+        // Audit log
+        await db('audit_logs').insert({
+            user_id: adminId,
+            action: 'delete_user',
+            target_type: 'user',
+            target_id: userId,
+            details: JSON.stringify({ 
+                username: user.username, 
+                forceDelete,
+                hasData 
+            }),
+            ip_address: ipAddress,
+            user_agent: userAgent
+        });
+
+        res.json({ message: 'Foydalanuvchi muvaffaqiyatli o\'chirildi' });
+    } catch (error) {
+        console.error('Foydalanuvchini o\'chirish xatoligi:', error);
+        res.status(500).json({ message: 'Foydalanuvchini o\'chirishda xatolik' });
+    }
+});
+
 module.exports = router;
 

@@ -3019,8 +3019,41 @@ async function handleDeleteUser(userId, username) {
         });
         
         if (!checkRes || !checkRes.ok) {
-            const errorData = checkRes ? await checkRes.json().catch(() => ({})) : {};
-            throw new Error(errorData.message || 'Ma\'lumotlarni tekshirishda xatolik');
+            let errorMessage = 'Ma\'lumotlarni tekshirishda xatolik';
+            try {
+                const contentType = checkRes?.headers?.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const errorData = await checkRes.json();
+                    errorMessage = errorData.message || errorMessage;
+                } else {
+                    // HTML javob qaytgan
+                    if (checkRes.status === 404) {
+                        errorMessage = 'Foydalanuvchi topilmadi';
+                    } else if (checkRes.status === 403) {
+                        errorMessage = 'Bu amalni bajarish uchun ruxsatingiz yo\'q';
+                    } else if (checkRes.status === 500) {
+                        errorMessage = 'Server xatoligi yuz berdi';
+                    } else {
+                        errorMessage = `Server xatolik: ${checkRes.status} ${checkRes.statusText}`;
+                    }
+                }
+            } catch (parseError) {
+                console.error('❌ [USERS] Check data xatolik ma\'lumotlarini parse qilishda xatolik:', parseError);
+                if (checkRes?.status === 404) {
+                    errorMessage = 'Foydalanuvchi topilmadi';
+                } else if (checkRes?.status === 403) {
+                    errorMessage = 'Bu amalni bajarish uchun ruxsatingiz yo\'q';
+                } else if (checkRes?.status === 500) {
+                    errorMessage = 'Server xatoligi yuz berdi';
+                }
+            }
+            throw new Error(errorMessage);
+        }
+        
+        // JSON javobni tekshirish
+        const contentType = checkRes.headers?.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server noto\'g\'ri javob qaytardi');
         }
         
         const checkData = await checkRes.json();
@@ -3081,8 +3114,41 @@ async function handleDeleteUser(userId, username) {
         });
         
         if (!deleteRes || !deleteRes.ok) {
-            const errorData = deleteRes ? await deleteRes.json().catch(() => ({})) : {};
-            throw new Error(errorData.message || 'Foydalanuvchini o\'chirishda xatolik');
+            let errorMessage = 'Foydalanuvchini o\'chirishda xatolik';
+            try {
+                const contentType = deleteRes?.headers?.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const errorData = await deleteRes.json();
+                    errorMessage = errorData.message || errorMessage;
+                } else {
+                    // HTML javob qaytgan (404 yoki 500 xatolik sahifasi)
+                    if (deleteRes.status === 404) {
+                        errorMessage = 'Foydalanuvchi topilmadi';
+                    } else if (deleteRes.status === 403) {
+                        errorMessage = 'Bu amalni bajarish uchun ruxsatingiz yo\'q';
+                    } else if (deleteRes.status === 500) {
+                        errorMessage = 'Server xatoligi yuz berdi';
+                    } else {
+                        errorMessage = `Server xatolik: ${deleteRes.status} ${deleteRes.statusText}`;
+                    }
+                }
+            } catch (parseError) {
+                console.error('❌ [USERS] Xatolik ma\'lumotlarini parse qilishda xatolik:', parseError);
+                if (deleteRes?.status === 404) {
+                    errorMessage = 'Foydalanuvchi topilmadi';
+                } else if (deleteRes?.status === 403) {
+                    errorMessage = 'Bu amalni bajarish uchun ruxsatingiz yo\'q';
+                } else if (deleteRes?.status === 500) {
+                    errorMessage = 'Server xatoligi yuz berdi';
+                }
+            }
+            throw new Error(errorMessage);
+        }
+        
+        // JSON javobni tekshirish
+        const contentType = deleteRes.headers?.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server noto\'g\'ri javob qaytardi');
         }
         
         const result = await deleteRes.json();
