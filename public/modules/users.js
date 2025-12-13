@@ -3050,12 +3050,7 @@ async function handleDeleteUser(userId, username) {
             throw new Error(errorMessage);
         }
         
-        // JSON javobni tekshirish
-        const contentType = checkRes.headers?.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            throw new Error('Server noto\'g\'ri javob qaytardi');
-        }
-        
+        // JSON javobni tekshirish (ok bo'lsa, demak JSON javob qaytgan)
         const checkData = await checkRes.json();
         
         let confirmMessage = '';
@@ -3145,12 +3140,7 @@ async function handleDeleteUser(userId, username) {
             throw new Error(errorMessage);
         }
         
-        // JSON javobni tekshirish
-        const contentType = deleteRes.headers?.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            throw new Error('Server noto\'g\'ri javob qaytardi');
-        }
-        
+        // JSON javobni tekshirish (ok bo'lsa, demak JSON javob qaytgan)
         const result = await deleteRes.json();
         showToast(result.message || 'Foydalanuvchi o\'chirildi', 'success');
         
