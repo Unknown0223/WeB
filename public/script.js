@@ -435,8 +435,16 @@ const renderKpiCards = (stats) => {
                 altFormat: 'd.m.Y', 
                 static: true,
                 allowInput: false,
-                onChange: validateDate,
-                onClose: validateDate,
+                onChange: (selectedDates) => {
+                    validateDate();
+                    // localStorage'ga saqlash
+                    saveFormDataToLocalStorage();
+                },
+                onClose: () => {
+                    validateDate();
+                    // localStorage'ga saqlash
+                    saveFormDataToLocalStorage();
+                },
             });
         }
         if (DOM.filterDateRange) {
@@ -648,6 +656,107 @@ const renderKpiCards = (stats) => {
         updateCalculations();
     }
 
+    // localStorage'ga saqlash funksiyasi
+    function saveFormDataToLocalStorage() {
+        try {
+            // Faqat yangi hisobot yaratish rejimida saqlash (edit mode va currentReportId null bo'lsa)
+            if (!state.isEditMode || state.currentReportId !== null) {
+                return;
+            }
+
+            // Sanani olish
+            let dateValue = '';
+            if (datePickerFP) {
+                if (datePickerFP.selectedDates && datePickerFP.selectedDates.length > 0) {
+                    dateValue = flatpickr.formatDate(datePickerFP.selectedDates[0], 'Y-m-d');
+                } else if (datePickerFP.input && datePickerFP.input.value) {
+                    dateValue = datePickerFP.input.value;
+                }
+            }
+
+            const formData = {
+                date: dateValue,
+                location: DOM.locationSelect ? DOM.locationSelect.value : '',
+                currency: DOM.currencySelect ? DOM.currencySelect.value : '',
+                data: {}
+            };
+
+            // Barcha input qiymatlarini yig'ish
+            if (DOM.tableBody) {
+                DOM.tableBody.querySelectorAll('.numeric-input').forEach(input => {
+                    const key = input.dataset.key;
+                    if (key) {
+                        const value = parseNumber(input.value);
+                        if (value > 0) {
+                            formData.data[key] = value;
+                        }
+                    }
+                });
+            }
+
+            localStorage.setItem('reportDraft', JSON.stringify(formData));
+            console.log('[LOCALSTORAGE] Form ma\'lumotlari saqlandi');
+        } catch (error) {
+            console.error('[LOCALSTORAGE] Saqlashda xatolik:', error);
+        }
+    }
+
+    // localStorage'dan yuklash funksiyasi
+    function loadFormDataFromLocalStorage() {
+        try {
+            const savedData = localStorage.getItem('reportDraft');
+            if (!savedData) {
+                return false;
+            }
+
+            const formData = JSON.parse(savedData);
+            
+            // Sana
+            if (formData.date && datePickerFP) {
+                // Sana formatini tekshirish va to'g'rilash
+                let dateToSet = formData.date;
+                // Agar sana DD.MM.YYYY formatida bo'lsa, YYYY-MM-DD ga o'tkazish
+                if (dateToSet.includes('.')) {
+                    const parts = dateToSet.split('.');
+                    if (parts.length === 3) {
+                        dateToSet = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                    }
+                }
+                datePickerFP.setDate(dateToSet, false);
+            }
+            
+            // Valyuta
+            if (formData.currency && DOM.currencySelect) {
+                DOM.currencySelect.value = formData.currency;
+                DOM.currencySelect.classList.remove('currency-not-selected');
+            }
+            
+            // Jadval qiymatlari (buildTable() dan keyin yuklash kerak)
+            if (formData.data && Object.keys(formData.data).length > 0) {
+                // Kichik kechikish bilan yuklash (DOM yangilanishi uchun)
+                setTimeout(() => {
+                    updateTableValues(formData.data);
+                }, 100);
+            }
+
+            console.log('[LOCALSTORAGE] Form ma\'lumotlari yuklandi');
+            return true;
+        } catch (error) {
+            console.error('[LOCALSTORAGE] Yuklashda xatolik:', error);
+            return false;
+        }
+    }
+
+    // localStorage'dan tozalash funksiyasi
+    function clearFormDataFromLocalStorage() {
+        try {
+            localStorage.removeItem('reportDraft');
+            console.log('[LOCALSTORAGE] Form ma\'lumotlari tozalandi');
+        } catch (error) {
+            console.error('[LOCALSTORAGE] Tozalashda xatolik:', error);
+        }
+    }
+
     function updateCalculations() {
         let grandTotal = 0;
         const columns = state.settings.app_settings?.columns || [];
@@ -798,27 +907,45 @@ const renderKpiCards = (stats) => {
         }
     }
 
-    function createNewReport() {
+    async function createNewReport() {
         if (!state.currentUser.permissions.includes('reports:create')) {
             return showToast("Sizda yangi hisobot yaratish uchun ruxsat yo'q.", true);
         }
         state.currentReportId = null;
         state.isEditMode = true;
         
-        buildTable();
-        updateTableValues({});
+        // localStorage'dan ma'lumotlarni olish (buildTable() dan oldin)
+        const savedData = localStorage.getItem('reportDraft');
+        let formData = null;
+        if (savedData) {
+            try {
+                formData = JSON.parse(savedData);
+            } catch (e) {
+                console.error('[LOCALSTORAGE] Parse xatolik:', e);
+            }
+        }
+        
+        // Filialni avval o'rnatish (buildTable() filialga qarab brendlarni yuklaydi)
+        if (formData && formData.location && DOM.locationSelect) {
+            DOM.locationSelect.value = formData.location;
+        } else if (DOM.locationSelect && DOM.locationSelect.options.length > 0) {
+            DOM.locationSelect.selectedIndex = 0;
+        }
+        
+        await buildTable();
+        
+        // localStorage'dan yuklash (buildTable() dan keyin)
+        const loaded = loadFormDataFromLocalStorage();
+        if (!loaded) {
+            updateTableValues({});
+            if (datePickerFP) datePickerFP.clear(); 
+        }
 
         if (DOM.reportIdBadge) {
             DOM.reportIdBadge.textContent = 'YANGI';
             DOM.reportIdBadge.className = 'badge new';
         }
         if (DOM.confirmBtn) DOM.confirmBtn.innerHTML = '<i data-feather="check-circle"></i> TASDIQLASH VA SAQLASH';
-        
-        if (datePickerFP) datePickerFP.clear(); 
-        
-        if (DOM.locationSelect && DOM.locationSelect.options.length > 0) {
-            DOM.locationSelect.selectedIndex = 0;
-        }
         
         document.querySelectorAll('.report-item.active').forEach(item => item.classList.remove('active'));
         updateUIForReportState();
@@ -831,6 +958,9 @@ const renderKpiCards = (stats) => {
             console.error('❌ Hisobot topilmadi:', reportId);
             return;
         }
+
+        // Mavjud hisobot yuklanayotganda localStorage'ni tozalash
+        clearFormDataFromLocalStorage();
 
         state.currentReportId = reportId;
         state.isEditMode = false;
@@ -972,6 +1102,10 @@ const renderKpiCards = (stats) => {
             if (!res.ok) throw new Error(result.message);
             
             showToast(result.message);
+            
+            // Hisobot saqlanganda localStorage'ni tozalash
+            clearFormDataFromLocalStorage();
+            
             await fetchAndRenderReports();
             const newId = isUpdating ? state.currentReportId : result.reportId;
             setTimeout(() => {
@@ -1560,6 +1694,8 @@ const renderKpiCards = (stats) => {
                     input.setSelectionRange(cursorPosition + (newLength - oldLength), cursorPosition + (newLength - oldLength));
                 }
                 updateCalculations();
+                // localStorage'ga saqlash
+                saveFormDataToLocalStorage();
             }
         });
         
@@ -1603,6 +1739,8 @@ const renderKpiCards = (stats) => {
                     showToast('Valyuta sozlamasini saqlashda xatolik', true);
                 }
             }
+            // localStorage'ga saqlash
+            saveFormDataToLocalStorage();
         });
         document.querySelectorAll('.close-modal-btn').forEach(btn => {
             addSafeListener(btn, 'click', () => {
@@ -1632,7 +1770,11 @@ const renderKpiCards = (stats) => {
         });
         addSafeListener(DOM.excelBtn, 'click', exportToExcel);
 
-        addSafeListener(DOM.locationSelect, 'change', validateDate);
+        addSafeListener(DOM.locationSelect, 'change', () => {
+            validateDate();
+            // localStorage'ga saqlash
+            saveFormDataToLocalStorage();
+        });
         
         // Avatar modal event listeners
         setupAvatarModal();
