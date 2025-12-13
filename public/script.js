@@ -364,17 +364,53 @@ const renderKpiCards = (stats) => {
             }
             
             const data = await res.json();
-            state.savedReports = data.reports;
-            state.reports = data.reports; // KPI uchun
-            state.pagination = { total: data.total, pages: data.pages, currentPage: data.currentPage };
+            console.log('[FRONTEND] API javob:', { 
+                reportsType: typeof data.reports, 
+                reportsIsArray: Array.isArray(data.reports),
+                reportsKeys: data.reports ? Object.keys(data.reports) : [],
+                reportsCount: data.reports ? (Array.isArray(data.reports) ? data.reports.length : Object.keys(data.reports).length) : 0,
+                total: data.total,
+                pages: data.pages
+            });
             
+            // Reports formatini to'g'rilash
             state.existingDates = {};
-            // ... fetchAndRenderReports funksiyasining davomi
-            Object.values(data.reports).forEach(report => {
-                if (!state.existingDates[report.location]) {
-                    state.existingDates[report.location] = new Set();
+            if (data.reports) {
+                if (Array.isArray(data.reports)) {
+                    // Agar array bo'lsa, obyektga o'tkazish
+                    const reportsObj = {};
+                    data.reports.forEach(report => {
+                        reportsObj[report.id] = report;
+                        if (!state.existingDates[report.location]) {
+                            state.existingDates[report.location] = new Set();
+                        }
+                        state.existingDates[report.location].add(report.date);
+                    });
+                    state.savedReports = reportsObj;
+                    state.reports = reportsObj;
+                } else {
+                    // Agar obyekt bo'lsa, to'g'ridan-to'g'ri ishlatish
+                    state.savedReports = data.reports;
+                    state.reports = data.reports;
+                    Object.values(data.reports).forEach(report => {
+                        if (!state.existingDates[report.location]) {
+                            state.existingDates[report.location] = new Set();
+                        }
+                        state.existingDates[report.location].add(report.date);
+                    });
                 }
-                state.existingDates[report.location].add(report.date);
+            } else {
+                state.savedReports = {};
+                state.reports = {};
+            }
+            
+            state.pagination = { total: data.total, pages: data.pages, currentPage: data.currentPage };
+
+            console.log('[FRONTEND] State.savedReports:', {
+                type: typeof state.savedReports,
+                isArray: Array.isArray(state.savedReports),
+                keys: state.savedReports ? Object.keys(state.savedReports) : [],
+                count: state.savedReports ? (Array.isArray(state.savedReports) ? state.savedReports.length : Object.keys(state.savedReports).length) : 0
             });
 
             renderSavedReports();
@@ -528,9 +564,23 @@ const renderKpiCards = (stats) => {
     }
 
     function renderSavedReports() {
-        if (!DOM.savedReportsList) return;
-        const reportIds = Object.keys(state.savedReports);
+        if (!DOM.savedReportsList) {
+            console.warn('[FRONTEND] DOM.savedReportsList topilmadi!');
+            return;
+        }
+        
+        console.log('[FRONTEND] renderSavedReports chaqirildi:', {
+            savedReportsType: typeof state.savedReports,
+            savedReportsIsArray: Array.isArray(state.savedReports),
+            savedReportsKeys: state.savedReports ? Object.keys(state.savedReports) : [],
+            savedReportsCount: state.savedReports ? (Array.isArray(state.savedReports) ? state.savedReports.length : Object.keys(state.savedReports).length) : 0
+        });
+        
+        const reportIds = Object.keys(state.savedReports || {});
+        console.log('[FRONTEND] Report IDs:', reportIds);
+        
         if (reportIds.length === 0) {
+            console.warn('[FRONTEND] Report IDs bo\'sh, "Hisobotlar topilmadi" ko\'rsatilmoqda');
             DOM.savedReportsList.innerHTML = '<div class="empty-state">Hisobotlar topilmadi.</div>';
             return;
         }

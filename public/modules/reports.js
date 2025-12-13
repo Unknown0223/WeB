@@ -34,16 +34,48 @@ export async function fetchAndRenderReports() {
         }
         
         const data = await res.json();
-        state.savedReports = data.reports;
-        state.reports = data.reports; // KPI uchun
+        console.log('[FRONTEND] API javob (modules/reports.js):', { 
+            reportsType: typeof data.reports, 
+            reportsIsArray: Array.isArray(data.reports),
+            reportsKeys: data.reports ? Object.keys(data.reports) : [],
+            reportsCount: data.reports ? (Array.isArray(data.reports) ? data.reports.length : Object.keys(data.reports).length) : 0,
+            total: data.total,
+            pages: data.pages
+        });
+        
+        if (data.reports) {
+            if (Array.isArray(data.reports)) {
+                // Agar array bo'lsa, obyektga o'tkazish
+                const reportsObj = {};
+                data.reports.forEach(report => {
+                    reportsObj[report.id] = report;
+                });
+                state.savedReports = reportsObj;
+                state.reports = reportsObj;
+            } else {
+                state.savedReports = data.reports;
+                state.reports = data.reports;
+            }
+        } else {
+            state.savedReports = {};
+            state.reports = {};
+        }
+        
         state.pagination = { total: data.total, pages: data.pages, currentPage: data.currentPage };
         
         state.existingDates = {};
-        Object.values(data.reports).forEach(report => {
+        Object.values(state.savedReports).forEach(report => {
             if (!state.existingDates[report.location]) {
                 state.existingDates[report.location] = new Set();
             }
             state.existingDates[report.location].add(report.date);
+        });
+
+        console.log('[FRONTEND] State.savedReports (modules/reports.js):', {
+            type: typeof state.savedReports,
+            isArray: Array.isArray(state.savedReports),
+            keys: state.savedReports ? Object.keys(state.savedReports) : [],
+            count: state.savedReports ? (Array.isArray(state.savedReports) ? state.savedReports.length : Object.keys(state.savedReports).length) : 0
         });
 
         renderSavedReports();
@@ -60,9 +92,23 @@ export async function fetchAndRenderReports() {
 }
 
 export function renderSavedReports() {
-    if (!DOM.savedReportsList) return;
+    if (!DOM.savedReportsList) {
+        console.warn('[FRONTEND] DOM.savedReportsList topilmadi! (modules/reports.js)');
+        return;
+    }
+    
+    console.log('[FRONTEND] renderSavedReports chaqirildi (modules/reports.js):', {
+        savedReportsType: typeof state.savedReports,
+        savedReportsIsArray: Array.isArray(state.savedReports),
+        savedReportsKeys: state.savedReports ? Object.keys(state.savedReports) : [],
+        savedReportsCount: state.savedReports ? (Array.isArray(state.savedReports) ? state.savedReports.length : Object.keys(state.savedReports).length) : 0
+    });
+    
     const reportIds = Object.keys(state.savedReports || {});
+    console.log('[FRONTEND] Report IDs (modules/reports.js):', reportIds);
+    
     if (reportIds.length === 0) {
+        console.warn('[FRONTEND] Report IDs bo\'sh, "Hisobotlar topilmadi" ko\'rsatilmoqda (modules/reports.js)');
         DOM.savedReportsList.innerHTML = '<div class="empty-state">Hisobotlar topilmadi.</div>';
         return;
     }

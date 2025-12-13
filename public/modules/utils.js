@@ -356,3 +356,22 @@ export function showConfirmDialog(options = {}) {
         document.addEventListener('keydown', escHandler);
     });
 }
+
+/**
+ * Format number with thousand separators
+ * @param {number} num - Number to format
+ * @returns {string} - Formatted number string
+ */
+export function formatNumber(num) {
+    if (num === null || num === undefined || isNaN(num)) return '0';
+    return Number(num).toLocaleString('uz-UZ');
+}
+
+/**
+ * Format report ID with leading zeros
+ * @param {number|string} id - Report ID
+ * @returns {string} - Formatted ID (e.g., "0001")
+ */
+export function formatReportId(id) {
+    return String(id).padStart(4, '0');
+}

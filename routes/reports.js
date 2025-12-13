@@ -55,6 +55,8 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
             const visibleLocations = await getVisibleLocations(user);
             const visibleBrands = await getVisibleBrands(user);
             
+            console.log(`[REPORTS] reports:view_assigned - User ID: ${user.id}, Visible Locations: ${JSON.stringify(visibleLocations)}, Visible Brands: ${JSON.stringify(visibleBrands)}`);
+            
             // O'zi yaratgan hisobotlar yoki biriktirilgan filiallar hisobotlari
             query.where(function() {
                 // O'zi yaratgan hisobotlar
@@ -128,6 +130,8 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 .orderBy('r.id', 'desc')
                 .limit(limit)
                 .offset(offset);
+            
+            console.log(`[REPORTS] Topilgan hisobotlar soni: ${reports.length}, User ID: ${user.id}, Permissions: ${user.permissions.join(', ')}`);
         } catch (queryError) {
             console.error('[reports] Query xatolik:', queryError);
             console.error('[reports] Query error message:', queryError.message);
@@ -288,6 +292,9 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 // Xatolik bo'lsa, bu report'ni o'tkazib yuboramiz
             }
         });
+
+        console.log(`[REPORTS] Formatted reports soni: ${Object.keys(formattedReports).length}, Keys: ${Object.keys(formattedReports).join(', ')}`);
+        console.log(`[REPORTS] API javob: reports (${typeof formattedReports}), total: ${total}, pages: ${pages}`);
 
         res.json({ reports: formattedReports, total, pages, currentPage: page });
     } catch (error) {
