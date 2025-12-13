@@ -412,6 +412,7 @@ async function loadComparisonData() {
         const res = await safeFetch(url);
         
         if (!res || !res.ok) {
+            console.error('[COMPARISON] Backend xatolik:', res?.status, res?.statusText);
             throw new Error('Ma\'lumotlarni yuklashda xatolik');
         }
 
@@ -651,6 +652,7 @@ function renderTable(data) {
     }
 
     let html = '';
+    
     for (const item of data) {
         const operatorAmount = item.operator_amount || 0;
         const comparisonAmount = item.comparison_amount;

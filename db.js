@@ -3,6 +3,9 @@
 const knex = require('knex');
 const config = require('./knexfile.js');
 const bcrypt = require('bcrypt');
+const { createLogger } = require('./utils/logger.js');
+
+const log = createLogger('DB');
 const saltRounds = 10;
 
 // NODE_ENV ga qarab development yoki production sozlamasini tanlash
@@ -52,7 +55,7 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
             });
         }
     } catch (error) {
-        console.error("Audit log yozishda xatolik:", error);
+        log.error('Audit log yozishda xatolik:', error.message);
     }
 };
 
@@ -113,7 +116,6 @@ const initializeDB = async () => {
                 // Import oldidan rollarni tekshirish
                 const rolesBefore = await trx('roles').select('role_name');
                 const roleNamesBefore = rolesBefore.map(r => r.role_name);
-                console.log(`🔍 [ROLES] Server ishga tushishdan oldin rollar (${roleNamesBefore.length} ta):`, roleNamesBefore);
                 
                 // Faqat superadmin rolini yaratish - retry bilan
                 try {
@@ -157,20 +159,11 @@ const initializeDB = async () => {
         // Import keyin rollarni tekshirish
         const rolesAfter = await trx('roles').select('role_name');
         const roleNamesAfter = rolesAfter.map(r => r.role_name);
-        console.log(`🔍 [ROLES] Server ishga tushishdan keyin rollar (${roleNamesAfter.length} ta):`, roleNamesAfter);
         
         // Yo'qolgan rollarni topish
         const lostRoles = roleNamesBefore.filter(role => !roleNamesAfter.includes(role));
         if (lostRoles.length > 0) {
-            console.log(`❌ [ROLES] XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
-        } else {
-            console.log(`✅ [ROLES] Barcha rollar saqlanib qoldi`);
-        }
-        
-        // Yangi qo'shilgan rollarni topish
-        const newRoles = roleNamesAfter.filter(role => !roleNamesBefore.includes(role));
-        if (newRoles.length > 0) {
-            console.log(`➕ [ROLES] Yangi qo'shilgan rollar (${newRoles.length} ta):`, newRoles);
+            log.error(`[ROLES] XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
         }
             });
             
@@ -182,7 +175,6 @@ const initializeDB = async () => {
             retries--;
             
             if (error.code === 'SQLITE_BUSY' && retries > 0) {
-                console.warn(`⚠️ [DB] SQLite BUSY xatolik, qayta urinish... (${retries} qoldi)`);
                 // Qisqa kutish va qayta urinish
                 await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries))); // 100ms, 200ms, 300ms
             } else {
@@ -200,9 +192,8 @@ const initializeDB = async () => {
     try {
         const expandedPermissionsSeed = require('./seeds/02_expanded_permissions.js');
         await expandedPermissionsSeed.seed(db);
-        console.log('Kengaytirilgan permission\'lar qo\'shildi.');
     } catch (error) {
-        console.error('Seeds faylini ishga tushirishda xatolik:', error.message);
+        log.warn('Seeds faylini ishga tushirishda xatolik:', error.message);
         // Xatolik bo'lsa ham davom etamiz
     }
 
@@ -218,30 +209,36 @@ const initializeDB = async () => {
             status: 'active',
             device_limit: 999 // Superadmin uchun cheksiz device limit
         });
-        console.log("Boshlang'ich superadmin yaratildi. Login: 'superadmin', Parol: 'superadmin123'");
+        log.info('Superadmin foydalanuvchi yaratildi');
     } else if (superAdminUser.role === 'super_admin') {
         // Eski super_admin ni superadmin ga o'zgartirish
         await db('users').where({ id: superAdminUser.id }).update({ role: 'superadmin' });
-        console.log("Eski super_admin roli superadmin ga o'zgartirildi.");
+        log.info('Eski super_admin roli superadmin ga o\'zgartirildi');
     }
     
     // Telegram sozlamalarini tekshirish va qo'yish (agar mavjud bo'lmasa)
+    // XAVFSIZLIK: Tokenlar .env faylidan olinadi
     const telegramSettings = [
-        { key: 'telegram_bot_token', value: '8448375034:AAE4az26SqxDP4CFbW0hkTGfc8zkL-zm5ig' },
-        { key: 'telegram_bot_username', value: 'kassa_opertor_bot' },
-        { key: 'telegram_admin_chat_id', value: '5988510278' },
-        { key: 'telegram_group_id', value: '-4521600300' }
+        { key: 'telegram_bot_token', value: process.env.TELEGRAM_BOT_TOKEN || '' },
+        { key: 'telegram_bot_username', value: process.env.TELEGRAM_BOT_USERNAME || '' },
+        { key: 'telegram_admin_chat_id', value: process.env.TELEGRAM_ADMIN_CHAT_ID || '' },
+        { key: 'telegram_group_id', value: process.env.TELEGRAM_GROUP_ID || '' }
     ];
     
     for (const setting of telegramSettings) {
         const existing = await db('settings').where({ key: setting.key }).first();
         if (!existing) {
+            // Yangi setting yaratish (hatto bo'sh bo'lsa ham)
             await db('settings').insert(setting);
-            console.log(`✅ Telegram sozlamasi qo'shildi: ${setting.key}`);
+            log.debug(`Telegram sozlamasi qo'shildi: ${setting.key}`);
+        } else if (setting.value && (!existing.value || existing.value === '')) {
+            // Mavjud bo'sh setting'ni env variable'dan yangilash
+            await db('settings').where({ key: setting.key }).update({ value: setting.value });
+            log.debug(`Telegram sozlamasi yangilandi (env'dan): ${setting.key}`);
         }
     }
     
-    console.log('Boshlang\'ich ma\'lumotlar (seeds) tekshirildi va qo\'shildi.');
+    log.info('Database ishga tushirildi va boshlang\'ich ma\'lumotlar tekshirildi');
 };
 
 module.exports = { db, initializeDB, logAction };

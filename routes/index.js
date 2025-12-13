@@ -20,13 +20,55 @@ router.use('/statistics', require('./statistics.js'));
 router.use('/brands', require('./brands.js'));
 
 router.use('/security', require('./security.js'));
-// router.use('/ostatki', require('./ostatki.js')); // O'chirilgan - ostatka analiz bo'limi olib tashlandi
 router.use('/exchange-rates', require('./exchangeRates.js'));
 router.use('/comparison', require('./comparison.js'));
 router.use('/notifications', require('./notifications.js'));
 
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { db } = require('../db.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('INDEX');
+
+
+// GET /api/user/preferred-currency - Foydalanuvchi valyuta sozlamasini olish
+router.get('/user/preferred-currency', isAuthenticated, async (req, res) => {
+    try {
+        const user = await db('users').where({ id: req.session.user.id }).first();
+        const preferredCurrency = user?.preferred_currency || null;
+        res.json({ currency: preferredCurrency });
+    } catch (error) {
+        log.error('Currency fetch error:', error);
+        res.status(500).json({ message: "Valyuta sozlamasini olishda xatolik." });
+    }
+});
+
+// POST /api/user/preferred-currency - Foydalanuvchi valyuta sozlamasini saqlash
+router.post('/user/preferred-currency', isAuthenticated, async (req, res) => {
+    const { currency } = req.body;
+    
+    if (!currency || typeof currency !== 'string') {
+        return res.status(400).json({ message: "Valyuta tanlash majburiy." });
+    }
+    
+    const allowedCurrencies = ['UZS', 'USD', 'EUR', 'RUB', 'KZT'];
+    if (!allowedCurrencies.includes(currency)) {
+        return res.status(400).json({ message: "Noto'g'ri valyuta tanlandi." });
+    }
+    
+    try {
+        await db('users')
+            .where({ id: req.session.user.id })
+            .update({ preferred_currency: currency });
+        
+        // Session'ni yangilash
+        req.session.user.preferred_currency = currency;
+        
+        res.json({ message: "Valyuta sozlamasi saqlandi.", currency });
+    } catch (error) {
+        log.error('Currency save error:', error);
+        res.status(500).json({ message: "Valyuta sozlamasini saqlashda xatolik." });
+    }
+});
 
 // Audit jurnallarini olish uchun endpoint
 router.get('/audit-logs', isAuthenticated, hasPermission('audit:view'), async (req, res) => {
@@ -72,7 +114,7 @@ router.get('/audit-logs', isAuthenticated, hasPermission('audit:view'), async (r
             }
         });
     } catch (error) {
-        console.error("/api/audit-logs GET xatoligi:", error);
+        log.error("/api/audit-logs GET xatoligi:", error);
         res.status(500).json({ message: "Jurnal ma'lumotlarini yuklashda xatolik." });
     }
 });

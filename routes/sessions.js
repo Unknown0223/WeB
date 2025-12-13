@@ -2,6 +2,9 @@ const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated } = require('../middleware/auth.js');
 const geoip = require('geoip-lite');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('SESSIONS');
+
 
 const router = express.Router();
 
@@ -91,14 +94,14 @@ router.get('/all', isAuthenticated, async (req, res) => {
                     is_current: session.sid === req.sessionID
                 };
             } catch (parseError) {
-                console.error('Session parse xatoligi:', parseError);
+                log.error('Session parse xatoligi:', parseError);
                 return null;
             }
         }).filter(s => s !== null);
 
         res.json(formattedSessions);
     } catch (error) {
-        console.error('GET /api/sessions/all xatoligi:', error);
+        log.error('GET /api/sessions/all xatoligi:', error);
         res.status(500).json({ message: "Sessiyalarni yuklashda xatolik." });
     }
 });
@@ -124,7 +127,7 @@ router.post('/terminate-all', isAuthenticated, async (req, res) => {
                     terminatedCount++;
                 }
             } catch (parseError) {
-                console.error('Session parse xatoligi:', parseError);
+                log.error('Session parse xatoligi:', parseError);
             }
         }
 
@@ -133,7 +136,7 @@ router.post('/terminate-all', isAuthenticated, async (req, res) => {
             terminated_count: terminatedCount
         });
     } catch (error) {
-        console.error('POST /api/sessions/terminate-all xatoligi:', error);
+        log.error('POST /api/sessions/terminate-all xatoligi:', error);
         res.status(500).json({ message: "Sessiyalarni tugatishda xatolik." });
     }
 });
@@ -182,19 +185,19 @@ router.delete('/:sid', isAuthenticated, async (req, res) => {
         const isStillOnline = remainingSessions.length > 0;
         
         if (global.broadcastWebSocket) {
-            console.log(`📡 [SESSIONS] Sessiya tugatildi, online status yangilanmoqda...`);
+            log.debug(`📡 [SESSIONS] Sessiya tugatildi, online status yangilanmoqda...`);
             const user = await db('users').where('id', sessionOwnerId).first();
             global.broadcastWebSocket('user_status_changed', {
                 userId: sessionOwnerId,
                 username: user?.username || 'Unknown',
                 isOnline: isStillOnline
             });
-            console.log(`✅ [SESSIONS] WebSocket yuborildi: user_status_changed (${isStillOnline ? 'online' : 'offline'})`);
+            log.debug(`✅ [SESSIONS] WebSocket yuborildi: user_status_changed (${isStillOnline ? 'online' : 'offline'})`);
         }
 
         res.json({ message: "Sessiya muvaffaqiyatli tugatildi." });
     } catch (error) {
-        console.error(`/api/sessions/${sidToDelete} DELETE xatoligi:`, error);
+        log.error(`/api/sessions/${sidToDelete} DELETE xatoligi:`, error);
         res.status(500).json({ message: "Sessiyani tugatishda xatolik." });
     }
 });

@@ -1,4 +1,6 @@
 const { db } = require('../db.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('AUTH');
 
 /**
  * Foydalanuvchi tizimga kirganligini, sessiyasi aktiv ekanligini va
@@ -21,7 +23,7 @@ const isAuthenticated = async (req, res, next) => {
         const sessionExists = await db('sessions').where({ sid: req.sessionID }).first();
         if (!sessionExists) {
             req.session.destroy((err) => {
-                if (err) console.error("Sessiyani tugatishda xatolik:", err);
+                if (err) log.error("Sessiyani tugatishda xatolik:", err);
                 return res.status(401).json({ 
                     message: "Sessiyangiz tugatildi. Iltimos, qayta kiring.",
                     action: 'logout'
@@ -36,7 +38,7 @@ const isAuthenticated = async (req, res, next) => {
         // Agar foydalanuvchi bazadan o'chirilgan bo'lsa
         if (!user) {
              req.session.destroy((err) => {
-                if (err) console.error("Sessiyani tugatishda xatolik:", err);
+                if (err) log.error("Sessiyani tugatishda xatolik:", err);
                 return res.status(401).json({ 
                     message: "Foydalanuvchi topilmadi. Sessiya tugatildi.",
                     action: 'logout'
@@ -47,26 +49,33 @@ const isAuthenticated = async (req, res, next) => {
 
         // === YANGI MANTIQ: MAJBURIY TELEGRAM OBUNASINI TEKSHIRISH ===
         // Superadmin (role='superadmin' yoki 'super_admin') uchun bu tekshiruv o'tkazib yuboriladi.
+        // Agar foydalanuvchi allaqachon ACTIVE statusga ega bo'lsa, telegram tekshiruvi o'tkazib yuboriladi
+        // (chunki admin tasdiqlaganda telegram ulanganligini tekshirgan)
         const userRole = userSessionData.role;
-        const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
-        const hasTelegramChatId = !!user.telegram_chat_id;
-        
-        if (userRole !== 'superadmin' && userRole !== 'super_admin' && (!isTelegramConnected || !hasTelegramChatId)) {
-            const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
-            const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
+        const userStatus = user.status;
 
-            // Sessiyani tugatish
-            req.session.destroy((err) => {
-                if (err) console.error("Majburiy obuna tufayli sessiyani tugatishda xatolik:", err);
-                
-                // Foydalanuvchiga maxsus javob yuborish
-                return res.status(403).json({
-                    message: "Tizimdan foydalanish uchun Telegram botga obuna bo'lishingiz shart. Iltimos, qayta obuna bo'lib, tizimga qayta kiring.",
-                    action: 'force_telegram_subscription',
-                    subscription_link: botUsername ? `https://t.me/${botUsername}` : null
-                } );
-            });
-            return; // Keyingi middleware'ga o'tishni to'xtatish
+        // Active foydalanuvchilar uchun telegram tekshiruvi o'tkazib yuboriladi
+        if (userStatus !== 'active' && userRole !== 'superadmin' && userRole !== 'super_admin') {
+            const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
+            const hasTelegramChatId = !!user.telegram_chat_id;
+
+            if (!isTelegramConnected || !hasTelegramChatId) {
+                const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
+                const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
+
+                // Sessiyani tugatish
+                req.session.destroy((err) => {
+                    if (err) log.error("Majburiy obuna tufayli sessiyani tugatishda xatolik:", err);
+
+                    // Foydalanuvchiga maxsus javob yuborish
+                    return res.status(403).json({
+                        message: "Tizimdan foydalanish uchun Telegram botga obuna bo'lishingiz shart. Iltimos, qayta obuna bo'lib, tizimga qayta kiring.",
+                        action: 'force_telegram_subscription',
+                        subscription_link: botUsername ? `https://t.me/${botUsername}` : null
+                    } );
+                });
+                return; // Keyingi middleware'ga o'tishni to'xtatish
+            }
         }
         // ==========================================================
 
@@ -75,7 +84,7 @@ const isAuthenticated = async (req, res, next) => {
         next();
 
     } catch (error) {
-        console.error("isAuthenticated middleware xatoligi:", error);
+        log.error("isAuthenticated middleware xatoligi:", error);
         res.status(500).json({ message: "Sessiyani tekshirishda ichki xatolik." });
     }
 };

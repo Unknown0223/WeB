@@ -2,6 +2,9 @@ const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { getVisibleLocations } = require('../utils/roleFiltering.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('DASHBOARD');
+
 
 const router = express.Router();
 
@@ -253,7 +256,7 @@ router.get('/stats', isAuthenticated, hasPermission('dashboard:view'), async (re
         });
 
     } catch (error) {
-        console.error("/api/dashboard/stats GET xatoligi:", error);
+        log.error("/api/dashboard/stats GET xatoligi:", error);
         res.status(500).json({ message: "Dashboard statistikasini yuklashda xatolik" });
     }
 });
@@ -457,7 +460,7 @@ router.get('/chart-data', isAuthenticated, hasPermission('dashboard:view'), asyn
         res.json({ type, data: chartData });
         
     } catch (error) {
-        console.error("/api/dashboard/chart-data GET xatoligi:", error);
+        log.error("/api/dashboard/chart-data GET xatoligi:", error);
         res.status(500).json({ message: "Grafik ma'lumotlarini yuklashda xatolik" });
     }
 });

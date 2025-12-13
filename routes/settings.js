@@ -3,49 +3,52 @@ const axios = require('axios');
 const { db } = require('../db');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
 const { initializeBot } = require('../utils/bot');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('SETTINGS');
+
 
 const router = express.Router();
 
 async function setWebhook(botToken) {
     if (!botToken) {
-        console.log("Bot tokeni mavjud emas, webhook o'rnatilmadi.");
+        log.debug("Bot tokeni mavjud emas, webhook o'rnatilmadi.");
         return;
     }
 
     const appBaseUrl = process.env.APP_BASE_URL;
 
     if (!appBaseUrl) {
-        console.error("DIQQAT: APP_BASE_URL o'rnatilmagan! Webhook o'rnatilmadi.");
-        console.error("Railway.com'da RAILWAY_PUBLIC_DOMAIN yoki APP_BASE_URL environment variable'ni sozlang.");
+        log.error("DIQQAT: APP_BASE_URL o'rnatilmagan! Webhook o'rnatilmadi.");
+        log.error("Railway.com'da RAILWAY_PUBLIC_DOMAIN yoki APP_BASE_URL environment variable'ni sozlang.");
         return;
     }
 
     // HTTPS tekshiruvi (faqat ogohlantirish, bloklamaymiz)
     if (!appBaseUrl.startsWith('https://')) {
-        console.warn(`⚠️  DIQQAT: APP_BASE_URL (${appBaseUrl}) 'https://' bilan boshlanmagan. Telegram webhooklari faqat HTTPS manzillarni qabul qiladi.`);
-        console.warn(`⚠️  Railway.com'da bu avtomatik HTTPS bo'ladi. Agar boshqa platformada bo'lsangiz, HTTPS sozlang.`);
+        log.warn(`⚠️  DIQQAT: APP_BASE_URL (${appBaseUrl}) 'https://' bilan boshlanmagan. Telegram webhooklari faqat HTTPS manzillarni qabul qiladi.`);
+        log.warn(`⚠️  Railway.com'da bu avtomatik HTTPS bo'ladi. Agar boshqa platformada bo'lsangiz, HTTPS sozlang.`);
     }
 
     const webhookUrl = `${appBaseUrl}/telegram-webhook/${botToken}`;
     const telegramApiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
 
     try {
-        console.log(`🔗 Webhook o'rnatilmoqda: ${webhookUrl}`);
+        log.debug(`🔗 Webhook o'rnatilmoqda: ${webhookUrl}`);
         const response = await axios.post(telegramApiUrl, { url: webhookUrl });
         if (response.data.ok) {
-            console.log(`✅ Webhook muvaffaqiyatli ${webhookUrl} manziliga o'rnatildi.`);
+            log.debug(`✅ Webhook muvaffaqiyatli ${webhookUrl} manziliga o'rnatildi.`);
             // Bot allaqachon initialize qilingan bo'lishi mumkin, shuning uchun faqat tekshiramiz
             if (!require('../utils/bot').getBot()) {
                 await initializeBot(botToken, { polling: false });
             }
         } else {
-            console.error("❌ Telegram webhookni o'rnatishda xatolik:", response.data.description);
+            log.error("❌ Telegram webhookni o'rnatishda xatolik:", response.data.description);
         }
     } catch (error) {
-        console.error("❌ Telegram API'ga ulanishda xatolik:", error.response ? error.response.data : error.message);
+        log.error("❌ Telegram API'ga ulanishda xatolik:", error.response ? error.response.data : error.message);
         // Xatolik bo'lsa ham, bot polling rejimida ishlashi mumkin (development uchun)
         if (process.env.NODE_ENV !== 'production') {
-            console.warn("⚠️  Development rejimida bot polling rejimida ishlashi mumkin.");
+            log.warn("⚠️  Development rejimida bot polling rejimida ishlashi mumkin.");
         }
     }
 }
@@ -81,7 +84,7 @@ router.get('/', isAuthenticated, async (req, res) => {
         
         res.json(settings);
     } catch (error) {
-        console.error("/api/settings GET xatoligi:", error);
+        log.error("/api/settings GET xatoligi:", error);
         res.status(500).json({ message: "Sozlamalarni yuklashda xatolik" });
     }
 });
@@ -130,35 +133,24 @@ router.post('/', isAuthenticated, async (req, res, next) => {
             .onConflict('key')
             .merge();
         
-        // WebSocket orqali realtime yuborish
-        if (global.broadcastWebSocket) {
-            console.log(`📡 [SETTINGS] Sozlama yangilandi, WebSocket orqali yuborilmoqda...`);
-            global.broadcastWebSocket('settings_updated', {
-                key: key,
-                value: value
-            });
-            console.log(`✅ [SETTINGS] WebSocket yuborildi: settings_updated`);
-        }
-        
+        // Telegram bot token yangilangan bo'lsa, webhook o'rnatish
         if (key === 'telegram_bot_token') {
             await setWebhook(value);
         }
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [SETTINGS] Sozlama yangilandi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('settings_updated', {
                 key: key,
                 value: value,
                 updated_by: req.session.user.id,
                 updated_by_username: req.session.user.username
             });
-            console.log(`✅ [SETTINGS] WebSocket yuborildi: settings_updated`);
         }
         
         res.json({ message: `"${key}" sozlamasi muvaffaqiyatli saqlandi.` });
     } catch (error) {
-        console.error("/api/settings POST xatoligi:", error);
+        log.error("/api/settings POST xatoligi:", error);
         res.status(500).json({ message: "Sozlamalarni saqlashda xatolik" });
     }
 });

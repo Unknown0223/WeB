@@ -4,9 +4,7 @@
 import { DOM } from './dom.js';
 import { state } from './state.js';
 import { showToast, formatNumber, formatReportId } from './utils.js';
-import { updateTableValues } from './table.js';
-import { buildTable } from './table.js';
-import { updateCalculations } from './table.js';
+import { updateTableValues, buildTable, updateCalculations } from './table.js';
 
 let datePickerFP = null;
 let dateFilterFP = null;

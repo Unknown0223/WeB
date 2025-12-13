@@ -4,6 +4,9 @@ const express = require('express');
 const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { refreshSessionsByRole } = require('../utils/sessionManager.js'); // YORDAMCHINI IMPORT QILAMIZ
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('ROLES');
+
 
 const router = express.Router();
 
@@ -60,10 +63,80 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
         res.json({ roles: result, all_permissions: permissionsByCategory });
 
     } catch (error) {
-        console.error("/api/roles GET xatoligi:", error);
+        log.error("/api/roles GET xatoligi:", error);
         res.status(500).json({ message: "Rollar va huquqlarni yuklashda xatolik." });
     }
 });
+
+// ===== STATIK ROUTE'LAR (dinamik :role_name dan OLDIN bo'lishi kerak) =====
+
+// Get all available permissions
+router.get('/permissions', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const permissions = await db('permissions')
+            .select('*')
+            .orderBy('category', 'permission_key');
+        res.json(permissions);
+    } catch (error) {
+        log.error('Get permissions error:', error);
+        res.status(500).json({ message: 'Huquqlarni yuklashda xatolik' });
+    }
+});
+
+// Get permissions overview with roles that have each permission
+router.get('/permissions/overview', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const permissions = await db('permissions')
+            .select('*')
+            .orderBy('category', 'permission_key');
+        
+        res.json(permissions);
+    } catch (error) {
+        log.error('Get permissions overview error:', error);
+        res.status(500).json({ message: 'Huquqlar ko\'rinishini yuklashda xatolik' });
+    }
+});
+
+// Admin rolining ma'lumotlarini olish
+router.get('/admin', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        log.debug('📋 [ROLES] /api/roles/admin endpointiga so\'rov keldi');
+        log.debug('📋 [ROLES] User:', req.session.user?.username, 'Role:', req.session.user?.role);
+        
+        const [adminRole, rolePermissions] = await Promise.all([
+            db('roles').where('role_name', 'admin').first(),
+            db('role_permissions').where('role_name', 'admin').select('permission_key')
+        ]);
+
+        if (!adminRole) {
+            log.debug('⚠️ [ROLES] Admin roli topilmadi');
+            return res.status(404).json({ message: "Admin roli topilmadi." });
+        }
+
+        const assignedPermissions = rolePermissions.map(rp => rp.permission_key);
+        
+        const requiresBrands = (adminRole.requires_brands === null || adminRole.requires_brands === undefined) 
+            ? null 
+            : Boolean(adminRole.requires_brands);
+        const requiresLocations = (adminRole.requires_locations === null || adminRole.requires_locations === undefined) 
+            ? null 
+            : Boolean(adminRole.requires_locations);
+
+        log.debug('✅ [ROLES] Admin roli ma\'lumotlari yuklandi');
+        res.json({
+            role_name: adminRole.role_name,
+            permissions: assignedPermissions,
+            requires_brands: requiresBrands,
+            requires_locations: requiresLocations
+        });
+
+    } catch (error) {
+        log.error("❌ [ROLES] /api/roles/admin GET xatoligi:", error);
+        res.status(500).json({ message: "Admin roli ma'lumotlarini yuklashda xatolik." });
+    }
+});
+
+// ===== DINAMIK ROUTE'LAR =====
 
 // Rol ma'lumotlarini olish (GET /api/roles/:role_name)
 router.get('/:role_name', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
@@ -106,48 +179,8 @@ router.get('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
             brands: brands
         });
     } catch (error) {
-        console.error(`/api/roles/${role_name} GET xatoligi:`, error);
+        log.error(`/api/roles/${role_name} GET xatoligi:`, error);
         res.status(500).json({ message: "Rol ma'lumotlarini yuklashda xatolik." });
-    }
-});
-
-// Admin rolining ma'lumotlarini olish (404 xatosini oldini olish uchun)
-// Bu endpoint /api/roles/:role_name dan oldin bo'lishi kerak
-router.get('/admin', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
-    try {
-        console.log('📋 [ROLES] /api/roles/admin endpointiga so\'rov keldi');
-        console.log('📋 [ROLES] User:', req.session.user?.username, 'Role:', req.session.user?.role);
-        
-        const [adminRole, rolePermissions] = await Promise.all([
-            db('roles').where('role_name', 'admin').first(),
-            db('role_permissions').where('role_name', 'admin').select('permission_key')
-        ]);
-
-        if (!adminRole) {
-            console.log('⚠️ [ROLES] Admin roli topilmadi');
-            return res.status(404).json({ message: "Admin roli topilmadi." });
-        }
-
-        const assignedPermissions = rolePermissions.map(rp => rp.permission_key);
-        
-        const requiresBrands = (adminRole.requires_brands === null || adminRole.requires_brands === undefined) 
-            ? null 
-            : Boolean(adminRole.requires_brands);
-        const requiresLocations = (adminRole.requires_locations === null || adminRole.requires_locations === undefined) 
-            ? null 
-            : Boolean(adminRole.requires_locations);
-
-        console.log('✅ [ROLES] Admin roli ma\'lumotlari yuklandi');
-        res.json({
-            role_name: adminRole.role_name,
-            permissions: assignedPermissions,
-            requires_brands: requiresBrands,
-            requires_locations: requiresLocations
-        });
-
-    } catch (error) {
-        console.error("❌ [ROLES] /api/roles/admin GET xatoligi:", error);
-        res.status(500).json({ message: "Admin roli ma'lumotlarini yuklashda xatolik." });
     }
 });
 
@@ -185,47 +218,20 @@ router.put('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [ROLES] Rol huquqlari yangilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [ROLES] Rol huquqlari yangilandi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('role_updated', {
                 role_name: role_name,
                 permissions: permissions,
                 action: 'updated'
             });
-            console.log(`✅ [ROLES] WebSocket yuborildi: role_updated`);
+            log.debug(`✅ [ROLES] WebSocket yuborildi: role_updated`);
         }
 
         res.json({ message: `"${role_name}" roli uchun huquqlar muvaffaqiyatli yangilandi.` });
 
     } catch (error) {
-        console.error(`/api/roles/${role_name} PUT xatoligi:`, error);
+        log.error(`/api/roles/${role_name} PUT xatoligi:`, error);
         res.status(500).json({ message: "Rol huquqlarini yangilashda xatolik." });
-    }
-});
-
-// Get all available permissions
-router.get('/permissions', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
-    try {
-        const permissions = await db('permissions')
-            .select('*')
-            .orderBy('category', 'permission_key');
-        res.json(permissions);
-    } catch (error) {
-        console.error('Get permissions error:', error);
-        res.status(500).json({ message: 'Huquqlarni yuklashda xatolik' });
-    }
-});
-
-// Get permissions overview with roles that have each permission
-router.get('/permissions/overview', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
-    try {
-        const permissions = await db('permissions')
-            .select('*')
-            .orderBy('category', 'permission_key');
-        
-        res.json(permissions);
-    } catch (error) {
-        console.error('Get permissions overview error:', error);
-        res.status(500).json({ message: 'Huquqlar ko\'rinishini yuklashda xatolik' });
     }
 });
 
@@ -248,7 +254,7 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
     const isBrandsFalse = requires_brands === false || requires_brands === null || requires_brands === undefined;
     
     if (isLocationsFalse && isBrandsFalse) {
-        console.error(`❌ [ROLES] Validatsiya xatolik: Ikkalasi ham false/null - hech narsa ko'rsatilmaydi`);
+        log.error(`❌ [ROLES] Validatsiya xatolik: Ikkalasi ham false/null - hech narsa ko'rsatilmaydi`);
         return res.status(400).json({ 
             message: "Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar). Agar ikkalasi ham tanlanmagan bo'lsa, foydalanuvchi hech qanday ma'lumot ko'ra olmaydi." 
         });
@@ -258,16 +264,16 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
         // Check if role already exists
         const existing = await db('roles').where('role_name', role_name).first();
         if (existing) {
-            console.log(`❌ [ROLES] Rol yaratishda xatolik: "${role_name}" allaqachon mavjud`);
+            log.debug(`❌ [ROLES] Rol yaratishda xatolik: "${role_name}" allaqachon mavjud`);
             return res.status(400).json({ message: 'Bu rol allaqachon mavjud' });
         }
         
         const adminId = req.session.user.id;
         const username = req.session.user?.username || 'admin';
         
-        console.log(`📝 [ROLES] Yangi rol yaratilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
-        console.log(`   - Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
-        console.log(`   - Locations: ${locations.length} ta, Brands: ${brands.length} ta, Permissions: ${permissions.length} ta`);
+        log.debug(`📝 [ROLES] Yangi rol yaratilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
+        log.debug(`   - Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
+        log.debug(`   - Locations: ${locations.length} ta, Brands: ${brands.length} ta, Permissions: ${permissions.length} ta`);
         
         await db.transaction(async trx => {
             // Create new role - null qiymatni qo'llab-quvvatlash
@@ -305,7 +311,7 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
             }
         });
         
-        console.log(`✅ [ROLES] Rol muvaffaqiyatli yaratildi: ${role_name}`);
+        log.debug(`✅ [ROLES] Rol muvaffaqiyatli yaratildi: ${role_name}`);
         
         // Log to audit
         await db('audit_logs').insert({
@@ -325,23 +331,23 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
             user_agent: req.session.user_agent
         });
         
-        console.log(`📋 [ROLES] Audit log yozildi. Action: create_role, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
+        log.debug(`📋 [ROLES] Audit log yozildi. Action: create_role, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [ROLES] Yangi rol yaratildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [ROLES] Yangi rol yaratildi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('role_updated', {
                 role_name: role_name,
                 requires_brands: requires_brands,
                 requires_locations: requires_locations,
                 action: 'created'
             });
-            console.log(`✅ [ROLES] WebSocket yuborildi: role_updated (created)`);
+            log.debug(`✅ [ROLES] WebSocket yuborildi: role_updated (created)`);
         }
         
         res.json({ message: 'Yangi rol muvaffaqiyatli yaratildi', role_name });
     } catch (error) {
-        console.error('Create role error:', error);
+        log.error('Create role error:', error);
         res.status(500).json({ message: 'Rol yaratishda xatolik' });
     }
 });
@@ -357,7 +363,7 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
     const isBrandsFalse = requires_brands === false || requires_brands === null || requires_brands === undefined;
     
     if (isLocationsFalse && isBrandsFalse) {
-        console.error(`❌ [ROLES] Validatsiya xatolik: Ikkalasi ham false/null - hech narsa ko'rsatilmaydi`);
+        log.error(`❌ [ROLES] Validatsiya xatolik: Ikkalasi ham false/null - hech narsa ko'rsatilmaydi`);
         return res.status(400).json({ 
             message: "Kamida bitta shart tanlanishi kerak (filiallar yoki brendlar). Agar ikkalasi ham tanlanmagan bo'lsa, foydalanuvchi hech qanday ma'lumot ko'ra olmaydi." 
         });
@@ -367,13 +373,13 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
         const adminId = req.session.user.id;
         const username = req.session.user?.username || 'admin';
         
-        console.log(`📝 [ROLES] Rol talablari yangilanmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
-        console.log(`   - Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
-        console.log(`   - Locations: ${locations.length} ta, Brands: ${brands.length} ta`);
+        log.debug(`📝 [ROLES] Rol talablari yangilanmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
+        log.debug(`   - Requires Brands: ${requires_brands}, Requires Locations: ${requires_locations}`);
+        log.debug(`   - Locations: ${locations.length} ta, Brands: ${brands.length} ta`);
         
         const role = await db('roles').where('role_name', role_name).first();
         if (!role) {
-            console.log(`❌ [ROLES] Rol topilmadi: ${role_name}`);
+            log.debug(`❌ [ROLES] Rol topilmadi: ${role_name}`);
             return res.status(404).json({ message: 'Rol topilmadi' });
         }
         
@@ -410,7 +416,7 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
             }
         });
         
-        console.log(`✅ [ROLES] Rol talablari yangilandi: ${role_name}`);
+        log.debug(`✅ [ROLES] Rol talablari yangilandi: ${role_name}`);
         
         // Rol o'zgargani uchun shu roldagi barcha foydalanuvchilarning sessiyalarini yangilash
         await refreshSessionsByRole(role_name);
@@ -431,11 +437,11 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
             user_agent: req.session.user_agent
         });
         
-        console.log(`📋 [ROLES] Audit log yozildi. Action: update_role_requirements, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
+        log.debug(`📋 [ROLES] Audit log yozildi. Action: update_role_requirements, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
         
         res.json({ message: 'Rol talablari yangilandi' });
     } catch (error) {
-        console.error('Update role requirements error:', error);
+        log.error('Update role requirements error:', error);
         res.status(500).json({ message: 'Rol talablarini yangilashda xatolik' });
     }
 });
@@ -466,7 +472,7 @@ router.delete('/:role_name', isAuthenticated, hasPermission('roles:manage'), asy
         const adminId = req.session.user.id;
         const username = req.session.user?.username || 'admin';
         
-        console.log(`📝 [ROLES] Rol o'chirilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
+        log.debug(`📝 [ROLES] Rol o'chirilmoqda. Admin: ${username} (ID: ${adminId}), Rol: ${role_name}`);
         
         await db.transaction(async trx => {
             // Rol bilan bog'liq barcha ma'lumotlarni o'chirish
@@ -476,7 +482,7 @@ router.delete('/:role_name', isAuthenticated, hasPermission('roles:manage'), asy
             await trx('roles').where('role_name', role_name).del();
         });
         
-        console.log(`✅ [ROLES] Rol muvaffaqiyatli o'chirildi: ${role_name}`);
+        log.debug(`✅ [ROLES] Rol muvaffaqiyatli o'chirildi: ${role_name}`);
         
         // Log to audit
         await db('audit_logs').insert({
@@ -489,22 +495,22 @@ router.delete('/:role_name', isAuthenticated, hasPermission('roles:manage'), asy
             user_agent: req.session.user_agent
         });
         
-        console.log(`📋 [ROLES] Audit log yozildi. Action: delete_role, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
+        log.debug(`📋 [ROLES] Audit log yozildi. Action: delete_role, Role: ${role_name}, Admin: ${username} (ID: ${adminId})`);
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
-            console.log(`📡 [ROLES] Rol o'chirildi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [ROLES] Rol o'chirildi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('role_deleted', {
                 role_name: role_name,
                 deleted_by: adminId,
                 deleted_by_username: username
             });
-            console.log(`✅ [ROLES] WebSocket yuborildi: role_deleted`);
+            log.debug(`✅ [ROLES] WebSocket yuborildi: role_deleted`);
         }
         
         res.json({ message: 'Rol muvaffaqiyatli o\'chirildi' });
     } catch (error) {
-        console.error('Delete role error:', error);
+        log.error('Delete role error:', error);
         res.status(500).json({ message: 'Rolni o\'chirishda xatolik' });
     }
 });

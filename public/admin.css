@@ -1940,6 +1940,17 @@ input.form-control.comparison-input {
     color: #ef4444;
 }
 
+.user-card-action-btn.warning {
+    border-color: #f59e0b;
+    color: #f59e0b;
+}
+
+.user-card-action-btn.warning:hover {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: #f59e0b;
+    color: #f59e0b;
+}
+
 /* Old styles kept for compatibility */
 .user-list { display: flex; flex-direction: column; gap: 15px; }
 .user-item {

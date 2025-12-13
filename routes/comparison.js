@@ -5,6 +5,9 @@ const { db } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { applyReportsFilter } = require('../utils/userAccessFilter.js');
 const { safeSendMessage } = require('../utils/bot.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('COMPARISON');
+
 
 const router = express.Router();
 
@@ -136,6 +139,7 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 const reportData = JSON.parse(rawData);
                 
                 let reportTotal = 0;
+                
                 for (const key in reportData) {
                     // Key format: {brandId}_{columnName}
                     const parts = key.split('_');
@@ -156,7 +160,7 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 
                 locationTotals[location].operator_amount += reportTotal;
             } catch (error) {
-                // Silent error handling
+                log.error(`[COMPARISON] Report parse xatolik (location: ${location}, report_id: ${report.id}):`, error.message);
             }
         }
 
@@ -342,7 +346,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             const targetBrandIdNum = parseInt(brandId);
             
             if (reports.length === 0) {
-                console.warn(`⚠️ [COMPARISON] Report topilmadi: date=${date}, brand_id=${brandId}, location=${location}`);
+                log.warn(`⚠️ [COMPARISON] Report topilmadi: date=${date}, brand_id=${brandId}, location=${location}`);
             }
             
             for (const report of reports) {
@@ -371,7 +375,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                     
                     operatorAmount += reportTotal;
                 } catch (error) {
-                    console.error(`❌ [COMPARISON] Report parse xatolik (location: ${location}):`, error.message);
+                    log.error(`❌ [COMPARISON] Report parse xatolik (location: ${location}):`, error.message);
                 }
             }
 
@@ -457,7 +461,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
 
         // Agar farqlar bo'lsa, barcha operatorlarga notification yaratish
         if (differences.length > 0) {
-            console.log(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial, Brand: ${brandName}, Date: ${date}`);
+            log.debug(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial, Brand: ${brandName}, Date: ${date}`);
             
             try {
                 // Operatorlarni qidirish (telegram_chat_id bilan)
@@ -493,7 +497,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 }
                 
                 if (operators.length === 0) {
-                    console.warn(`⚠️ [COMPARISON] Hech qanday aktiv operator topilmadi, notification yuborilmaydi`);
+                    log.warn(`⚠️ [COMPARISON] Hech qanday aktiv operator topilmadi, notification yuborilmaydi`);
                 } else {
                     // Har bir operator uchun notification yaratish
                     const notificationData = operators.map(operator => ({
@@ -515,9 +519,9 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 if (notificationData.length > 0) {
                     try {
                         await db('notifications').insert(notificationData);
-                        console.log(`✅ [COMPARISON] ${notificationData.length} ta notification yaratildi`);
+                        log.debug(`✅ [COMPARISON] ${notificationData.length} ta notification yaratildi`);
                     } catch (insertError) {
-                        console.error(`❌ [COMPARISON] Notification'lar bazaga yozishda xatolik:`, insertError.message);
+                        log.error(`❌ [COMPARISON] Notification'lar bazaga yozishda xatolik:`, insertError.message);
                     }
                     
                     // Telegram orqali har bir operatorga xabar yuborish
@@ -534,7 +538,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                         
                         for (const operator of operators) {
                             if (!operator.telegram_chat_id) {
-                                console.warn(`⚠️ [COMPARISON] Operator ${operator.username} (ID: ${operator.id}) da telegram_chat_id yo'q`);
+                                log.warn(`⚠️ [COMPARISON] Operator ${operator.username} (ID: ${operator.id}) da telegram_chat_id yo'q`);
                                 continue;
                             }
                             
@@ -549,25 +553,25 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                                 const result = await safeSendMessage(operator.telegram_chat_id, telegramMessage);
                                 if (result) {
                                     telegramSuccessCount++;
-                                    console.log(`✅ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborildi`);
+                                    log.debug(`✅ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborildi`);
                                 } else {
                                     telegramErrorCount++;
-                                    console.warn(`⚠️ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborilmadi`);
+                                    log.warn(`⚠️ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborilmadi`);
                                 }
                             } catch (telegramError) {
                                 telegramErrorCount++;
-                                console.error(`❌ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborishda xatolik:`, telegramError.message);
+                                log.error(`❌ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborishda xatolik:`, telegramError.message);
                             }
                         }
                         
                         if (telegramSuccessCount > 0) {
-                            console.log(`✅ [COMPARISON] Telegram: ${telegramSuccessCount} ta operatorga xabar yuborildi`);
+                            log.debug(`✅ [COMPARISON] Telegram: ${telegramSuccessCount} ta operatorga xabar yuborildi`);
                         }
                         if (telegramErrorCount > 0) {
-                            console.warn(`⚠️ [COMPARISON] Telegram: ${telegramErrorCount} ta operatorga xabar yuborilmadi`);
+                            log.warn(`⚠️ [COMPARISON] Telegram: ${telegramErrorCount} ta operatorga xabar yuborilmadi`);
                         }
                     } catch (telegramError) {
-                        console.error(`❌ [COMPARISON] Telegram yuborishda umumiy xatolik:`, telegramError.message);
+                        log.error(`❌ [COMPARISON] Telegram yuborishda umumiy xatolik:`, telegramError.message);
                     }
                     
                     // WebSocket orqali realtime yuborish
@@ -599,27 +603,27 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                                     successCount++;
                                 } catch (operatorError) {
                                     errorCount++;
-                                    console.error(`❌ [COMPARISON] Operator ${operator.id} ga yuborishda xatolik:`, operatorError.message);
+                                    log.error(`❌ [COMPARISON] Operator ${operator.id} ga yuborishda xatolik:`, operatorError.message);
                                 }
                             }
                             
                             if (errorCount > 0) {
-                                console.warn(`⚠️ [COMPARISON] WebSocket yuborish: ${successCount} muvaffaqiyatli, ${errorCount} xatolik`);
+                                log.warn(`⚠️ [COMPARISON] WebSocket yuborish: ${successCount} muvaffaqiyatli, ${errorCount} xatolik`);
                             }
                         }
                     } catch (wsError) {
-                        console.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError.message);
+                        log.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError.message);
                     }
                 }
                 }
             } catch (error) {
-                console.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error.message);
+                log.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error.message);
             }
         }
 
         // WebSocket orqali realtime yuborish (umumiy yangilanish)
         if (global.broadcastWebSocket) {
-            console.log(`📡 [COMPARISON] Solishtirish yangilandi, WebSocket orqali yuborilmoqda...`);
+            log.debug(`📡 [COMPARISON] Solishtirish yangilandi, WebSocket orqali yuborilmoqda...`);
             global.broadcastWebSocket('comparison_updated', {
                 date: date,
                 brandId: brandId,
@@ -628,7 +632,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 updatedCount: updatedCount,
                 updated_by: userId
             });
-            console.log(`✅ [COMPARISON] WebSocket yuborildi: comparison_updated`);
+            log.debug(`✅ [COMPARISON] WebSocket yuborildi: comparison_updated`);
         }
         
         res.json({

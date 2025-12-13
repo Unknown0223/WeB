@@ -1088,34 +1088,209 @@ const renderKpiCards = (stats) => {
         `;
     }
 
-    function exportToExcel() {
+    async function exportToExcel() {
         const table = document.getElementById('main-table');
-        if (!table) return;
+        if (!table) {
+            console.error('[EXCEL] Jadval topilmadi!');
+            return;
+        }
+        
+        // Jadval ma'lumotlarini to'plash
+        const { columns = [] } = state.settings.app_settings || {};
+        const tableData = [];
+        
+        // Brendlar qatorlarini olish
+        const brandRows = DOM.tableBody?.querySelectorAll('tr') || [];
+        brandRows.forEach(row => {
+            const brandCell = row.querySelector('td[data-label="Brend"]');
+            if (!brandCell) return;
+            
+            const brandName = brandCell.textContent.trim();
+            const rowData = [brandName];
+            
+            // Ustunlar qiymatlarini olish
+            columns.forEach(col => {
+                const input = row.querySelector(`input[data-key$="_${col}"]`);
+                const value = input ? (input.value || '0') : '0';
+                rowData.push(value);
+            });
+            
+            // Jami ustunini olish
+            const totalCell = row.querySelector('td.row-total');
+            const totalValue = totalCell ? (totalCell.textContent.trim() || '0') : '0';
+            rowData.push(totalValue);
+            
+            tableData.push(rowData);
+        });
+        
+        // Jami qatorini olish
+        const footerRow = DOM.tableFoot?.querySelector('tr');
+        if (footerRow) {
+            const footerData = ['Jami'];
+            columns.forEach(col => {
+                const totalCell = footerRow.querySelector(`td.col-total[data-col="${col}"]`);
+                const value = totalCell ? (totalCell.textContent.trim() || '0') : '0';
+                footerData.push(value);
+            });
+            const grandTotalCell = footerRow.querySelector('#grand-total');
+            const grandTotal = grandTotalCell ? (grandTotalCell.textContent.trim() || '0') : '0';
+            footerData.push(grandTotal);
+            tableData.push(footerData);
+        }
+        
+        // Backend'ga so'rov yuborish
+        try {
+            const date = DOM.datePickerEl.value || new Date().toISOString().split('T')[0];
+            const location = DOM.locationSelect.value || 'noma\'lum';
+            const currency = DOM.currencySelect?.value || 'UZS';
+            
+            const response = await fetch('/api/reports/export', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify({
+                    tableData,
+                    columns,
+                    date,
+                    location,
+                    currency
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Server xatolik: ${response.status}`);
+            }
+            
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${location}_${date}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            showToast("Excel fayl muvaffaqiyatli yaratildi!");
+            return;
+        } catch (error) {
+            console.error('[EXCEL] Backend export xatolik:', error);
+            // Agar backend ishlamasa, frontend export ishlatiladi
+        }
     
         // Jadvalni nusxalash va input qiymatlarini matnda almashtirish
         const tableClone = table.cloneNode(true);
         
-        // Barcha input'larni qiymatiga almashtirish
-        tableClone.querySelectorAll('input').forEach(input => {
+        // Barcha input'larni qiymatiga almashtirish va sonlarni to'g'ri formatlash
+        let numericCellsCount = 0;
+        tableClone.querySelectorAll('input').forEach((input, idx) => {
             const td = input.closest('td');
             if (td) {
                 const value = input.value || '0';
-                td.textContent = value;
+                // Bo'shliqlarni olib tashlash va son sifatida tekshirish
+                const cleanValue = value.toString().replace(/\s/g, '');
+                const numValue = parseFloat(cleanValue);
+                
+                if (!isNaN(numValue) && cleanValue !== '') {
+                    // Son sifatida saqlash
+                    td.textContent = numValue;
+                    td.setAttribute('data-type', 'number');
+                    td.setAttribute('data-value', numValue);
+                    numericCellsCount++;
+                } else {
+                    // Matn sifatida saqlash
+                    td.textContent = value;
+                    td.setAttribute('data-type', 'string');
+                }
+            }
+        });
+        
+        // Sarlavha qatorini formatlash (ko'k rang)
+        const headerRow = tableClone.querySelector('thead tr');
+        if (headerRow) {
+            headerRow.style.backgroundColor = '#1F4788';
+            headerRow.style.color = '#FFFFFF';
+            headerRow.style.fontWeight = 'bold';
+            headerRow.querySelectorAll('th').forEach(th => {
+                th.style.backgroundColor = '#1F4788';
+                th.style.color = '#FFFFFF';
+                th.style.textAlign = 'center';
+                th.style.border = '1px solid #000000';
+            });
+        }
+        
+        // Jami qatorini formatlash (sariq rang) - frontend export uchun
+        const footerRowClone = tableClone.querySelector('tfoot tr');
+        if (footerRowClone) {
+            footerRowClone.style.backgroundColor = '#FFEB3B';
+            footerRowClone.style.fontWeight = 'bold';
+            footerRowClone.querySelectorAll('td').forEach(td => {
+                td.style.backgroundColor = '#FFEB3B';
+                td.style.color = '#000000';
+                td.style.border = '1px solid #000000';
+                if (td.textContent.trim() !== 'Jami') {
+                    td.style.textAlign = 'right';
+                }
+            });
+        }
+        
+        // Barcha qatorlar uchun border qo'shish
+        tableClone.querySelectorAll('td, th').forEach(cell => {
+            if (!cell.style.border) {
+                cell.style.border = '1px solid #000000';
             }
         });
         
         // Excel yaratish
         const wb = XLSX.utils.table_to_book(tableClone, { 
             sheet: "Hisobot",
-            raw: false,
-            cellStyles: true
+            raw: true, // Sonlarni to'g'ri formatlash uchun raw: true
+            cellStyles: true,
+            cellHTML: false // HTML formatlarni o'chirish
+        });
+        
+        // Workbook'ga style qo'shish (ranglar uchun)
+        if (!wb.Styles) {
+            wb.Styles = {
+                fills: [],
+                fonts: [],
+                borders: [],
+                cellXfs: []
+            };
+        }
+        
+        // Ko'k rang qo'shish
+        wb.Styles.fills.push({
+            patternType: 'solid',
+            fgColor: { rgb: '1F4788' }
+        });
+        
+        // Sariq rang qo'shish
+        wb.Styles.fills.push({
+            patternType: 'solid',
+            fgColor: { rgb: 'FFEB3B' }
+        });
+        
+        // Oq matn qo'shish
+        wb.Styles.fonts.push({
+            bold: true,
+            color: { rgb: 'FFFFFF' },
+            sz: 12
+        });
+        
+        // Qora matn qo'shish
+        wb.Styles.fonts.push({
+            bold: true,
+            color: { rgb: '000000' }
         });
         
         // Ustunlar kengligini sozlash
         const ws = wb.Sheets['Hisobot'];
         const range = XLSX.utils.decode_range(ws['!ref']);
-        const colWidths = [];
         
+        const colWidths = [];
         for (let C = range.s.c; C <= range.e.c; ++C) {
             let maxWidth = 10;
             for (let R = range.s.r; R <= range.e.r; ++R) {
@@ -1130,10 +1305,163 @@ const renderKpiCards = (stats) => {
         }
         ws['!cols'] = colWidths;
         
+        // Jami qatori indexini aniqlash
+        const totalRowIndex = range.e.r;
+        
+        // Sonlarni to'g'ri formatlash va number format qo'shish
+        let formattedNumbersCount = 0;
+        // Number format: # ##0,00 (bo'shliq bilan ajratilgan, vergul bilan kasr)
+        // Excel format: # ##0,00 (O'zbekiston formatida)
+        const numberFormat = '# ##0,00';
+        
+        // Workbook'ga number format qo'shish
+        if (!wb.SSF) wb.SSF = {};
+        // XLSX kutubxonasida formatlar ro'yxatini yaratish
+        const formatIndex = Object.keys(wb.SSF).length;
+        wb.SSF[formatIndex] = numberFormat;
+        
+        for (let R = range.s.r + 1; R < totalRowIndex; ++R) { // Sarlavha va jami qatorini o'tkazib yuborish
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                const cell = ws[cellAddress];
+                if (cell && cell.v !== undefined && cell.v !== null) {
+                    // Agar son bo'lsa, son sifatida saqlash
+                    const strValue = cell.v.toString().replace(/\s/g, '').replace(',', '.');
+                    const numValue = parseFloat(strValue);
+                    if (!isNaN(numValue) && strValue !== '' && C > 0) { // Birinchi ustun (Brend) emas
+                        // Son sifatida saqlash
+                        cell.v = numValue;
+                        cell.t = 'n'; // number type
+                        cell.z = numberFormat; // number format string
+                        // Style uchun ham format qo'shish
+                        if (!cell.s) cell.s = {};
+                        cell.s.numFmt = numberFormat;
+                        formattedNumbersCount++;
+                    } else if (C === 0) {
+                        // Birinchi ustun (Brend) - matn sifatida qoldirish
+                        cell.t = 's'; // string type
+                    }
+                }
+            }
+        }
+        
+        // Jami qatoridagi sonlarni ham formatlash
+        if (totalRowIndex > 0) {
+            for (let C = range.s.c + 1; C <= range.e.c; ++C) { // Birinchi ustun (Jami) emas
+                const cellAddress = XLSX.utils.encode_cell({ r: totalRowIndex, c: C });
+                const cell = ws[cellAddress];
+                if (cell && cell.v !== undefined && cell.v !== null) {
+                    const strValue = cell.v.toString().replace(/\s/g, '').replace(',', '.');
+                    const numValue = parseFloat(strValue);
+                    if (!isNaN(numValue) && strValue !== '') {
+                        cell.v = numValue;
+                        cell.t = 'n';
+                        cell.z = numberFormat;
+                        if (!cell.s) cell.s = {};
+                        cell.s.numFmt = numberFormat;
+                    }
+                }
+            }
+        }
+        
+        // XLSX kutubxonasida ranglar qo'shish uchun workbook'ga style qo'shish
+        if (!wb.SSF) wb.SSF = {};
+        
+        // Sarlavha qatorini formatlash (ko'k rang - rasmdagidek)
+        if (range.s.r === 0) {
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
+                if (!ws[cellAddress]) continue;
+                const cell = ws[cellAddress];
+                if (!cell.s) cell.s = {};
+                // Ko'k fon, oq matn
+                cell.s = {
+                    fill: { 
+                        fgColor: { rgb: "1F4788" },
+                        bgColor: { rgb: "1F4788" },
+                        patternType: "solid"
+                    },
+                    font: { 
+                        bold: true, 
+                        color: { rgb: "FFFFFF" }, 
+                        sz: 12 
+                    },
+                    alignment: { 
+                        horizontal: "center", 
+                        vertical: "center" 
+                    },
+                    border: {
+                        top: { style: "thin", color: { rgb: "000000" } },
+                        bottom: { style: "thin", color: { rgb: "000000" } },
+                        left: { style: "thin", color: { rgb: "000000" } },
+                        right: { style: "thin", color: { rgb: "000000" } }
+                    }
+                };
+            }
+        }
+        
+        // Jami qatorini formatlash (sariq rang - rasmdagidek)
+        const totalRowLabel = ws[XLSX.utils.encode_cell({ r: totalRowIndex, c: 0 })];
+        if (totalRowLabel && totalRowLabel.v && (totalRowLabel.v.toString().toLowerCase().includes('jami') || totalRowLabel.v.toString().toLowerCase().includes('total'))) {
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellAddress = XLSX.utils.encode_cell({ r: totalRowIndex, c: C });
+                if (!ws[cellAddress]) continue;
+                const cell = ws[cellAddress];
+                if (!cell.s) cell.s = {};
+                // Sariq fon, qora matn
+                cell.s = {
+                    fill: { 
+                        fgColor: { rgb: "FFEB3B" },
+                        bgColor: { rgb: "FFEB3B" },
+                        patternType: "solid"
+                    },
+                    font: { 
+                        bold: true, 
+                        color: { rgb: "000000" }
+                    },
+                    alignment: { 
+                        horizontal: "right", 
+                        vertical: "center" 
+                    },
+                    border: {
+                        top: { style: "medium", color: { rgb: "000000" } },
+                        bottom: { style: "thin", color: { rgb: "000000" } },
+                        left: { style: "thin", color: { rgb: "000000" } },
+                        right: { style: "thin", color: { rgb: "000000" } }
+                    }
+                };
+            }
+        }
+        
+        // Barcha qatorlar uchun border qo'shish
+        for (let R = range.s.r; R <= range.e.r; ++R) {
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                const cell = ws[cellAddress];
+                if (cell && !cell.s) {
+                    cell.s = {
+                        border: {
+                            top: { style: "thin", color: { rgb: "000000" } },
+                            bottom: { style: "thin", color: { rgb: "000000" } },
+                            left: { style: "thin", color: { rgb: "000000" } },
+                            right: { style: "thin", color: { rgb: "000000" } }
+                        }
+                    };
+                } else if (cell && cell.s && !cell.s.border) {
+                    cell.s.border = {
+                        top: { style: "thin", color: { rgb: "000000" } },
+                        bottom: { style: "thin", color: { rgb: "000000" } },
+                        left: { style: "thin", color: { rgb: "000000" } },
+                        right: { style: "thin", color: { rgb: "000000" } }
+                    };
+                }
+            }
+        }
+        
         const date = DOM.datePickerEl.value || 'hisobot';
         const location = DOM.locationSelect.value || 'noma\'lum';
         const fileName = `${location}_${date}.xlsx`;
-    
+        
         XLSX.writeFile(wb, fileName);
         showToast("Excel fayl muvaffaqiyatli yaratildi!");
     }

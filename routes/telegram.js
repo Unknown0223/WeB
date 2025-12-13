@@ -3,6 +3,9 @@ const bcrypt = require('bcrypt');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../db.js');
 const { sendToTelegram } = require('../utils/bot.js');
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('TELEGRAM');
+
 
 const router = express.Router();
 
@@ -16,18 +19,18 @@ const router = express.Router();
 router.post('/finalize-approval', async (req, res) => {
     const { user_id, role, locations = [], brands = [] } = req.body;
     
-    console.log(`📥 [TELEGRAM API] Finalize approval so'rovi qabul qilindi. User ID: ${user_id}, Role: ${role}`);
-    console.log(`   - Locations: ${locations.length} ta`, locations);
-    console.log(`   - Brands: ${brands.length} ta`, brands);
+    log.debug(`📥 [TELEGRAM API] Finalize approval so'rovi qabul qilindi. User ID: ${user_id}, Role: ${role}`);
+    log.debug(`   - Locations: ${locations.length} ta`, locations);
+    log.debug(`   - Brands: ${brands.length} ta`, brands);
     
     if (!user_id || !role) {
-        console.log(`❌ [TELEGRAM API] Validatsiya xatosi: user_id yoki role yo'q`);
+        log.debug(`❌ [TELEGRAM API] Validatsiya xatosi: user_id yoki role yo'q`);
         return res.status(400).json({ message: "Foydalanuvchi ID si va rol yuborilishi shart." });
     }
 
     // Super admin yaratish mumkin emas
     if (role === 'super_admin') {
-        console.log(`❌ [TELEGRAM API] Super admin yaratishga urinish`);
+        log.debug(`❌ [TELEGRAM API] Super admin yaratishga urinish`);
         return res.status(403).json({ message: "Super admin yaratish mumkin emas." });
     }
 
@@ -35,20 +38,17 @@ router.post('/finalize-approval', async (req, res) => {
     const { db } = require('../db.js');
     const roleExists = await db('roles').where({ role_name: role }).first();
     if (!roleExists) {
-        console.log(`❌ [TELEGRAM API] Rol topilmadi. Role: ${role}`);
+        log.debug(`❌ [TELEGRAM API] Rol topilmadi. Role: ${role}`);
         return res.status(400).json({ message: "Tanlangan rol mavjud emas." });
     }
 
     // Rol talablarini bazadan olish
     const roleData = await db('roles').where({ role_name: role }).first();
     if (!roleData) {
-        console.log(`❌ [TELEGRAM API] Rol ma'lumotlari topilmadi. Role: ${role}`);
+        log.debug(`❌ [TELEGRAM API] Rol ma'lumotlari topilmadi. Role: ${role}`);
         return res.status(400).json({ message: "Tanlangan rol mavjud emas." });
     }
     
-    // TODO: Bu yerda user-specific sozlamalarni tekshirish qo'shiladi
-    // Hozircha validatsiya o'tkazilmaydi
-
     try {
         // Foydalanuvchi allaqachon tasdiqlanmaganligini tekshirish
         const existingUser = await db('users').where({ id: user_id }).first();
@@ -106,18 +106,18 @@ router.post('/finalize-approval', async (req, res) => {
 
         await db('pending_registrations').where({ user_id: user_id }).del();
 
-        console.log(`✅ [TELEGRAM API] Foydalanuvchi muvaffaqiyatli tasdiqlandi. User ID: ${user_id}, Role: ${role}, Locations: ${locations.length} ta, Brands: ${brands.length} ta`);
+        log.debug(`✅ [TELEGRAM API] Foydalanuvchi muvaffaqiyatli tasdiqlandi. User ID: ${user_id}, Role: ${role}, Locations: ${locations.length} ta, Brands: ${brands.length} ta`);
         res.json({ status: 'success', message: 'Foydalanuvchi muvaffaqiyatli tasdiqlandi.' });
 
     } catch (error) {
-        console.error(`❌ [TELEGRAM API] /api/telegram/finalize-approval xatoligi:`, error);
-        console.error(`❌ [TELEGRAM API] Error stack:`, error.stack);
+        log.error(`❌ [TELEGRAM API] /api/telegram/finalize-approval xatoligi:`, error);
+        log.error(`❌ [TELEGRAM API] Error stack:`, error.stack);
         // Agar xatolik yuz bersa, statusni qaytarish
         try {
             await db('users').where({ id: user_id, status: 'status_in_process' }).update({ status: 'pending_approval' });
-            console.log(`🔄 [TELEGRAM API] Foydalanuvchi statusi qaytarildi: pending_approval`);
+            log.debug(`🔄 [TELEGRAM API] Foydalanuvchi statusi qaytarildi: pending_approval`);
         } catch (updateError) {
-            console.error(`❌ [TELEGRAM API] Statusni qaytarishda xatolik:`, updateError);
+            log.error(`❌ [TELEGRAM API] Statusni qaytarishda xatolik:`, updateError);
         }
         res.status(500).json({ message: "Foydalanuvchini tasdiqlashda server xatoligi." });
     }
@@ -166,7 +166,7 @@ router.post('/verify-secret-word', async (req, res) => {
             return res.json({ status: 'fail', message: "Maxfiy so'z noto'g'ri." });
         }
     } catch (error) {
-        console.error("/api/telegram/verify-secret-word xatoligi:", error);
+        log.error("/api/telegram/verify-secret-word xatoligi:", error);
         res.status(500).json({ message: "Serverda kutilmagan xatolik." });
     }
 });
@@ -185,7 +185,7 @@ router.post('/notify-admin-lock', async (req, res) => {
         });
         res.json({ status: 'success' });
     } catch (error) {
-        console.error("/api/telegram/notify-admin-lock xatoligi:", error);
+        log.error("/api/telegram/notify-admin-lock xatoligi:", error);
         res.status(500).json({ message: "Serverda xatolik." });
     }
 });
@@ -209,7 +209,7 @@ router.post('/reset-attempts', async (req, res) => {
         }
         res.json({ status: 'success' });
     } catch (error) {
-        console.error("/api/telegram/reset-attempts xatoligi:", error);
+        log.error("/api/telegram/reset-attempts xatoligi:", error);
         res.status(500).json({ message: "Serverda xatolik." });
     }
 });
@@ -231,7 +231,7 @@ router.post('/unblock-user', async (req, res) => {
         });
         res.json({ status: 'success', message: "Foydalanuvchi blokdan chiqarildi." });
     } catch (error) {
-        console.error("/api/telegram/unblock-user xatoligi:", error);
+        log.error("/api/telegram/unblock-user xatoligi:", error);
         res.status(500).json({ message: "Serverda xatolik." });
     }
 });
@@ -245,7 +245,7 @@ router.post('/keep-blocked', async (req, res) => {
         await db('users').where({ id: user_id }).update({ lock_reason: lockMessage });
         res.json({ status: 'success', message: "Foydalanuvchi bloklangan holatda qoldirildi." });
     } catch (error) {
-        console.error("/api/telegram/keep-blocked xatoligi:", error);
+        log.error("/api/telegram/keep-blocked xatoligi:", error);
         res.status(500).json({ message: "Serverda xatolik." });
     }
 });

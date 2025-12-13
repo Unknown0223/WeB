@@ -1015,6 +1015,24 @@ function renderModernUserCard(user) {
                     ${user.status === 'active' ? 'Bloklash' : 'Aktivlashtirish'}
                 </button>
                 ` : ''}
+                ${(state.currentUser.role === 'superadmin' || state.currentUser.role === 'super_admin') && state.currentUser.id !== user.id && user.telegram_chat_id ? `
+                <button class="user-card-action-btn warning clear-telegram-btn" 
+                        data-id="${user.id}" 
+                        data-username="${user.username}"
+                        title="Telegram bog'lanishni tozalash">
+                    <i data-feather="link-2"></i>
+                    TG tozalash
+                </button>
+                ` : ''}
+                ${(state.currentUser.role === 'superadmin' || state.currentUser.role === 'super_admin') && state.currentUser.id !== user.id && user.role !== 'superadmin' && user.role !== 'super_admin' ? `
+                <button class="user-card-action-btn danger delete-user-btn" 
+                        data-id="${user.id}" 
+                        data-username="${user.username}"
+                        title="Foydalanuvchini o'chirish">
+                    <i data-feather="trash-2"></i>
+                    O'chirish
+                </button>
+                ` : ''}
             </div>
         </div>
     `;
@@ -2938,9 +2956,144 @@ export async function handleUserActions(e) {
     } else if (button.classList.contains('connect-telegram-btn')) {
         openTelegramConnectModal(userId);
         isHandlingUserAction = false;
+    } else if (button.classList.contains('clear-telegram-btn')) {
+        // Telegram bog'lanishni tozalash (faqat superadmin)
+        await handleClearTelegram(userId, button.dataset.username);
+        isHandlingUserAction = false;
+    } else if (button.classList.contains('delete-user-btn')) {
+        // Foydalanuvchini o'chirish (faqat superadmin)
+        await handleDeleteUser(userId, button.dataset.username);
+        isHandlingUserAction = false;
     } else {
         // Boshqa button'lar uchun ham flag'ni qaytarish
         isHandlingUserAction = false;
+    }
+}
+
+// ===================================================================
+// === TELEGRAM BOG'LANISHNI TOZALASH (FAQAT SUPERADMIN) ===
+// ===================================================================
+async function handleClearTelegram(userId, username) {
+    const confirmed = await showConfirmDialog({
+        title: '🔗 Telegram bog\'lanishni tozalash',
+        message: `<b>${username}</b> foydalanuvchisining Telegram bog'lanishini tozalamoqchimisiz?\n\nBu amalni bajargandan so'ng foydalanuvchi qaytadan bot obunasini qilishi kerak bo'ladi.`,
+        confirmText: 'Ha, tozalash',
+        cancelText: 'Bekor qilish',
+        type: 'warning',
+        icon: 'link-2'
+    });
+    
+    if (!confirmed) return;
+    
+    try {
+        const res = await safeFetch(`/api/users/${userId}/clear-telegram`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!res || !res.ok) {
+            const errorData = res ? await res.json().catch(() => ({})) : {};
+            throw new Error(errorData.message || 'Telegram tozalashda xatolik');
+        }
+        
+        const result = await res.json();
+        showToast(result.message || 'Telegram bog\'lanish tozalandi', 'success');
+        
+        // Foydalanuvchilar ro'yxatini yangilash
+        await refreshUsersList();
+        
+    } catch (error) {
+        console.error('❌ [USERS] Telegram tozalash xatoligi:', error);
+        showToast(error.message || 'Telegram tozalashda xatolik', 'error');
+    }
+}
+
+// ===================================================================
+// === FOYDALANUVCHINI O'CHIRISH (FAQAT SUPERADMIN) ===
+// ===================================================================
+async function handleDeleteUser(userId, username) {
+    try {
+        // Avval foydalanuvchi ma'lumotlarini tekshirish
+        const checkRes = await safeFetch(`/api/users/${userId}/check-data`, {
+            method: 'GET'
+        });
+        
+        if (!checkRes || !checkRes.ok) {
+            const errorData = checkRes ? await checkRes.json().catch(() => ({})) : {};
+            throw new Error(errorData.message || 'Ma\'lumotlarni tekshirishda xatolik');
+        }
+        
+        const checkData = await checkRes.json();
+        
+        let confirmMessage = '';
+        let confirmType = 'danger';
+        
+        if (checkData.canDeleteSafely) {
+            // Xavfsiz o'chirish mumkin
+            confirmMessage = `<b>${username}</b> foydalanuvchisini o'chirmoqchimisiz?\n\n` +
+                `✅ Bu foydalanuvchi hech qanday ma'lumot kiritmagan. Xavfsiz o'chirish mumkin.`;
+        } else {
+            // Ogohlantirish
+            confirmMessage = `<b>⚠️ Diqqat!</b>\n\n` +
+                `<b>${username}</b> foydalanuvchisi quyidagi ma'lumotlarni kiritgan:\n\n` +
+                `📊 Hisobotlar: <b>${checkData.hasData.reports}</b> ta\n` +
+                `📜 Tarix: <b>${checkData.hasData.history}</b> ta\n` +
+                `📈 Taqqoslashlar: <b>${checkData.hasData.comparisons}</b> ta\n\n` +
+                `<b>O'chirish kelajakdagi tarixlarga ta'sir qilishi mumkin!</b>\n\n` +
+                `Davom etasizmi?`;
+            confirmType = 'danger';
+        }
+        
+        const confirmed = await showConfirmDialog({
+            title: '🗑️ Foydalanuvchini o\'chirish',
+            message: confirmMessage,
+            confirmText: checkData.canDeleteSafely ? 'Ha, o\'chirish' : '⚠️ Ha, o\'chirish',
+            cancelText: 'Bekor qilish',
+            type: confirmType,
+            icon: 'trash-2'
+        });
+        
+        if (!confirmed) return;
+        
+        // Agar ma'lumot bor bo'lsa, yana bir marta tasdiqlash
+        if (!checkData.canDeleteSafely) {
+            const forceConfirmed = await showConfirmDialog({
+                title: '⚠️ OXIRGI OGOHLANTIRISH',
+                message: `<b>Bu amal qaytarib bo'lmaydi!</b>\n\n` +
+                    `Foydalanuvchi o'chiriladi, lekin uning kiritgan hisobotlari saqlanib qoladi (user_id = null).\n\n` +
+                    `Rostdan ham davom etasizmi?`,
+                confirmText: 'Ha, o\'chirish',
+                cancelText: 'Yo\'q, bekor qilish',
+                type: 'danger',
+                icon: 'alert-triangle'
+            });
+            
+            if (!forceConfirmed) return;
+        }
+        
+        // O'chirish so'rovi
+        const deleteUrl = checkData.canDeleteSafely 
+            ? `/api/users/${userId}` 
+            : `/api/users/${userId}?forceDelete=true`;
+            
+        const deleteRes = await safeFetch(deleteUrl, {
+            method: 'DELETE'
+        });
+        
+        if (!deleteRes || !deleteRes.ok) {
+            const errorData = deleteRes ? await deleteRes.json().catch(() => ({})) : {};
+            throw new Error(errorData.message || 'Foydalanuvchini o\'chirishda xatolik');
+        }
+        
+        const result = await deleteRes.json();
+        showToast(result.message || 'Foydalanuvchi o\'chirildi', 'success');
+        
+        // Foydalanuvchilar ro'yxatini yangilash
+        await refreshUsersList();
+        
+    } catch (error) {
+        console.error('❌ [USERS] Foydalanuvchi o\'chirish xatoligi:', error);
+        showToast(error.message || 'Foydalanuvchini o\'chirishda xatolik', 'error');
     }
 }
 
@@ -4993,6 +5146,46 @@ function setupRequestsFilters() {
         });
     }
     
+    // Excel export button
+    const exportExcelBtn = document.getElementById('export-requests-excel-btn');
+    if (exportExcelBtn) {
+        exportExcelBtn.addEventListener('click', async () => {
+            try {
+                exportExcelBtn.disabled = true;
+                exportExcelBtn.innerHTML = '<i data-feather="loader"></i><span>Yuklanmoqda...</span>';
+                feather.replace();
+                
+                const response = await fetch('/api/users/pending/export', {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Excel faylni yuklab olishda xatolik');
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `yangi_foydalanuvchi_so'rovlari_${new Date().toISOString().split('T')[0]}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showToast('Excel fayl muvaffaqiyatli yuklab olindi', 'success');
+            } catch (error) {
+                console.error('Excel export error:', error);
+                showToast(`Xatolik: ${error.message}`, 'error');
+            } finally {
+                exportExcelBtn.disabled = false;
+                exportExcelBtn.innerHTML = '<i data-feather="download"></i><span>Excel Yuklab Olish</span>';
+                feather.replace();
+            }
+        });
+    }
+    
     // Bulk approve all button
     const bulkApproveAllBtn = document.getElementById('bulk-approve-all-btn');
     if (bulkApproveAllBtn) {
@@ -5330,7 +5523,6 @@ function formatDate(timestamp) {
         });
         
         const formatted = formatter.format(date);
-        console.log('✅ [formatDate] Formatlandi:', timestamp, '->', formatted);
         return formatted;
     } catch (error) {
         console.error('❌ [formatDate] Date formatlash xatolik:', error, 'Timestamp:', timestamp);
@@ -5356,10 +5548,6 @@ function formatDateTime(timestamp) {
         date = new Date(timestamp);
     }
     
-    console.log('🕐 [formatDateTime] Original timestamp:', timestamp);
-    console.log('🕐 [formatDateTime] Parsed date object:', date);
-    console.log('🕐 [formatDateTime] UTC time:', date.toISOString());
-    
     // Toshkent vaqti (UTC+5) - Intl.DateTimeFormat ishlatish
     // Vaqt Toshkent mintaqasida hisoblanadi, lekin "+5 Toshkent" yozuvi ko'rsatilmaydi
     const formatter = new Intl.DateTimeFormat('uz-UZ', {
@@ -5383,9 +5571,6 @@ function formatDateTime(timestamp) {
     const second = parts.find(p => p.type === 'second').value;
     
     const formattedTime = `${day}/${month}/${year}, ${hour}:${minute}:${second}`;
-    
-    console.log('🕐 [formatDateTime] Toshkent time parts:', { day, month, year, hour, minute, second });
-    console.log('🕐 [formatDateTime] Formatted result:', formattedTime);
     
     // "+5 Toshkent" yozuvini olib tashlash, faqat vaqt ko'rsatiladi
     return formattedTime;
