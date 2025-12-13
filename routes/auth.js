@@ -260,14 +260,25 @@ router.post('/login', async (req, res) => {
         return res.status(400).json({ message: "Login va parol kiritilishi shart." });
     }
 
+    // Username va password'ni trim qilish
+    const trimmedUsername = username.trim();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedUsername || !trimmedPassword) {
+        return res.status(400).json({ message: "Login va parol kiritilishi shart." });
+    }
+
     try {
-        const user = await userRepository.findByUsername(username);
+        const user = await userRepository.findByUsername(trimmedUsername);
 
         if (!user) {
+            console.log(`[LOGIN] Foydalanuvchi topilmadi: ${trimmedUsername}`);
             // Background'da log yozish
-            logAction(null, 'login_fail', 'user', null, { username, reason: 'User not found', ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
+            logAction(null, 'login_fail', 'user', null, { username: trimmedUsername, reason: 'User not found', ip: ipAddress, userAgent }).catch(err => console.error('Log yozishda xatolik:', err));
             return res.status(401).json({ message: "Login yoki parol noto'g'ri." });
         }
+
+        console.log(`[LOGIN] Foydalanuvchi topildi: ${trimmedUsername}, Status: ${user.status}, ID: ${user.id}`);
 
         if (user.status !== 'active') {
             let reason = "Bu foydalanuvchi faol emas. Iltimos, administratorga murojaat qiling.";
@@ -283,7 +294,9 @@ router.post('/login', async (req, res) => {
             return res.status(403).json({ message: reason });
         }
 
-        const match = await bcrypt.compare(password, user.password);
+        const match = await bcrypt.compare(trimmedPassword, user.password);
+        
+        console.log(`[LOGIN] Parol solishtirish: ${match ? 'To\'g\'ri' : 'Noto\'g\'ri'}`);
 
         if (!match) {
             const newAttempts = (user.login_attempts || 0) + 1;

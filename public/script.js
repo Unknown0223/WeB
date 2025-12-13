@@ -704,9 +704,11 @@ const renderKpiCards = (stats) => {
     function updateUIForReportState() {
         const isNew = state.currentReportId === null;
         const report = state.currentReportId !== null ? state.savedReports?.[state.currentReportId] : null;
-        const canEdit = report && (state.currentUser?.permissions?.includes('reports:edit_all') ||
-                        (state.currentUser?.permissions?.includes('reports:edit_assigned') && state.currentUser?.locations?.includes(report.location)) ||
-                        (state.currentUser?.permissions?.includes('reports:edit_own') && report.created_by === state.currentUser?.id));
+        const hasEditAll = state.currentUser?.permissions?.includes('reports:edit_all');
+        const hasEditAssigned = state.currentUser?.permissions?.includes('reports:edit_assigned') && report && report.location && state.currentUser?.locations?.includes(report.location);
+        const hasEditOwn = state.currentUser?.permissions?.includes('reports:edit_own') && report && report.created_by && String(report.created_by) === String(state.currentUser?.id);
+        
+        const canEdit = report && (hasEditAll || hasEditAssigned || hasEditOwn);
         
         if (DOM.confirmBtn) DOM.confirmBtn.classList.toggle('hidden', !state.isEditMode);
         if (DOM.editBtn) DOM.editBtn.classList.toggle('hidden', isNew || state.isEditMode || !canEdit);

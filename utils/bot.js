@@ -166,6 +166,11 @@ async function safeSendMessage(chatId, text, options = {}) {
                 console.error(`❌ [TELEGRAM] Guruh topilmadi! Group ID noto'g'ri yoki bot guruhda yo'q.`);
             } else if (body?.description?.includes("not enough rights")) {
                 console.error(`❌ [TELEGRAM] Bot guruhda xabar yuborish huquqiga ega emas!`);
+            } else if (body?.description?.includes("group chat was upgraded to a supergroup chat")) {
+                console.warn(`⚠️ [TELEGRAM] Guruh supergroup'ga o'zgartirilgan. Eski chat ID: ${chatId}`);
+                console.warn(`⚠️ [TELEGRAM] Iltimos, yangi supergroup chat ID ni sozlamalarga kiriting.`);
+                // Supergroup chat ID ni olish uchun getChat API dan foydalanish mumkin
+                // Lekin hozircha faqat ogohlantirish qoldiramiz
             }
         } else {
             console.error(`❌ [TELEGRAM] Telegramga xabar yuborishda xatolik (chat_id: ${chatId}): ${body?.description || error.message}`);

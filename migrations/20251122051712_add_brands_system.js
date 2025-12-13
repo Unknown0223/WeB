@@ -47,3 +47,4 @@ exports.down = function(knex) {
     .dropTableIfExists('brand_locations')
     .dropTableIfExists('brands');
 };
+

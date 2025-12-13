@@ -10,6 +10,21 @@ const router = express.Router();
 // Bir kun oldingi notification'larni o'chirish funksiyasi
 async function cleanupOldNotifications() {
     try {
+        // Jadval mavjudligini tekshirish - try-catch orqali
+        let hasTable = false;
+        try {
+            await db('notifications').limit(1);
+            hasTable = true;
+        } catch (err) {
+            // Jadval mavjud emas
+            hasTable = false;
+        }
+        
+        if (!hasTable) {
+            log.debug('⚠️ [NOTIFICATIONS] Notifications jadvali hali yaratilmagan, tozalash o\'tkazib yuborildi');
+            return;
+        }
+        
         const oneDayAgo = new Date();
         oneDayAgo.setDate(oneDayAgo.getDate() - 1);
         
@@ -21,6 +36,11 @@ async function cleanupOldNotifications() {
             log.debug(`✅ [NOTIFICATIONS] ${deleted} ta eski bildirishnoma o'chirildi`);
         }
     } catch (error) {
+        // Agar jadval mavjud emas bo'lsa, xatolikni e'tiborsiz qoldirish
+        if (error.code === 'SQLITE_ERROR' && error.message.includes('no such table')) {
+            log.debug('⚠️ [NOTIFICATIONS] Notifications jadvali hali yaratilmagan');
+            return;
+        }
         log.error('❌ [NOTIFICATIONS] Eski bildirishnomalarni o\'chirishda xatolik:', error);
     }
 }

@@ -19,7 +19,36 @@ function clearUserCache(userId) {
 // --- QIDIRISH FUNKSIYALARI (READ) ---
 
 async function findByUsername(username) {
-    return db('users').where({ username: username }).first();
+    // Case-insensitive qidiruv va trim
+    const trimmedUsername = username.trim();
+    
+    // Debug log
+    console.log(`[FIND_USER] Qidirilmoqda: "${trimmedUsername}"`);
+    
+    // Avval to'g'ridan-to'g'ri qidiruv
+    let user = await db('users')
+        .where('username', trimmedUsername)
+        .first();
+    
+    if (user) {
+        console.log(`[FIND_USER] To'g'ri qidiruv natijasi: topildi (ID: ${user.id})`);
+        return user;
+    }
+    
+    // Agar topilmasa, case-insensitive qidiruv
+    user = await db('users')
+        .whereRaw('LOWER(TRIM(username)) = LOWER(?)', [trimmedUsername])
+        .first();
+    
+    if (user) {
+        console.log(`[FIND_USER] Case-insensitive qidiruv natijasi: topildi (ID: ${user.id}, username: ${user.username})`);
+    } else {
+        // Barcha foydalanuvchilarni ko'rsatish (debug uchun)
+        const allUsers = await db('users').select('id', 'username', 'status').limit(10);
+        console.log(`[FIND_USER] Foydalanuvchi topilmadi. Mavjud foydalanuvchilar (10 ta):`, allUsers.map(u => `${u.username} (${u.status})`).join(', '));
+    }
+    
+    return user;
 }
 
 async function findById(id, withDetails = false) {
