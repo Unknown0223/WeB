@@ -1216,7 +1216,8 @@ const initializeBot = async (botToken, options = { polling: true }) => {
             if (user) {
                 await db('users').where({ id: user.id }).update({
                     telegram_chat_id: null,
-                    telegram_username: null
+                    telegram_username: null,
+                    is_telegram_connected: 0 // Bot obunasi bekor qilingan
                 });
 
                 const adminSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
@@ -1225,6 +1226,8 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     const text = `⚠️ <b>Obuna Bekor Qilindi!</b> \n\nFoydalanuvchi <b>${escapeHtml(user.fullname || user.username)}</b> botga obunani bekor qildi. \n\nUning tizimga kirish imkoniyatlari cheklanishi mumkin.`;
                     await safeSendMessage(adminChatId, text);
                 }
+                
+                console.log(`⚠️ [BOT] Foydalanuvchi ${user.username} (ID: ${user.id}) bot obunasini bekor qildi. Tizimdan chiqariladi.`);
                 // User left bot
             }
         } else if (newStatus === 'member') {
