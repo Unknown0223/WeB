@@ -383,7 +383,7 @@ router.get('/used-currencies', isAuthenticated, hasPermission('reports:view_all'
         // Hozirgi kurslarni olish
         const exchangeRates = await getTodayExchangeRates();
         
-        // Barcha qo'llab-quvvatlanadigan valyutalarni ko'rsatish
+        // Barcha qo'llab-quvvatlanadigan valyutalarni ko'rsatish (UZS dan tashqari)
         const ratesList = [];
         const symbols = {
             'UZS': 'so\'m',
@@ -393,14 +393,7 @@ router.get('/used-currencies', isAuthenticated, hasPermission('reports:view_all'
             'KZT': '₸'
         };
         
-        // UZS ni birinchi bo'lib qo'shamiz
-        ratesList.push({
-            currency: BASE_CURRENCY,
-            symbol: symbols[BASE_CURRENCY],
-            rate: 1,
-            display: '1 so\'m = 1 so\'m'
-        });
-        
+        // UZS ni o'tkazib yuboramiz, faqat boshqa valyutalarni ko'rsatamiz
         // Qolgan barcha qo'llab-quvvatlanadigan valyutalarni qo'shamiz
         for (const currency of SUPPORTED_CURRENCIES) {
             const rate = exchangeRates[currency];
