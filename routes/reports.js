@@ -14,6 +14,8 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
             return res.status(401).json({ message: "Foydalanuvchi ma'lumotlari topilmadi" });
         }
         
+        console.log(`[REPORTS] GET /api/reports - User: ${user.username} (ID: ${user.id}), Role: ${user.role}`);
+        
         // Permissions va locations ni tekshirish
         if (!user.permissions || !Array.isArray(user.permissions)) {
             user.permissions = [];
@@ -21,6 +23,9 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
         if (!user.locations || !Array.isArray(user.locations)) {
             user.locations = [];
         }
+        
+        console.log(`[REPORTS] User permissions: ${JSON.stringify(user.permissions)}`);
+        console.log(`[REPORTS] User locations: ${JSON.stringify(user.locations)}`);
         
         const page = parseInt(req.query.page) || 1;
         
@@ -132,6 +137,7 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 .offset(offset);
             
             console.log(`[REPORTS] Topilgan hisobotlar soni: ${reports.length}, User ID: ${user.id}, Permissions: ${user.permissions.join(', ')}`);
+            console.log(`[REPORTS] Reports ma'lumotlari:`, reports.length > 0 ? reports.map(r => ({ id: r.id, location: r.location, date: r.report_date })) : 'Bo\'sh');
         } catch (queryError) {
             console.error('[reports] Query xatolik:', queryError);
             console.error('[reports] Query error message:', queryError.message);
