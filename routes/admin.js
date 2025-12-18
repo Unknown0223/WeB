@@ -526,29 +526,41 @@ router.post('/import-full-db', async (req, res) => {
                                     if (Object.keys(whereClause).length === options.compositeUnique.length) {
                                         const existing = await trx(tableName).where(whereClause).first();
                                         if (existing) {
-                                            skipped++;
+                                            // Mavjud bo'lsa, update qilish
+                                            log.debug(`  🔄 [${tableName}] Composite key bilan mavjud yozuv yangilanmoqda:`, whereClause);
+                                            await trx(tableName)
+                                                .where(whereClause)
+                                                .update(record);
+                                            imported++;
                                             continue;
                                         }
                                     }
                                 }
                                 
-                                // ID'ni tekshirish va agar mavjud bo'lsa, skip qilish
+                                // ID'ni tekshirish - agar mavjud bo'lsa, update qilish
                                 if (record.id) {
                                     const existing = await trx(tableName)
                                         .where('id', record.id)
                                         .first();
                                     if (existing) {
-                                        skipped++;
+                                        // Mavjud bo'lsa, update qilish
+                                        log.debug(`  🔄 [${tableName}] ID ${record.id} mavjud, yangilanmoqda...`);
+                                        await trx(tableName)
+                                            .where('id', record.id)
+                                            .update(record);
+                                        imported++;
                                         continue;
                                     }
+                                    // ID mavjud lekin bazada yo'q, ID bilan insert qilish
+                                    log.debug(`  ➕ [${tableName}] Yangi yozuv ID ${record.id} bilan qo'shilmoqda...`);
+                                    await trx(tableName).insert(record);
+                                    imported++;
+                                } else {
+                                    // ID yo'q, insert qilish (avtomatik generatsiya uchun)
+                                    log.debug(`  ➕ [${tableName}] Yangi yozuv qo'shilmoqda (avtomatik ID)...`);
+                                    await trx(tableName).insert(record);
+                                    imported++;
                                 }
-                                // ID'ni o'chirib, insert qilish (avtomatik generatsiya uchun)
-                                const recordToInsert = { ...record };
-                                if (recordToInsert.id && tableName !== 'users') {
-                                    delete recordToInsert.id;
-                                }
-                                await trx(tableName).insert(recordToInsert);
-                                imported++;
                             }
                         } catch (err) {
                             // UNIQUE constraint xatoliklarini skip qilish
