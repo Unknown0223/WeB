@@ -453,3 +453,14 @@ function setupEventListeners() {
         }
     });
 }
+
+// Global feather replace funksiyasi
+window.replaceFeatherIcons = function(root = document) {
+    if (typeof window.feather !== 'undefined') {
+        try {
+            feather.replace({ root: root });
+        } catch (error) {
+            console.warn('Feather replace error:', error);
+        }
+    }
+};

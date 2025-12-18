@@ -559,7 +559,7 @@ router.post('/import-full-db', async (req, res) => {
                                     // ID yo'q, insert qilish (avtomatik generatsiya uchun)
                                     log.debug(`  ➕ [${tableName}] Yangi yozuv qo'shilmoqda (avtomatik ID)...`);
                                     await trx(tableName).insert(record);
-                                    imported++;
+                                imported++;
                                 }
                             }
                         } catch (err) {

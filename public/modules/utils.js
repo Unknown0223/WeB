@@ -375,3 +375,14 @@ export function formatNumber(num) {
 export function formatReportId(id) {
     return String(id).padStart(4, '0');
 }
+
+// Feather iconlarni yangilash uchun yordamchi funksiya
+export function replaceFeatherIcons(root = document) {
+    if (typeof window.feather !== 'undefined') {
+        try {
+            feather.replace({ root: root });
+        } catch (error) {
+            console.warn('Feather replace error:', error);
+        }
+    }
+}

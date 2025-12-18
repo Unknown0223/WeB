@@ -1963,6 +1963,9 @@ input.form-control.comparison-input {
 
 .user-card-action-btn:hover {
     background: rgba(102, 126, 234, 0.2);
+    border-color: #667eea;
+    color: #667eea;
+    transform: translateY(-2px);
 }
 
 .user-card-action-btn.loading {
@@ -1978,10 +1981,6 @@ input.form-control.comparison-input {
 @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
-}
-    border-color: #667eea;
-    color: #667eea;
-    transform: translateY(-2px);
 }
 
 .user-card-action-btn.danger:hover {
@@ -11912,6 +11911,8 @@ tr:hover .quick-actions {
     width: 18px;
     height: 18px;
 }
+
+.requests-view-toggle-buttons .view-toggle-btn:hover {
     border-color: #7c3aed;
     color: #7c3aed;
     transform: translateY(-2px);

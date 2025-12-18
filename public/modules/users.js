@@ -378,6 +378,11 @@ function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
     // Har doim ko'rsatish (hatto natijalar bo'lmasa ham qidiruv oynasi ko'rinib turishi uchun)
     paginationContainer.style.display = 'flex';
     
+    // Input maydonini saqlash (agar mavjud bo'lsa)
+    const existingSearchInput = document.getElementById('users-search-input');
+    const wasFocused = existingSearchInput && document.activeElement === existingSearchInput;
+    const cursorPosition = existingSearchInput ? existingSearchInput.selectionStart : null;
+    const inputValue = existingSearchInput ? existingSearchInput.value : (currentFilters.search || '');
     
     // Calculate page numbers to show (har doim ko'rsatish)
     const maxVisiblePages = 7;
@@ -388,7 +393,7 @@ function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
         startPage = Math.max(1, endPage - maxVisiblePages + 1);
     }
     
-    // Agar faqat 1 sahifa bo'lsa ham ko'rsatish
+    // Agar faqot 1 sahifa bo'lsa ham ko'rsatish
     if (totalPages === 1) {
         startPage = 1;
         endPage = 1;
@@ -407,7 +412,7 @@ function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
                     id="users-search-input" 
                     class="form-control search-input" 
                     placeholder="Foydalanuvchi qidirish (ism, login, email, telefon...)"
-                    value="${currentFilters.search || ''}"
+                    value="${(currentFilters.search || '').replace(/"/g, '&quot;')}"
                     style="padding-right: 40px;"
                 >
                 <i data-feather="search" class="search-input-icon" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); pointer-events: none;"></i>
@@ -476,6 +481,12 @@ function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
                     <option value="100" ${usersPerPage === 100 ? 'selected' : ''} style="background: #1a1a2e; color: #fff; padding: 10px;">100</option>
                 </select>
             </div>
+            
+            <!-- Excel eksport tugmasi -->
+            <button id="export-users-excel-btn" class="btn btn-success" style="margin-left: 15px; padding: 8px 16px; display: flex; align-items: center; gap: 8px; font-size: 14px; white-space: nowrap;">
+                <i data-feather="download"></i>
+                <span>Excel</span>
+            </button>
         </div>
     `;
     
@@ -484,6 +495,35 @@ function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
     // Replace icons
     if (window.feather) {
         feather.replace({ root: paginationContainer });
+    }
+    
+    // Focus va cursor pozitsiyasini qaytarish (agar input focus bo'lgan bo'lsa)
+    if (wasFocused) {
+        const newSearchInput = document.getElementById('users-search-input');
+        if (newSearchInput) {
+            // Bir necha marta urinib ko'rish (DOM to'liq tayyor bo'lishi uchun)
+            const restoreFocus = () => {
+                if (newSearchInput && document.body.contains(newSearchInput)) {
+                    newSearchInput.focus();
+                    if (cursorPosition !== null && cursorPosition !== undefined && cursorPosition >= 0) {
+                        try {
+                            newSearchInput.setSelectionRange(cursorPosition, cursorPosition);
+                        } catch (e) {
+                            // Ignore selection errors
+                        }
+                    }
+                } else {
+                    requestAnimationFrame(restoreFocus);
+                }
+            };
+            
+            // Darhol va keyin bir necha marta urinib ko'rish
+            requestAnimationFrame(() => {
+                restoreFocus();
+                setTimeout(restoreFocus, 0);
+                setTimeout(restoreFocus, 10);
+            });
+        }
     }
     
     // Setup pagination button listeners
@@ -552,6 +592,25 @@ function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
     
     // Setup view toggle buttons (pagination ichida)
     setupPaginationViewToggle();
+    
+    // Setup Excel export button
+    const exportExcelBtn = document.getElementById('export-users-excel-btn');
+    if (exportExcelBtn) {
+        // Remove old listener by cloning
+        const newExportBtn = exportExcelBtn.cloneNode(true);
+        exportExcelBtn.parentNode.replaceChild(newExportBtn, exportExcelBtn);
+        
+        newExportBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            exportUsersToExcel();
+        });
+        
+        // Replace icons
+        if (window.feather) {
+            feather.replace({ root: newExportBtn });
+        }
+    }
 }
 
 // Setup search input in pagination
@@ -561,17 +620,29 @@ function setupPaginationSearchInput() {
     
     let searchDebounceTimer = null;
     
-    // Remove old listeners by cloning
-    const newSearchInput = searchInput.cloneNode(true);
-    searchInput.parentNode.replaceChild(newSearchInput, searchInput);
+    // Agar input maydoni allaqachon event listener'ga ega bo'lsa, qayta qo'shmaslik
+    if (searchInput.dataset.listenerAttached === 'true') {
+        return; // Event listener allaqachon qo'shilgan
+    }
+    
+    // Focus'ni saqlab qolish
+    const wasFocused = document.activeElement === searchInput;
+    const cursorPosition = searchInput.selectionStart;
+    
+    // Event listener qo'shilganini belgilash
+    searchInput.dataset.listenerAttached = 'true';
     
     // Clear search button
     const clearBtn = document.getElementById('clear-search-btn');
     if (clearBtn) {
-        clearBtn.addEventListener('click', (e) => {
+        // Eski listener'larni olib tashlash
+        const newClearBtn = clearBtn.cloneNode(true);
+        clearBtn.parentNode.replaceChild(newClearBtn, clearBtn);
+        
+        newClearBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            newSearchInput.value = '';
+            searchInput.value = '';
             currentFilters.search = '';
             filteredUsersCache = null;
             lastFiltersHash = '';
@@ -581,7 +652,7 @@ function setupPaginationSearchInput() {
     }
     
     // Show/hide clear button based on input value
-    newSearchInput.addEventListener('input', (e) => {
+    searchInput.addEventListener('input', (e) => {
         const searchTerm = e.target.value;
         const clearBtn = document.getElementById('clear-search-btn');
         if (clearBtn) {
@@ -595,17 +666,40 @@ function setupPaginationSearchInput() {
         
         // Debounce search for better performance
         searchDebounceTimer = setTimeout(() => {
+            // Focus holatini saqlash
+            const isFocused = document.activeElement === searchInput;
+            const cursorPos = searchInput.selectionStart;
+            
             currentFilters.search = searchTerm;
             filteredUsersCache = null; // Clear cache on search change
             lastFiltersHash = ''; // Reset hash
             currentPage = 1; // Reset to first page on search
+            
+            // Render qilish va focus'ni qaytarish
             renderModernUsers();
+            
+            // Focus'ni qaytarish
+            if (isFocused) {
+                requestAnimationFrame(() => {
+                    const newInput = document.getElementById('users-search-input');
+                    if (newInput) {
+                        newInput.focus();
+                        if (cursorPos !== null && cursorPos !== undefined && cursorPos >= 0) {
+                            try {
+                                newInput.setSelectionRange(cursorPos, cursorPos);
+                            } catch (e) {
+                                // Ignore selection errors
+                            }
+                        }
+                    }
+                });
+            }
         }, 300); // 300ms debounce
     });
     
     // Replace icons
     if (window.feather) {
-        const searchContainer = newSearchInput.parentElement;
+        const searchContainer = searchInput.parentElement;
         feather.replace({ root: searchContainer });
     }
 }
@@ -6098,3 +6192,215 @@ window.showUserItemsModal = function(userId, title, items, type) {
         if (typeof feather !== 'undefined') feather.replace();
     }, 100);
 };
+
+// Excel eksport funksiyasi
+async function exportUsersToExcel() {
+    try {
+        console.log('📊 [EXCEL EXPORT] ===========================================');
+        console.log('📊 [EXCEL EXPORT] Eksport boshlandi...');
+        console.log('📊 [EXCEL EXPORT] ===========================================');
+        
+        // Filtrlangan foydalanuvchilarni olish
+        const filtersHash = getFiltersHash();
+        let filteredUsers;
+        
+        if (filteredUsersCache && lastFiltersHash === filtersHash) {
+            filteredUsers = filteredUsersCache;
+            console.log('✅ [EXCEL EXPORT] Cache\'dan foydalanildi');
+        } else {
+            console.log('🔄 [EXCEL EXPORT] Yangi filter qo\'llanmoqda...');
+            // Apply filters (renderModernUsers ichidagi logikani takrorlash)
+            filteredUsers = state.users.filter(user => {
+                // Superadmin'ni faqat superadmin o'zi ko'rsin
+                if ((user.role === 'superadmin' || user.role === 'super_admin') && 
+                    state.currentUser?.role !== 'superadmin' && state.currentUser?.role !== 'super_admin') {
+                    return false;
+                }
+                
+                // Search filter
+                if (currentFilters.search && currentFilters.search.trim()) {
+                    const searchTerm = currentFilters.search.toLowerCase().trim();
+                    const fullname = (user.fullname || '').toLowerCase();
+                    const username = (user.username || '').toLowerCase();
+                    const email = (user.email || '').toLowerCase();
+                    const phone = (user.phone || '').toLowerCase();
+                    const role = (user.role || '').toLowerCase();
+                    
+                    const matchesSearch = fullname.includes(searchTerm) || 
+                                         username.includes(searchTerm) || 
+                                         email.includes(searchTerm) || 
+                                         phone.includes(searchTerm) ||
+                                         role.includes(searchTerm);
+                    
+                    if (!matchesSearch) return false;
+                }
+                
+                // Role filter
+                if (currentFilters.role && user.role !== currentFilters.role) return false;
+
+                // Account Status filter
+                if (currentFilters.accountStatus) {
+                    if (currentFilters.accountStatus === 'active' && user.status !== 'active') return false;
+                    if (currentFilters.accountStatus === 'pending' && !user.status.startsWith('pending')) return false;
+                    if (currentFilters.accountStatus === 'inactive' && user.status !== 'blocked' && user.status !== 'archived') return false;
+                }
+
+                // Online Status filter
+                if (currentFilters.onlineStatus) {
+                    if (currentFilters.onlineStatus === 'online' && !user.is_online) return false;
+                    if (currentFilters.onlineStatus === 'offline' && user.is_online) return false;
+                }
+
+                // Telegram Status filter
+                if (currentFilters.telegramStatus) {
+                    const isConnected = Boolean(user.telegram_chat_id) || user.is_telegram_connected === 1;
+                    if (currentFilters.telegramStatus === 'connected' && !isConnected) return false;
+                    if (currentFilters.telegramStatus === 'not_connected' && isConnected) return false;
+                }
+
+                return true;
+            });
+        }
+        
+        console.log(`📋 [EXCEL EXPORT] Jami ${filteredUsers.length} ta foydalanuvchi topildi`);
+        
+        if (!filteredUsers || filteredUsers.length === 0) {
+            console.warn('⚠️ [EXCEL EXPORT] Eksport qilish uchun ma\'lumot yo\'q');
+            showToast('Eksport qilish uchun ma\'lumot yo\'q', true);
+            return;
+        }
+        
+        // Faqat kerakli ma'lumotlar uchun CSV formatida tayyorlash
+        // 1. ID, 2. FISH, 3. Filiallar, 4. Rol, 5. Telegram Username
+        const headers = [
+            'ID',
+            'FISH',
+            'Filiallar',
+            'Rol',
+            'Telegram Username'
+        ];
+        
+        console.log('📑 [EXCEL EXPORT] Ustunlar:', headers);
+        console.log('📐 [EXCEL EXPORT] Ustunlar tartibi:');
+        headers.forEach((header, index) => {
+            console.log(`   ${index + 1}. ${header}`);
+        });
+        
+        const rows = filteredUsers.map((user, userIndex) => {
+            // Filiallarni olish (to'g'ri formatdan)
+            let locations = '';
+            
+            // Bir nechta formatni tekshirish
+            if (user.role_based_locations && Array.isArray(user.role_based_locations) && user.role_based_locations.length > 0) {
+                // role_based_locations formatida
+                locations = user.role_based_locations.join(', ');
+            } else if (user.locations && Array.isArray(user.locations) && user.locations.length > 0) {
+                // locations array formatida
+                locations = user.locations.map(loc => {
+                    if (typeof loc === 'string') return loc;
+                    if (loc && loc.location_name) return loc.location_name;
+                    return String(loc);
+                }).join(', ');
+            } else if (user.locations && typeof user.locations === 'string') {
+                // locations string formatida
+                locations = user.locations;
+            }
+            
+            const row = [
+                user.id || '', // 1-ustun: ID
+                user.fullname || '', // 2-ustun: FISH (To'liq ism)
+                locations, // 3-ustun: Filiallar (vergul bilan ajratilgan)
+                user.role || '', // 4-ustun: Rol
+                user.telegram_username || '' // 5-ustun: Telegram Username
+            ];
+            
+            // Har bir foydalanuvchi uchun log
+            if (userIndex < 5) { // Faqat birinchi 5 ta foydalanuvchi uchun log
+                console.log(`👤 [EXCEL EXPORT] Foydalanuvchi #${userIndex + 1} (ID: ${user.id}, Username: ${user.username}):`);
+                console.log(`   📍 Filiallar ma'lumotlari:`, {
+                    'role_based_locations': user.role_based_locations,
+                    'locations': user.locations,
+                    'natija': locations
+                });
+                console.log(`   1-ustun (ID): "${row[0]}"`);
+                console.log(`   2-ustun (FISH): "${row[1]}"`);
+                console.log(`   3-ustun (Filiallar): "${row[2]}"`);
+                console.log(`   4-ustun (Rol): "${row[3]}"`);
+                console.log(`   5-ustun (Telegram Username): "${row[4]}"`);
+            }
+            
+            return row;
+        });
+        
+        console.log(`✅ [EXCEL EXPORT] ${rows.length} ta qator tayyorlandi`);
+        
+        // CSV formatida yaratish (Excel uchun mos format - semicolon separator)
+        const escapeCSV = (value) => {
+            if (value === null || value === undefined) return '';
+            
+            const str = String(value);
+            
+            // Agar ma'lumot ichida semicolon, qo'shtirnoq yoki newline bo'lsa, qo'shtirnoq ichiga olish
+            if (str.includes(';') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+                // Qo'shtirnoqlarni double quote qilish (CSV standarti)
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+            
+            return str;
+        };
+        
+        // Semicolon separator ishlatish (Excel'da ko'proq ishonchli)
+        const separator = ';';
+        
+        // CSV content yaratish
+        const csvRows = [
+            headers.map(escapeCSV).join(separator),
+            ...rows.map(row => row.map(escapeCSV).join(separator))
+        ];
+        
+        const csvContent = csvRows.join('\r\n'); // Windows uchun \r\n ishlatish
+        
+        console.log(`📄 [EXCEL EXPORT] CSV content yaratildi (${csvContent.length} belgi)`);
+        console.log(`📄 [EXCEL EXPORT] Separator: "${separator}"`);
+        console.log('📋 [EXCEL EXPORT] Birinchi qator (header):', csvRows[0]);
+        if (csvRows.length > 1) {
+            console.log('📋 [EXCEL EXPORT] Ikkinchi qator (birinchi foydalanuvchi):', csvRows[1]);
+            console.log('📋 [EXCEL EXPORT] Ikkinchi qator tahlili:');
+            const firstRow = csvRows[1].split(separator);
+            firstRow.forEach((cell, index) => {
+                console.log(`   ${index + 1}-ustun (${headers[index]}): ${cell}`);
+            });
+        }
+        
+        // BOM qo'shish (UTF-8 uchun Excel'da to'g'ri ko'rinishi uchun)
+        const BOM = '\uFEFF';
+        const blob = new Blob([BOM + csvContent], { 
+            type: 'text/csv;charset=utf-8;' 
+        });
+        
+        console.log(`💾 [EXCEL EXPORT] Blob yaratildi (${blob.size} bayt)`);
+        
+        // Download qilish
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().split('T')[0];
+        link.href = url;
+        link.download = `foydalanuvchilar_${timestamp}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        console.log('✅ [EXCEL EXPORT] Fayl muvaffaqiyatli yuklab olindi:', link.download);
+        console.log('✅ [EXCEL EXPORT] Eksport yakunlandi!');
+        console.log('📊 [EXCEL EXPORT] ===========================================');
+        showToast('Excel fayl muvaffaqiyatli yuklab olindi!', false);
+        
+    } catch (error) {
+        console.error('❌ [EXCEL EXPORT] ===========================================');
+        console.error('❌ [EXCEL EXPORT] Xatolik:', error);
+        console.error('❌ [EXCEL EXPORT] Xatolik tafsilotlari:', error.stack);
+        console.error('❌ [EXCEL EXPORT] ===========================================');
+        showToast(`Excel eksport qilishda xatolik: ${error.message}`, true);
+    }
+}

@@ -163,8 +163,11 @@ export function renderAuditLogTable() {
         `;
     }).join('');
     
+    // Feather iconlarni yangilash
     if (window.feather) {
+        setTimeout(() => {
         feather.replace();
+        }, 0);
     }
 }
 
