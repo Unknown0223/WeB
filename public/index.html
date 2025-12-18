@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dinamik Hisobot Jadvali</title>
+    
+    <!-- Tashqi kutubxonalar va uslublar -->
+    <link rel="stylesheet" href="main.css?v=15.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+    <link rel="stylesheet" href="https://npmcdn.com/flatpickr/dist/plugins/rangePlugin.css">
+</head>
+<body class="main-page">
+
+    <!-- Yuqori Header Panel -->
+    <header class="top-header">
+        <div class="header-container">
+            <div class="logo-section">
+                <div class="logo-icon">
+                    <i data-feather="bar-chart-2"></i>
+                </div>
+                <h1 class="app-title">MANUS</h1>
+                <span class="app-subtitle">Hisobot Tizimi</span>
+            </div>
+            
+            <div class="header-actions">
+                <button id="new-report-btn" class="header-btn primary" data-permission="reports:create">
+                    <i data-feather="plus-circle"></i>
+                    <span>Yangi Hisobot</span>
+                </button>
+                <a href="/admin" id="admin-panel-btn" class="header-btn secondary hidden">
+                    <i data-feather="sliders"></i>
+                    <span>Boshqaruv Paneli</span>
+                </a>
+            </div>
+            
+            <div class="user-profile-section">
+                <div class="user-profile-card" id="user-profile-card">
+                    <div class="user-avatar" id="user-avatar-display">
+                        <i data-feather="user"></i>
+                        <span class="avatar-status-badge"></span>
+                    </div>
+                    <div class="user-info">
+                        <span id="current-username" class="user-name">Yuklanmoqda...</span>
+                        <span id="current-user-role" class="user-role"></span>
+                    </div>
+                    <button class="dropdown-btn" id="dropdown-btn">
+                        <i data-feather="chevron-down"></i>
+                    </button>
+                </div>
+                
+                <div class="user-dropdown-menu" id="user-dropdown-menu">
+                    <button class="dropdown-menu-item" id="change-avatar-btn">
+                        <i data-feather="camera"></i>
+                        <span>Avatarni o'zgartirish</span>
+                    </button>
+                    <button class="dropdown-menu-item" id="view-profile-btn">
+                        <i data-feather="user"></i>
+                        <span>Profil sozlamalari</span>
+                    </button>
+                    <button class="dropdown-menu-item" id="change-password-btn">
+                        <i data-feather="lock"></i>
+                        <span>Parolni o'zgartirish</span>
+                    </button>
+                    <button class="dropdown-menu-item" id="sessions-btn">
+                        <i data-feather="smartphone"></i>
+                        <span>Aktiv sessiyalar</span>
+                    </button>
+                    <button class="dropdown-menu-item" id="notifications-btn">
+                        <i data-feather="bell"></i>
+                        <span>Bildirishnomalar</span>
+                        <span class="notification-badge">3</span>
+                    </button>
+                    <div class="dropdown-menu-divider"></div>
+                    <button class="dropdown-menu-item danger" id="dropdown-logout-btn">
+                        <i data-feather="log-out"></i>
+                        <span>Chiqish</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-wrapper">
+        
+        <!-- 1. CHAP USTUN (Hisobotlar ro'yxati ) -->
+        <aside class="sidebar">
+            <div class="sidebar-title">
+                <i data-feather="list"></i>
+                <h3>Hisobotlar</h3>
+            </div>
+            
+            <div class="filter-date-wrapper">
+                <label for="filter-date-range">Sana bo'yicha filtr</label>
+                <div class="flatpickr-wrapper">
+                    <input type="text" id="filter-date-range" class="form-control" placeholder="Barcha sanalar" data-input>
+                    <a class="input-button" title="Tozalash" data-clear>
+                        <i data-feather="x"></i>
+                    </a>
+                </div>
+            </div>
+
+            <div class="search-wrapper">
+                <input type="text" id="search-input" class="form-control" placeholder="ID yoki filial bo'yicha qidirish...">
+            </div>
+
+            <div class="filter-controls">
+                <div id="report-filter-buttons" class="filter-buttons">
+                    <button class="filter-btn active" data-filter="all">Barchasi</button>
+                    <button class="filter-btn" data-filter="edited">Tahrirlangan</button>
+                    <button class="filter-btn" data-filter="unedited">Tahrirlanmagan</button>
+                </div>
+            </div>
+
+            <div id="saved-reports-list" class="report-list">
+                <!-- YUKLANISH HOLATI UCHUN SKELETON -->
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+            </div>
+
+            <!-- Pagination bloki -->
+            <div id="pagination-controls" class="pagination-controls hidden">
+                <!-- JS orqali to'ldiriladi -->
+            </div>
+        </aside>
+
+        <!-- 2. MARKAZIY USTUN (Asosiy jadval) -->
+        <main class="container">
+            <header class="header">
+                <div class="header-left">
+                    <span class="badge new" id="report-id-badge">YANGI</span>
+                    <button id="history-btn" class="icon-btn hidden" title="O'zgarishlar tarixi">
+                        <i data-feather="clock"></i>
+                    </button>
+                </div>
+                <div class="header-center">
+                    <input type="text" id="date-picker" class="form-control" placeholder="Sanani tanlang">
+                </div>
+                <div class="header-right">
+                    <select id="currency-select" class="form-control currency-select" title="Valyuta tanlang">
+                        <option value="">Valyuta</option>
+                        <option value="UZS">UZS (So'm)</option>
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="RUB">RUB (₽)</option>
+                        <option value="KZT">KZT (₸)</option>
+                    </select>
+                    <select id="location-select" class="form-control"></select>
+                </div>
+            </header>
+
+            <div class="table-wrapper">
+                <table id="main-table">
+                    <thead></thead>
+                    <tbody></tbody>
+                    <tfoot></tfoot>
+                </table>
+            </div>
+
+            <div class="controls">
+                <button id="edit-btn" class="btn btn-warning hidden" data-permission="reports:edit_own"><i data-feather="edit"></i> TAHRIRLASH</button>
+                <button id="confirm-btn" class="btn btn-success"><i data-feather="check-circle"></i> TASDIQLASH VA SAQLASH</button>
+                <button id="excel-btn" class="btn btn-primary"><i data-feather="download"></i> EXCEL YUKLAB OLISH</button>
+            </div>
+
+            <div id="summary-wrapper" class="summary-wrapper hidden">
+                <h4 class="summary-title">Ma'lumotlar xulosasi</h4>
+                <div id="summary-list" class="summary-list"></div>
+                <div id="summary-total" class="summary-total"></div>
+            </div>
+        </main>
+
+        <!-- 3. O'NG USTUN (KPI va Statistika) -->
+        <aside class="right-column">
+            <div class="kpi-section">
+                <div class="section-header">
+                    <h4 class="section-title">
+                        <i data-feather="bar-chart-2"></i>
+                        KPI Ko'rsatkichlari
+                    </h4>
+                </div>
+                <div id="kpi-cards"></div>
+            </div>
+            
+            <div class="sessions-section">
+                <div class="section-header">
+                    <h4 class="section-title">
+                        <i data-feather="activity"></i>
+                        Sessiya Statistikasi
+                    </h4>
+                </div>
+                
+                <div class="session-card" id="active-sessions-card">
+                    <div class="session-icon blue">
+                        <i data-feather="users" style="width: 26px; height: 26px;"></i>
+                    </div>
+                    <div class="session-info">
+                        <span class="session-label">Aktiv Foydalanuvchilar</span>
+                        <span class="session-value" id="active-users-count">0</span>
+                    </div>
+                </div>
+                
+                <div class="session-card" id="total-sessions-card">
+                    <div class="session-icon green">
+                        <i data-feather="smartphone" style="width: 26px; height: 26px;"></i>
+                    </div>
+                    <div class="session-info">
+                        <span class="session-label">Jami Sessiyalar</span>
+                        <span class="session-value" id="total-sessions-count">0</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+    </div>
+
+    <!-- MODAL OYNALAR -->
+    <!-- Hisobot tarixi uchun -->
+    <div id="history-modal" class="modal hidden">
+        <div class="modal-content history-modal-content">
+            <button class="close-modal-btn" data-target="history-modal"><i data-feather="x"></i></button>
+            <div class="modal-header-enhanced">
+                <div class="modal-icon-wrapper">
+                    <i data-feather="clock"></i>
+                </div>
+                <div>
+                    <h2 class="modal-title">Hisobot O'zgarishlar Tarixi</h2>
+                    <p class="modal-subtitle">Barcha o'zgarishlar va tahrirlar</p>
+                </div>
+            </div>
+            <div class="modal-currency-selector" style="padding: 15px; border-bottom: 1px solid var(--border-color);">
+                <label for="history-currency-select" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 14px;">Ko'rish valyutasi:</label>
+                <select id="history-currency-select" class="form-control" style="max-width: 200px;">
+                    <option value="UZS">UZS (So'm)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="RUB">RUB (₽)</option>
+                    <option value="KZT">KZT (₸)</option>
+                </select>
+            </div>
+            <div id="history-modal-body" class="modal-body history-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Kechikish sababi uchun modal oyna -->
+    <div id="late-comment-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <button class="close-modal-btn" data-target="late-comment-modal"><i data-feather="x"></i></button>
+            <h3 class="modal-title">Kechikish Sababini Kiriting</h3>
+            <p>Hisobot belgilangan vaqtdan kech topshirilmoqda. Iltimos, sababini izohlang.</p>
+            <form id="late-comment-form">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <textarea id="late-comment-input" class="form-control" rows="4" required placeholder="Sababini shu yerga yozing..."></textarea>
+                </div>
+                <div class="modal-actions" style="display: flex; justify-content: flex-end;">
+                    <button type="submit" class="btn btn-primary">Yuborish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bildirishnoma (Toast) -->
+    <div id="toast-notification" class="toast hidden"></div>
+
+    <!-- Modern Confirm Dialog -->
+    <div id="confirm-modal" class="modal confirm-modal hidden">
+        <div class="modal-content confirm-modal-content">
+            <div class="confirm-modal-header">
+                <div class="confirm-icon">
+                    <i data-feather="alert-circle"></i>
+                </div>
+            </div>
+            <h3 class="confirm-title" id="confirm-title">Tasdiqlash</h3>
+            <p class="confirm-message" id="confirm-message">Bu amalni amalga oshirishni xohlaysizmi?</p>
+            <div class="confirm-actions">
+                <button class="btn btn-secondary" id="confirm-cancel-btn">Yo'q</button>
+                <button class="btn btn-danger" id="confirm-ok-btn">Ha</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profil sozlamalari Modal -->
+    <div id="profile-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <button class="close-modal-btn" data-target="profile-modal"><i data-feather="x"></i></button>
+            <h2 class="modal-title">Profil sozlamalari</h2>
+            <div class="modal-body">
+                <form id="profile-form">
+                    <div class="form-group">
+                        <label>To'liq ism</label>
+                        <input type="text" id="profile-fullname" class="form-control" placeholder="To'liq ismingiz">
+                    </div>
+                    <div class="form-group">
+                        <label>Login</label>
+                        <input type="text" id="profile-username" class="form-control" readonly disabled>
+                    </div>
+                    <div class="form-group">
+                        <label>Rol</label>
+                        <input type="text" id="profile-role" class="form-control" readonly disabled>
+                    </div>
+                    <div class="modal-actions" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                        <button type="button" class="btn" onclick="document.getElementById('profile-modal').classList.add('hidden')">Bekor qilish</button>
+                        <button type="submit" class="btn btn-primary">Saqlash</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parol o'zgartirish Modal -->
+    <div id="password-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <button class="close-modal-btn" data-target="password-modal"><i data-feather="x"></i></button>
+            <h2 class="modal-title">Parolni o'zgartirish</h2>
+            <div class="modal-body">
+                <form id="password-form">
+                    <div class="alert-warning" style="padding: 12px; background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; margin-bottom: 20px; color: var(--yellow-color); font-size: 13px;">
+                        <strong>⚠️ Diqqat:</strong> Parolni o'zgartirish so'rovi admin tomonidan tasdiqlanishi kerak. Admindan tasdiq kelguncha kutish lozim.
+                    </div>
+                    <div class="form-group">
+                        <label>Joriy parol</label>
+                        <input type="password" id="current-password" class="form-control" required placeholder="Joriy parolingiz">
+                    </div>
+                    <div class="form-group">
+                        <label>Maxfiy so'z</label>
+                        <input type="password" id="secret-word" class="form-control" required placeholder="Maxfiy so'zingiz">
+                        <small style="color: var(--text-secondary); font-size: 12px;">Xavfsizlik uchun maxfiy so'zingizni kiriting</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Yangi parol</label>
+                        <input type="password" id="new-password" class="form-control" required placeholder="Yangi parol (min 8 belgidan)">
+                    </div>
+                    <div class="form-group">
+                        <label>Parolni tasdiqlash</label>
+                        <input type="password" id="confirm-password" class="form-control" required placeholder="Yangi parolni qayta kiriting">
+                    </div>
+                    <div class="modal-actions" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                        <button type="button" class="btn" onclick="document.getElementById('password-modal').classList.add('hidden')">Bekor qilish</button>
+                        <button type="submit" class="btn btn-primary">O'zgartirish</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sessiyalar Modal -->
+    <div id="sessions-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 600px;">
+            <button class="close-modal-btn" data-target="sessions-modal"><i data-feather="x"></i></button>
+            <h2 class="modal-title">Aktiv sessiyalar</h2>
+            <div class="modal-body">
+                <div id="sessions-list" style="display: flex; flex-direction: column; gap: 10px;">
+                    <div class="loading-state">Yuklanmoqda...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bildirishnomalar Modal -->
+    <div id="notifications-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="document.getElementById('notifications-modal').classList.add('hidden')"></div>
+        <div class="modal-content notifications-modal-content">
+            <div class="notifications-modal-header">
+                <div class="notifications-header-title">
+                    <i data-feather="bell"></i>
+                    <h2>Bildirishnomalar</h2>
+                </div>
+                <div class="notifications-header-actions">
+                    <button class="btn-icon" id="mark-all-read-btn" title="Barchasini o'qilgan deb belgilash">
+                        <i data-feather="check-circle"></i>
+                    </button>
+                    <button class="btn-icon close-modal-btn" data-target="notifications-modal" title="Yopish">
+                        <i data-feather="x"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="notifications-modal-body">
+                <div id="notifications-list" class="notifications-list">
+                    <div class="empty-state">
+                        <i data-feather="bell-off"></i>
+                        <p>Hozircha bildirishnomalar yo'q</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Comparison Difference Alert Modal (Markazda ko'rsatiladigan) -->
+    <div id="comparison-alert-modal" class="modal comparison-alert-modal hidden">
+        <div class="comparison-alert-content">
+            <div class="comparison-alert-header">
+                <div class="comparison-alert-icon">
+                    <i data-feather="alert-triangle"></i>
+                </div>
+                <h2 class="comparison-alert-title">Solishtirishda farqlar aniqlandi</h2>
+            </div>
+            <div class="comparison-alert-notifications-container" id="comparison-alert-notifications-container">
+                <!-- Bildirishnomalar bu yerda ko'rsatiladi (pastdan qo'shiladi) -->
+            </div>
+            <button class="btn btn-primary comparison-alert-acknowledge-btn" id="comparison-alert-acknowledge-btn">
+                <i data-feather="check"></i>
+                <span>Tushundim</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Jami Hisobotlar KPI Modal -->
+    <div id="total-kpi-modal" class="modal hidden">
+        <div class="modal-content kpi-modal-content">
+            <button class="close-modal-btn" data-target="total-kpi-modal"><i data-feather="x"></i></button>
+            <div class="modal-header-enhanced">
+                <div class="modal-icon-wrapper purple">
+                    <i data-feather="file-text"></i>
+                </div>
+                <div>
+                    <h2 class="modal-title">Jami Hisobotlar</h2>
+                    <p class="modal-subtitle">So'nggi 7 kunlik hisobotlar</p>
+                </div>
+            </div>
+            <div class="kpi-date-filter">
+                <div class="date-range-compact">
+                    <input type="text" id="total-kpi-daterange" class="kpi-daterange-input-compact" placeholder="📅 Sana tanlang" readonly>
+                    <div class="date-presets">
+                        <button class="preset-btn" data-days="1" data-target="total">Bugun</button>
+                        <button class="preset-btn active" data-days="7" data-target="total">7 kun</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body kpi-modal-body">
+                <div id="total-kpi-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- O'z Vaqtida KPI Modal -->
+    <div id="ontime-kpi-modal" class="modal hidden">
+        <div class="modal-content kpi-modal-content">
+            <button class="close-modal-btn" data-target="ontime-kpi-modal"><i data-feather="x"></i></button>
+            <div class="modal-header-enhanced">
+                <div class="modal-icon-wrapper green">
+                    <i data-feather="check"></i>
+                </div>
+                <div>
+                    <h2 class="modal-title">O'z Vaqtida Topshirilgan</h2>
+                    <p class="modal-subtitle">So'nggi 7 kunlik hisobotlar</p>
+                </div>
+            </div>
+            <div class="kpi-date-filter">
+                <div class="date-range-compact">
+                    <input type="text" id="ontime-kpi-daterange" class="kpi-daterange-input-compact" placeholder="📅 Sana tanlang" readonly>
+                    <div class="date-presets">
+                        <button class="preset-btn" data-days="1" data-target="ontime">Bugun</button>
+                        <button class="preset-btn active" data-days="7" data-target="ontime">7 kun</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body kpi-modal-body">
+                <div id="ontime-kpi-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Kechikkan KPI Modal -->
+    <div id="late-kpi-modal" class="modal hidden">
+        <div class="modal-content kpi-modal-content">
+            <button class="close-modal-btn" data-target="late-kpi-modal"><i data-feather="x"></i></button>
+            <div class="modal-header-enhanced">
+                <div class="modal-icon-wrapper orange">
+                    <i data-feather="clock"></i>
+                </div>
+                <div>
+                    <h2 class="modal-title">Kechikkan Hisobotlar</h2>
+                    <p class="modal-subtitle">So'nggi 7 kunlik hisobotlar</p>
+                </div>
+            </div>
+            <div class="kpi-date-filter">
+                <div class="date-range-compact">
+                    <input type="text" id="late-kpi-daterange" class="kpi-daterange-input-compact" placeholder="📅 Sana tanlang" readonly>
+                    <div class="date-presets">
+                        <button class="preset-btn" data-days="1" data-target="late">Bugun</button>
+                        <button class="preset-btn active" data-days="7" data-target="late">7 kun</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body kpi-modal-body">
+                <div id="late-kpi-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tahrirlangan KPI Modal -->
+    <div id="edited-kpi-modal" class="modal hidden">
+        <div class="modal-content kpi-modal-content">
+            <button class="close-modal-btn" data-target="edited-kpi-modal"><i data-feather="x"></i></button>
+            <div class="modal-header-enhanced">
+                <div class="modal-icon-wrapper blue">
+                    <i data-feather="edit-3"></i>
+                </div>
+                <div>
+                    <h2 class="modal-title">Tahrirlangan Hisobotlar</h2>
+                    <p class="modal-subtitle">So'nggi 7 kunlik hisobotlar</p>
+                </div>
+            </div>
+            <div class="kpi-date-filter">
+                <div class="date-range-compact">
+                    <input type="text" id="edited-kpi-daterange" class="kpi-daterange-input-compact" placeholder="📅 Sana tanlang" readonly>
+                    <div class="date-presets">
+                        <button class="preset-btn" data-days="1" data-target="edited">Bugun</button>
+                        <button class="preset-btn active" data-days="7" data-target="edited">7 kun</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body kpi-modal-body">
+                <div id="edited-kpi-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Aktiv Foydalanuvchilar Modal -->
+    <div id="active-sessions-modal" class="modal hidden">
+        <div class="modal-content kpi-modal-content">
+            <button class="close-modal-btn" data-target="active-sessions-modal"><i data-feather="x"></i></button>
+            <div class="modal-header-enhanced">
+                <div class="modal-icon-wrapper blue">
+                    <i data-feather="users"></i>
+                </div>
+                <div>
+                    <h2 class="modal-title">Aktiv Foydalanuvchilar</h2>
+                    <p class="modal-subtitle">Joriy sessiyalar ma'lumoti</p>
+                </div>
+            </div>
+            <div class="modal-body kpi-modal-body">
+                <div id="active-users-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jami Sessiyalar Modal -->
+    <div id="total-sessions-modal" class="modal hidden">
+        <div class="modal-content kpi-modal-content">
+            <button class="close-modal-btn" data-target="total-sessions-modal"><i data-feather="x"></i></button>
+            <div class="modal-header-enhanced">
+                <div class="modal-icon-wrapper green">
+                    <i data-feather="smartphone"></i>
+                </div>
+                <div>
+                    <h2 class="modal-title">Jami Sessiyalar</h2>
+                    <p class="modal-subtitle">Vaqt bo'yicha sessiya statistikasi</p>
+                </div>
+            </div>
+            <div class="modal-body kpi-modal-body">
+                <div id="total-sessions-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Avatar Modal -->
+    <div id="avatar-modal" class="modal hidden">
+        <div class="modal-content avatar-modal-content">
+            <button class="close-modal-btn" data-target="avatar-modal"><i data-feather="x"></i></button>
+            <h2 class="modal-title">Avatar Boshqaruvi</h2>
+            <div class="modal-body">
+                <div class="avatar-preview-section">
+                    <div class="avatar-preview" id="avatar-preview">
+                        <i data-feather="user"></i>
+                    </div>
+                    <p class="avatar-hint">Joriy avatar</p>
+                </div>
+                
+                <div class="avatar-actions">
+                    <label for="avatar-upload" class="btn btn-primary">
+                        <i data-feather="upload"></i> Rasm yuklash
+                    </label>
+                    <input type="file" id="avatar-upload" accept="image/*" style="display: none;">
+                    
+                    <button id="delete-avatar-btn" class="btn btn-danger" style="display: none;">
+                        <i data-feather="trash-2"></i> O'chirish
+                    </button>
+                </div>
+
+                <div class="avatar-upload-info">
+                    <p><i data-feather="info"></i> JPG, PNG yoki GIF (max 2MB)</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript fayllari -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/uz.js"></script>
+    <script src="https://npmcdn.com/flatpickr/dist/plugins/rangePlugin.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script type="module" src="modules/dom.js"></script>
+    <script type="module" src="script.js"></script>
+</body>
+</html>

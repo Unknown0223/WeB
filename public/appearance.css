@@ -1,0 +1,586 @@
+/* ===================================================== */
+/* === 🎨 ZAMONAVIY BRENDING BO'LIMI CSS === */
+/* ===================================================== */
+
+/* Brending Tabs */
+.branding-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0;
+    overflow-x: auto;
+}
+
+.branding-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 15px 25px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.branding-tab i {
+    width: 18px;
+    height: 18px;
+}
+
+.branding-tab:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.branding-tab.active {
+    color: var(--blue-color);
+    border-bottom-color: var(--blue-color);
+    background: rgba(0, 123, 255, 0.1);
+}
+
+/* Tab Content */
+.branding-content {
+    min-height: 500px;
+}
+
+.branding-tab-content {
+    display: none;
+    animation: fadeInUp 0.4s ease;
+}
+
+.branding-tab-content.active {
+    display: block;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Brending Grid Layout */
+.branding-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-bottom: 30px;
+}
+
+@media (max-width: 1200px) {
+    .branding-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.brending-settings,
+.branding-preview-panel {
+    background: var(--surface-color);
+    padding: 25px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+.section-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Color Picker Wrapper */
+.color-picker-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.color-input {
+    width: 60px;
+    height: 40px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.color-input:hover {
+    border-color: var(--blue-color);
+    transform: scale(1.05);
+}
+
+/* Color Palette */
+.color-palette {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.color-box {
+    width: 45px;
+    height: 45px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 3px solid transparent;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.color-box:hover {
+    transform: scale(1.1);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.color-box.active {
+    border-color: #fff;
+    box-shadow: 0 0 0 2px var(--blue-color);
+}
+
+.color-box.active::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-size: 20px;
+    font-weight: bold;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Range Input */
+.range-input {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(to right, var(--blue-color) 0%, var(--blue-color) 50%, var(--border-color) 50%, var(--border-color) 100%);
+    outline: none;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.range-input::-webkit-slider-thumb {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--blue-color);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.5);
+    transition: all 0.3s ease;
+}
+
+.range-input::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.7);
+}
+
+.range-value {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 4px 12px;
+    background: rgba(0, 123, 255, 0.2);
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--blue-color);
+}
+
+/* Preview Panel */
+.branding-preview-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+}
+
+.preview-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: var(--border-radius);
+}
+
+/* Colors Grid */
+.colors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.color-item {
+    background: var(--surface-color);
+    padding: 20px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    transition: all 0.3s ease;
+}
+
+.color-item:hover {
+    border-color: var(--blue-color);
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+}
+
+.color-item label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.color-desc {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Colors Preview Section */
+.colors-preview-section {
+    background: var(--surface-color);
+    padding: 25px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    margin-top: 30px;
+}
+
+.preview-buttons {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+}
+
+/* Typography Grid */
+.typography-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.typography-preview {
+    background: var(--surface-color);
+    padding: 30px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    margin-top: 30px;
+}
+
+/* Animations Grid */
+.animations-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.animations-preview {
+    background: var(--surface-color);
+    padding: 30px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    margin-top: 30px;
+}
+
+.animation-test-btn {
+    transition: all var(--transition-speed, 0.3s) ease;
+}
+
+.animation-test-btn:hover {
+    transform: translateY(-3px) scale(1.05);
+    box-shadow: 0 10px 25px rgba(0, 123, 255, 0.4);
+}
+
+.animation-test-card {
+    width: 150px;
+    height: 150px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-speed, 0.3s) ease;
+}
+
+.animation-test-card:hover {
+    transform: translateY(-10px) scale(1.05);
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* Components Settings */
+.components-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+}
+
+.component-section {
+    background: var(--surface-color);
+    padding: 25px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+.component-section h4 {
+    margin-bottom: 20px;
+    color: var(--text-primary);
+    font-size: 16px;
+}
+
+.component-preview-btn {
+    transition: all 0.3s ease;
+}
+
+.component-preview-card {
+    transition: all 0.3s ease;
+}
+
+.component-preview-input {
+    transition: all 0.3s ease;
+}
+
+/* Spacing Grid */
+.spacing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+/* Checkbox Label */
+.checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.checkbox-label:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+/* Export/Import Buttons */
+#export-branding-btn,
+#import-branding-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .branding-tabs {
+        flex-wrap: wrap;
+    }
+    
+    .branding-tab {
+        flex: 1 1 auto;
+        min-width: 120px;
+    }
+    
+    .colors-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .typography-grid,
+    .animations-grid,
+    .spacing-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Smooth Transitions */
+* {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* ===================================================== */
+/* === ✨ ZAMONAVIY ANIMATSIYA VA CHEGARA EFFEKTLARI === */
+/* ===================================================== */
+
+/* Hover Transform Effektlari */
+.scale-up:hover {
+    transform: scale(1.05) !important;
+}
+
+.scale-down:hover {
+    transform: scale(0.95) !important;
+}
+
+.tilt-left:hover {
+    transform: rotate(-2deg) translateY(-2px) !important;
+}
+
+.tilt-right:hover {
+    transform: rotate(2deg) translateY(-2px) !important;
+}
+
+.flip-3d:hover {
+    transform: rotateY(10deg) rotateX(5deg) !important;
+    transform-style: preserve-3d;
+}
+
+.perspective:hover {
+    transform: perspective(500px) translateZ(20px) !important;
+}
+
+.skew:hover {
+    transform: skewX(-3deg) skewY(-1deg) !important;
+}
+
+/* Hover Effektlari */
+.hover-glow:hover {
+    box-shadow: 0 0 20px rgba(0, 123, 255, 0.6), 0 0 40px rgba(0, 123, 255, 0.4) !important;
+}
+
+.hover-rotate:hover {
+    transform: rotate(5deg) !important;
+}
+
+.hover-slide:hover {
+    transform: translateX(5px) !important;
+}
+
+/* Chegara Effektlari */
+.gradient-border {
+    position: relative;
+    background: linear-gradient(var(--card-bg), var(--card-bg)) padding-box,
+                linear-gradient(135deg, #667eea 0%, #764ba2 100%) border-box;
+    border: 2px solid transparent;
+}
+
+.animated-gradient {
+    position: relative;
+    background: linear-gradient(var(--card-bg), var(--card-bg)) padding-box,
+                linear-gradient(135deg, #667eea, #764ba2, #f093fb, #667eea) border-box;
+    border: 2px solid transparent;
+    background-size: 200% 200%;
+    animation: gradientFlow 3s ease infinite;
+}
+
+@keyframes gradientFlow {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+.neon-glow {
+    border: 2px solid #00f3ff;
+    box-shadow: 0 0 10px rgba(0, 243, 255, 0.5),
+                inset 0 0 10px rgba(0, 243, 255, 0.2);
+    animation: neonPulse 2s ease-in-out infinite;
+}
+
+@keyframes neonPulse {
+    0%, 100% { 
+        box-shadow: 0 0 10px rgba(0, 243, 255, 0.5),
+                    inset 0 0 10px rgba(0, 243, 255, 0.2);
+    }
+    50% { 
+        box-shadow: 0 0 20px rgba(0, 243, 255, 0.8),
+                    inset 0 0 15px rgba(0, 243, 255, 0.4);
+    }
+}
+
+.pulse-border {
+    border: 2px solid var(--blue-color);
+    animation: pulseBorder 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseBorder {
+    0%, 100% { 
+        border-color: var(--blue-color);
+        box-shadow: 0 0 0 0 rgba(0, 123, 255, 0.7);
+    }
+    50% { 
+        border-color: var(--success-color);
+        box-shadow: 0 0 0 10px rgba(0, 123, 255, 0);
+    }
+}
+
+.rotating-border {
+    position: relative;
+    border: 2px solid transparent;
+    background: var(--card-bg);
+}
+
+.rotating-border::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    background: linear-gradient(45deg, #667eea, #764ba2, #f093fb, #4facfe);
+    border-radius: inherit;
+    animation: rotateBorder 3s linear infinite;
+    z-index: -1;
+}
+
+@keyframes rotateBorder {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.dashed-animated {
+    border: 2px dashed var(--blue-color);
+    animation: dashMove 20s linear infinite;
+    background-size: 200% 200%;
+}
+
+@keyframes dashMove {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 100% 100%; }
+}
+
+/* Test kartalar uchun */
+.animation-test-btn,
+.animation-test-btn-2,
+.animation-test-btn-3 {
+    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.animation-test-card,
+.animation-test-card-2 {
+    transition: all 0.3s ease;
+}
+
+.animation-test-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 25px rgba(0, 123, 255, 0.3);
+}
+
+.animation-test-card:hover {
+    transform: translateY(-5px) scale(1.02);
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+}
+
+.animation-test-card-2:hover {
+    transform: rotate(-2deg) scale(1.05);
+    box-shadow: 0 20px 40px rgba(102, 126, 234, 0.4);
+}

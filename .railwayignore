@@ -1,0 +1,11 @@
+node_modules/
+.git/
+.env
+.env.local
+*.log
+logs/
+.DS_Store
+database.db-journal
+database.db-wal
+database.db-shm
+

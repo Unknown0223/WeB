@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+database.db
+
+# Backups
+backups/
+*.backup
+
+# Logs
+logs/
+*.log
+pm2-*.log
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# PM2
+.pm2/
+ecosystem.config.js.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+

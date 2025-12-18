@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Bot bilan Bog'lash</title>
+    
+    <!-- Umumiy uslublar fayli -->
+    <link rel="stylesheet" href="main.css"> 
+    <link rel="stylesheet" href="admin.css">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        .bot-connect-card {
+            background: var(--bg-secondary, #f5f5f5);
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        .login-display {
+            background: var(--bg-primary, #fff);
+            padding: 16px;
+            border-radius: 8px;
+            border: 2px solid var(--border-color, #e0e0e0);
+            margin-bottom: 20px;
+        }
+        .login-display label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .login-display .username {
+            margin: 0;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 18px;
+        }
+        .instructions {
+            background: rgba(255, 152, 0, 0.1);
+            border-left: 4px solid #ff9800;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .instructions h4 {
+            margin: 0 0 12px 0;
+            color: #ff9800;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .instructions ul {
+            margin: 0;
+            padding-left: 0;
+            color: var(--text-primary);
+            line-height: 1.8;
+            list-style: none;
+        }
+        .instructions li {
+            margin-bottom: 10px;
+        }
+        .instructions li strong {
+            color: #ff9800;
+        }
+        .message-text {
+            margin-top: 15px;
+            min-height: 1.2em;
+            font-weight: 500;
+            transition: color 0.3s;
+            line-height: 1.5;
+            text-align: center;
+        }
+        .message-text.error {
+            color: var(--red-color);
+        }
+        .message-text.success {
+            color: var(--green-color);
+            font-size: 15px;
+        }
+        .bot-button {
+            display: inline-flex !important;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: auto;
+            min-width: 250px;
+            padding: 14px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            margin: 0 auto;
+            text-align: center;
+        }
+        #bot-subscription-section {
+            display: block !important;
+            width: 100%;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .bot-button i {
+            width: 20px;
+            height: 20px;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .success-section {
+            text-align: center;
+            padding: 30px 20px;
+        }
+        .success-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            animation: scaleIn 0.5s ease-out;
+        }
+        @keyframes scaleIn {
+            from { transform: scale(0); }
+            to { transform: scale(1); }
+        }
+        .brand-logo {
+            display: inline-block;
+            /* Rang JavaScript orqali o'rnatiladi - inline CSS'dan olib tashlandi */
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            text-align: center;
+            /* Text-shadow ham JavaScript orqali o'rnatiladi */
+            margin: 0;
+        }
+        /* Animatsiya CSS variable orqali ishlaydi */
+        @keyframes glow-pulse {
+            from {
+                text-shadow: 0 0 20px var(--glow-color, rgba(76, 175, 80, 0.8)), 0 0 40px var(--glow-color, rgba(76, 175, 80, 0.6));
+            }
+            to {
+                text-shadow: 0 0 30px var(--glow-color, rgba(76, 175, 80, 1)), 0 0 60px var(--glow-color, rgba(76, 175, 80, 0.8)), 0 0 80px var(--glow-color, rgba(76, 175, 80, 0.6));
+            }
+        }
+        .logo-border-effect {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+        }
+    </style>
+</head>
+<body class="login-page">
+
+    <div class="login-container">
+        <div class="logo-border-effect">
+             <h2 class="brand-logo">MANUS</h2>
+        </div>
+        <p class="login-description">Telegram bot bilan bog'lash kerak</p>
+        
+        <!-- Ogohlantirish -->
+        <div id="warning-section" class="instructions" style="display: none; background: rgba(255, 152, 0, 0.1); border-left-color: #ff9800;">
+            <h4 style="color: #ff9800;">⚠️ Muhim ogohlantirish:</h4>
+            <ul style="list-style: none; padding-left: 0; margin: 0;">
+                <li style="margin-bottom: 10px;">• <strong>Telegram bot obunasi majburiy</strong> - tizimdan foydalanish uchun botga obuna bo'lishingiz shart</li>
+                <li style="margin-bottom: 10px;">• <strong>Obunani bekor qilmaslik</strong> - agar bot obunasini bekor qilsangiz, tizimga kirib bo'lmaydi</li>
+                <li style="margin-bottom: 10px;">• <strong>Doimiy ulanish</strong> - bot bilan doimiy ulanishni saqlab turing</li>
+            </ul>
+        </div>
+
+        <!-- Xabar ko'rsatish -->
+        <p id="message-area" class="message-text" style="display: none;"></p>
+
+        <!-- Bot obunasi knopkasi -->
+        <div id="bot-subscription-section" style="display: none;">
+            <a id="bot-subscription-button" href="#" target="_blank" class="btn btn-primary bot-button">
+                <i data-feather="send"></i>
+                <span id="button-text">Botga obuna bo'lish</span>
+            </a>
+        </div>
+
+        <!-- Loading holati -->
+        <div id="loading-section" style="text-align: center; padding: 30px;">
+            <div class="loading-spinner" style="margin: 0 auto 15px;"></div>
+            <p style="color: var(--text-secondary);">Yuklanmoqda...</p>
+        </div>
+
+        <!-- Muvaffaqiyatli bog'lanish -->
+        <div id="success-section" class="success-section" style="display: none;">
+            <div class="success-icon">✅</div>
+            <h3 style="color: var(--green-color, #4CAF50); margin-bottom: 12px; font-size: 24px;">Muvaffaqiyatli bog'landi!</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 16px;">
+                Telegram bot bilan bog'lanish muvaffaqiyatli yakunlandi.<br>
+                Dashboardga o'tilmoqda...
+            </p>
+        </div>
+    </div>
+
+    <!-- Tashqi kutubxonalar -->
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script src="bot-connect.js"></script>
+    <script>
+        // Ikonkalarni ishga tushirish uchun
+        feather.replace();
+    </script>
+</body>
+</html>
