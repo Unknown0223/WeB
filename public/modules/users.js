@@ -413,6 +413,10 @@ function renderPaginationControls(totalUsers, totalPages, currentPageNum) {
                     class="form-control search-input" 
                     placeholder="Foydalanuvchi qidirish (ism, login, email, telefon...)"
                     value="${(currentFilters.search || '').replace(/"/g, '&quot;')}"
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
                     style="padding-right: 40px;"
                 >
                 <i data-feather="search" class="search-input-icon" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); pointer-events: none;"></i>
