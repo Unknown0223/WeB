@@ -35,12 +35,18 @@ async function getVisibleLocations(user) {
         return userLocations;
     }
     
-    // Agar foydalanuvchining o'z filiallari bo'lmasa, rol filiallarini tekshiramiz
     // Rol ma'lumotlarini olish
     const roleData = await db('roles').where('role_name', user.role).first();
     if (!roleData) {
         log.warn(`Rol topilmadi: ${user.role}`);
-        return []; // Rol topilmasa, hech narsa ko'rinmaydi
+        return [];
+    }
+    
+    // Agar requires_locations = false bo'lsa, barcha filiallar ko'rinadi
+    // Bu holda bo'sh array qaytaramiz (bu "barcha" degani)
+    if (roleData.requires_locations === false || roleData.requires_locations === 0) {
+        log.debug(`Rol ${user.role} uchun filiallar talab qilinmaydi - barcha filiallar ko'rinadi`);
+        return []; // Bo'sh array "barcha" degani
     }
     
     // Rol uchun belgilangan filiallar
@@ -192,13 +198,10 @@ async function filterReportsByRole(query, user) {
         // User va role tekshiruvi
         if (!user || !user.role) {
             log.warn('User yoki role topilmadi');
-            // Agar user yoki role yo'q bo'lsa, hech narsa qaytarmaslik
             query.whereRaw('1 = 0');
-            // Query obyektini tekshirish
             if (query && typeof query.select === 'function') {
                 return query;
             }
-            // Agar query obyekti to'g'ri emas bo'lsa, xatolikni throw qilamiz
             throw new Error('Query obyekti to\'g\'ri emas - whereRaw dan keyin select metodi yo\'q');
         }
         
@@ -207,28 +210,49 @@ async function filterReportsByRole(query, user) {
             return query;
         }
         
+        // Rol ma'lumotlarini olish
+        const roleData = await db('roles').where('role_name', user.role).first();
+        if (!roleData) {
+            log.warn(`Rol topilmadi: ${user.role}`);
+            query.whereRaw('1 = 0');
+            return query;
+        }
+        
+        // Agar rol uchun requires_locations = false va requires_brands = false bo'lsa,
+        // bu "barcha filiallar va brendlar" degani, shuning uchun hech qanday filtr qo'llanmaydi
+        const requiresLocations = roleData.requires_locations === true || roleData.requires_locations === 1;
+        const requiresBrands = roleData.requires_brands === true || roleData.requires_brands === 1;
+        
+        // Agar hech qanday shart talab qilinmasa, barcha hisobotlarni ko'rsatish
+        if (!requiresLocations && !requiresBrands) {
+            log.debug(`Rol ${user.role} uchun hech qanday shart talab qilinmaydi - barcha hisobotlar ko'rsatiladi`);
+            return query;
+        }
+        
         const visibleLocations = await getVisibleLocations(user);
         const visibleBrands = await getVisibleBrands(user);
         
-        // Agar hech narsa ko'rinmasa, bo'sh natija qaytarish
-        if (visibleLocations.length === 0 && visibleBrands.length === 0) {
-            // Query'ni hech narsa qaytarmasligi uchun imkonsiz shart qo'shamiz
+        // Agar requires_locations = true lekin visibleLocations bo'sh bo'lsa, hech narsa ko'rinmaydi
+        // Agar requires_brands = true lekin visibleBrands bo'sh bo'lsa, hech narsa ko'rinmaydi
+        if (requiresLocations && visibleLocations.length === 0) {
+            log.debug(`Rol ${user.role} uchun filiallar talab qilinadi, lekin ko'rinadigan filiallar yo'q`);
             query.whereRaw('1 = 0');
-            // Query obyektini tekshirish
-            if (query && typeof query.select === 'function') {
-                return query;
-            }
-            // Agar query obyekti to'g'ri emas bo'lsa, xatolikni throw qilamiz
-            throw new Error('Query obyekti to\'g\'ri emas - whereRaw dan keyin select metodi yo\'q');
+            return query;
         }
         
-        // Filiallar bo'yicha filtr
-        if (visibleLocations.length > 0) {
+        if (requiresBrands && visibleBrands.length === 0) {
+            log.debug(`Rol ${user.role} uchun brendlar talab qilinadi, lekin ko'rinadigan brendlar yo'q`);
+            query.whereRaw('1 = 0');
+            return query;
+        }
+        
+        // Filiallar bo'yicha filtr (faqat agar requires_locations = true bo'lsa)
+        if (requiresLocations && visibleLocations.length > 0) {
             query.whereIn('r.location', visibleLocations);
         }
         
-        // Brendlar bo'yicha filtr (agar reports jadvalida brand_id ustuni bo'lsa)
-        if (visibleBrands.length > 0) {
+        // Brendlar bo'yicha filtr (faqat agar requires_brands = true bo'lsa)
+        if (requiresBrands && visibleBrands.length > 0) {
             query.whereIn('r.brand_id', visibleBrands);
         }
         
@@ -237,19 +261,15 @@ async function filterReportsByRole(query, user) {
             return query;
         }
         
-        // Agar query obyekti to'g'ri emas bo'lsa, xatolikni throw qilamiz
         throw new Error('Query obyekti to\'g\'ri emas - select metodi yo\'q');
     } catch (error) {
         log.error('filterReportsByRole xatolik:', error.message);
-        // Xatolik bo'lsa, hech narsa qaytarmaslik
         if (query && typeof query.whereRaw === 'function') {
             query.whereRaw('1 = 0');
-            // Query obyektini tekshirish
             if (query && typeof query.select === 'function') {
                 return query;
             }
         }
-        // Agar query obyekti to'g'ri emas bo'lsa, xatolikni throw qilamiz
         throw error;
     }
 }

@@ -640,6 +640,16 @@ body.admin-page {
     font-weight: 700;
     margin: 0;
     color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.page-title i {
+    width: 28px;
+    height: 28px;
+    color: var(--blue-color);
+    stroke-width: 2.5;
 }
 
 .page-description {

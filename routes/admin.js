@@ -186,6 +186,10 @@ router.get('/export-full-db', async (req, res) => {
             user_locations: await db('user_locations').select('*'),
             user_brands: await db('user_brands').select('*').catch(() => []),
             
+            // Rol bog'lanishlari (QO'SHILDI)
+            role_locations: await db('role_locations').select('*'),
+            role_brands: await db('role_brands').select('*').catch(() => []),
+            
             // Hisobotlar
             reports: await db('reports').select('*'),
             report_history: await db('report_history').select('*').catch(() => []),
@@ -637,6 +641,21 @@ router.post('/import-full-db', async (req, res) => {
             await importTable('user_brands', data.user_brands, {
                 foreignKeys: [
                     { table: 'users', column: 'id', reference: 'user_id' },
+                    { table: 'brands', column: 'id', reference: 'brand_id' }
+                ]
+            });
+            
+            // Rol bog'lanishlari (QO'SHILDI)
+            await importTable('role_locations', data.role_locations, {
+                compositeUnique: ['role_name', 'location_name'],
+                foreignKeys: [
+                    { table: 'roles', column: 'role_name', reference: 'role_name' }
+                ]
+            });
+            
+            await importTable('role_brands', data.role_brands, {
+                foreignKeys: [
+                    { table: 'roles', column: 'role_name', reference: 'role_name' },
                     { table: 'brands', column: 'id', reference: 'brand_id' }
                 ]
             });
