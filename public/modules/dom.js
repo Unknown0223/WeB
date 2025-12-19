@@ -145,6 +145,8 @@ export const DOM = {
     datePickerEl: null,
     datePickerWrapper: null,
     filterDateRange: null,
+    searchInput: null, // Qo'shildi
+    reportFilterButtons: null, // Qo'shildi
     confirmBtn: null,
     editBtn: null,
     excelBtn: null,
@@ -332,6 +334,8 @@ function initDOM() {
     // wrapper for validation classes; prefer closest flatpickr wrapper if present
     DOM.datePickerWrapper = DOM.datePickerEl ? (DOM.datePickerEl.closest('.flatpickr-wrapper') || DOM.datePickerEl.parentElement) : null;
     DOM.filterDateRange = document.getElementById('filter-date-range');
+    DOM.searchInput = document.getElementById('search-input'); // Qo'shildi
+    DOM.reportFilterButtons = document.getElementById('report-filter-buttons'); // Qo'shildi
     DOM.confirmBtn = document.getElementById('confirm-btn');
     DOM.editBtn = document.getElementById('edit-btn');
     DOM.excelBtn = document.getElementById('excel-btn');

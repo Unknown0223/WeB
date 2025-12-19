@@ -1721,11 +1721,36 @@ const renderKpiCards = (stats) => {
         
         addSafeListener(DOM.confirmBtn, 'click', () => handleConfirm(null));
         addSafeListener(DOM.editBtn, 'click', handleEdit);
+        
+        // Qidiruv input uchun event listener
         addSafeListener(DOM.searchInput, 'input', debounce(e => {
             state.filters.searchTerm = e.target.value;
             state.filters.page = 1;
             fetchAndRenderReports();
         }, 300));
+        
+        // Filter buttonlar uchun event listener
+        if (DOM.reportFilterButtons) {
+            DOM.reportFilterButtons.addEventListener('click', e => {
+                const btn = e.target.closest('.filter-btn');
+                if (!btn) return;
+                
+                // Barcha buttonlardan active class'ni olib tashlash
+                DOM.reportFilterButtons.querySelectorAll('.filter-btn').forEach(b => {
+                    b.classList.remove('active');
+                });
+                
+                // Tanlangan buttonga active class qo'shish
+                btn.classList.add('active');
+                
+                // Filter qiymatini o'rnatish
+                const filterValue = btn.dataset.filter;
+                state.filters.filter = filterValue;
+                state.filters.page = 1;
+                fetchAndRenderReports();
+            });
+        }
+        
         addSafeListener(DOM.paginationControls, 'click', e => {
             const btn = e.target.closest('.pagination-btn');
             if (!btn) return;
@@ -1778,15 +1803,6 @@ const renderKpiCards = (stats) => {
             } else {
                 showToast("Iltimos, kechikish sababini kiriting!", true);
             }
-        });
-        addSafeListener(DOM.reportFilterButtons, 'click', e => {
-            const btn = e.target.closest('.filter-btn');
-            if (!btn) return;
-            DOM.reportFilterButtons.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            state.filters.filter = btn.dataset.filter;
-            state.filters.page = 1;
-            fetchAndRenderReports();
         });
         addSafeListener(DOM.excelBtn, 'click', exportToExcel);
 
