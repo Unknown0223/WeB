@@ -147,6 +147,24 @@ router.get('/me/sessions', isAuthenticated, async (req, res) => {
     }
 });
 
+// Bitta foydalanuvchi ma'lumotlarini olish
+router.get('/:id', isAuthenticated, hasPermission('users:view'), async (req, res) => {
+    const userId = parseInt(req.params.id);
+    try {
+        const users = await userRepository.getAllUsersWithDetails();
+        const user = users.find(u => u.id === userId);
+        
+        if (!user) {
+            return res.status(404).json({ message: 'Foydalanuvchi topilmadi' });
+        }
+        
+        res.json(user);
+    } catch (error) {
+        log.error(`/api/users/${userId} GET xatoligi:`, error.message);
+        res.status(500).json({ message: "Foydalanuvchi ma'lumotlarini olishda xatolik." });
+    }
+});
+
 // User-specific sozlamalarni olish
 router.get('/:id/settings', isAuthenticated, hasPermission('users:view'), async (req, res) => {
     const userId = req.params.id;

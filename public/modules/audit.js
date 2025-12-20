@@ -312,17 +312,22 @@ async function updateAuditStats() {
             return; // Not JSON, skip silently
         }
         
-        const data = await res.json();
-        
-        const totalCountEl = document.getElementById('total-logs-count');
-        const todayCountEl = document.getElementById('today-logs-count');
-        
-        if (totalCountEl) {
-            totalCountEl.textContent = data.total || 0;
-        }
-        
-        if (todayCountEl) {
-            todayCountEl.textContent = data.today || 0;
+        try {
+            const data = await res.json();
+            
+            const totalCountEl = document.getElementById('total-logs-count');
+            const todayCountEl = document.getElementById('today-logs-count');
+            
+            if (totalCountEl) {
+                totalCountEl.textContent = data.total || 0;
+            }
+            
+            if (todayCountEl) {
+                todayCountEl.textContent = data.today || 0;
+            }
+        } catch (parseError) {
+            console.error('Audit stats parse error:', parseError);
+            // Silently ignore parse errors
         }
     } catch (error) {
         // Silently ignore if stats endpoint doesn't exist

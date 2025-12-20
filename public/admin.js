@@ -248,6 +248,54 @@ function setupEventListeners() {
     const addSafeListener = (element, event, handler) => {
         if (element) element.addEventListener(event, handler);
     };
+    
+    // Mobile menu toggle
+    const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+    const sidebar = document.querySelector('.sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    
+    function toggleMobileMenu() {
+        if (sidebar && sidebarOverlay) {
+            sidebar.classList.toggle('open');
+            sidebarOverlay.classList.toggle('active');
+            // Body scroll ni to'xtatish/yochish
+            if (sidebar.classList.contains('open')) {
+                document.body.style.overflow = 'hidden';
+            } else {
+                document.body.style.overflow = '';
+            }
+        }
+    }
+    
+    function closeMobileMenu() {
+        if (sidebar && sidebarOverlay) {
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+    }
+    
+    addSafeListener(mobileMenuToggle, 'click', (e) => {
+        e.stopPropagation();
+        toggleMobileMenu();
+    });
+    
+    addSafeListener(sidebarOverlay, 'click', closeMobileMenu);
+    
+    // Sidebar nav link bosilganda mobil menyuni yopish
+    addSafeListener(DOM.sidebarNav, 'click', (e) => {
+        const link = e.target.closest('.nav-link');
+        if (link && window.innerWidth <= 992) {
+            closeMobileMenu();
+        }
+    });
+    
+    // Window resize - katta ekranda sidebar ochiq bo'lishi kerak
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 992) {
+            closeMobileMenu();
+        }
+    });
 
     // Navigatsiya
     window.addEventListener('hashchange', () => navigateTo(window.location.hash.substring(1)));

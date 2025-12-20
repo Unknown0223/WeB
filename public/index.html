@@ -13,6 +13,14 @@
 </head>
 <body class="main-page">
 
+    <!-- Mobile Menu Toggle Button -->
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Menyuni ochish">
+        <i data-feather="menu"></i>
+    </button>
+    
+    <!-- Sidebar Overlay (mobil uchun) -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
     <!-- Yuqori Header Panel -->
     <header class="top-header">
         <div class="header-container">
@@ -85,10 +93,15 @@
     <div class="main-wrapper">
         
         <!-- 1. CHAP USTUN (Hisobotlar ro'yxati ) -->
-        <aside class="sidebar">
-            <div class="sidebar-title">
-                <i data-feather="list"></i>
-                <h3>Hisobotlar</h3>
+        <aside class="sidebar" id="left-sidebar">
+            <div class="sidebar-header-controls">
+                <div class="sidebar-title">
+                    <i data-feather="list"></i>
+                    <h3>Hisobotlar</h3>
+                </div>
+                <button class="sidebar-toggle-btn" id="toggle-left-sidebar" title="Yon panelni yig'ish/yoyish">
+                    <i data-feather="chevron-left"></i>
+                </button>
             </div>
             
             <div class="filter-date-wrapper">

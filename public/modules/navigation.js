@@ -12,11 +12,28 @@ import { fetchAndRenderMySessions } from './security.js';
 export function applyPermissions() {
     const userPermissions = state.currentUser.permissions || [];
     
+    // Ruxsatlar mapping (tahrirlash ruxsati bo'lsa, ko'rish ruxsati ham beriladi)
+    const permissionMapping = {
+        'reports:edit_all': 'reports:view_all',
+        'reports:edit_assigned': 'reports:view_assigned',
+        'reports:edit_own': 'reports:view_own'
+    };
+    
+    // Virtual permissions qo'shish (tahrirlash ruxsati bo'lsa, ko'rish ruxsati ham qo'shiladi)
+    const virtualPermissions = [...userPermissions];
+    userPermissions.forEach(perm => {
+        if (permissionMapping[perm] && !virtualPermissions.includes(permissionMapping[perm])) {
+            virtualPermissions.push(permissionMapping[perm]);
+        }
+    });
+    
     document.querySelectorAll('[data-permission]').forEach(el => {
         const requiredPermissions = el.dataset.permission.split(',').map(p => p.trim());
-        const hasRequiredPermission = requiredPermissions.some(p => userPermissions.includes(p));
+        const hasRequiredPermission = requiredPermissions.some(p => virtualPermissions.includes(p));
         if (!hasRequiredPermission) {
             el.style.display = 'none';
+        } else {
+            el.style.display = '';
         }
     });
     

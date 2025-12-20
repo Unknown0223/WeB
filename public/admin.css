@@ -4369,7 +4369,9 @@ input.form-control.comparison-input {
     border: 1px solid rgba(255, 255, 255, 0.1);
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-auto-rows: min-content;
     gap: 8px;
+    align-items: stretch;
 }
 
 @media (max-width: 1200px) {
@@ -4423,6 +4425,31 @@ input.form-control.comparison-input {
     flex-wrap: nowrap;
     z-index: 10;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Modal footer button grouping - ensure buttons stay together */
+.modal-footer > .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+    align-self: center;
+}
+
+/* User form modal footer - tugmalarni bir xil qatorda bo'lishini ta'minlash */
+#user-form-modal .modal-footer {
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+#user-form-modal .modal-footer > .btn {
+    align-self: center;
+    margin: 0;
+}
+
+/* Special handling for approval modal with skip button */
+#approval-modal .modal-footer {
+    justify-content: space-between;
+    align-items: center;
 }
 
 .modal-actions {
@@ -4592,12 +4619,13 @@ input.form-control.comparison-input {
     .modal-dialog {
         width: 95%;
         margin: 10px auto;
+        max-height: 95vh;
     }
     
     .modal-header,
     .modal-body,
     .modal-footer {
-        padding: 20px;
+        padding: 15px;
     }
     
     .modal-title {
@@ -4606,15 +4634,84 @@ input.form-control.comparison-input {
     
     .modal-footer {
         flex-direction: row;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 10px;
+        align-items: center;
+        padding: 15px;
+    }
+    
+    /* User form modal footer - mobile uchun ham */
+    #user-form-modal .modal-footer {
+        flex-wrap: nowrap;
+        align-items: center;
+        padding: 15px;
     }
     
     .modal-footer .btn,
     .modal-actions .btn {
-        flex: 1;
+        flex: 0 0 auto;
         min-width: 100px;
+        min-height: 44px;
         justify-content: center;
+        align-self: center;
+        touch-action: manipulation;
+        font-size: 14px;
+        padding: 12px 16px;
+    }
+    
+    /* User form modal mobil uchun */
+    #user-form-modal .modal-dialog {
+        width: 98%;
+        max-width: 98%;
+        max-height: 95vh;
+    }
+    
+    #user-form-modal .modal-content {
+        max-height: 95vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    #user-form-modal .modal-body {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 15px;
+        flex: 1;
+        min-height: 0;
+    }
+    
+    #user-form {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    /* Form controls mobil uchun */
+    #user-form-modal .form-control,
+    #user-form-modal select,
+    #user-form-modal input[type="text"],
+    #user-form-modal input[type="number"] {
+        font-size: 16px; /* iOS zoom oldini olish */
+        min-height: 44px;
+        padding: 12px;
+        width: 100%;
+    }
+    
+    /* Selected items display mobil uchun */
+    #user-form-modal .selected-items-display {
+        grid-template-columns: 1fr;
+        max-height: 150px;
+        gap: 8px;
+    }
+    
+    /* Select buttons mobil uchun */
+    #user-form-modal .btn-select-locations,
+    #user-form-modal .btn-select-brands {
+        width: 100%;
+        min-height: 44px;
+        padding: 12px 16px;
+        font-size: 14px;
+        touch-action: manipulation;
     }
 }
 
@@ -5865,30 +5962,60 @@ input.form-control.comparison-input {
 @media (max-width: 1200px) {
     .settings-layout, .roles-management-container, .branding-grid { grid-template-columns: 1fr; }
 }
+/* ===================================== */
+/* ADMIN SAHIFA UCHUN MOBIL RESPONSIVE */
+/* ===================================== */
+
+/* Tablet va kichik ekranlar (max-width: 992px) */
 @media (max-width: 992px) {
-    .admin-layout { grid-template-columns: 1fr; }
+    .admin-layout { 
+        grid-template-columns: 1fr; 
+    }
+    
     .sidebar {
         position: fixed;
-        left: -260px; /* Boshida yashirin */
+        left: -260px;
         top: 0;
         height: 100vh;
+        width: 260px;
         z-index: 1001;
         transition: left 0.3s ease;
+        overflow-y: auto;
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
     }
+    
     .sidebar.open {
         left: 0;
     }
+    
     .main-content {
         margin-left: 0;
         padding: 20px;
     }
+    
     .mobile-menu-toggle {
-        display: block; /* Mobil qurilmalarda ko'rsatish */
+        display: flex;
+        align-items: center;
+        justify-content: center;
         position: fixed;
         top: 15px;
         left: 15px;
+        width: 44px;
+        height: 44px;
+        background: var(--surface-color);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
         z-index: 1002;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
+    
+    .mobile-menu-toggle i {
+        width: 24px;
+        height: 24px;
+    }
+    
     .overlay {
         display: none;
         position: fixed;
@@ -5896,17 +6023,363 @@ input.form-control.comparison-input {
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(0,0,0,0.5);
+        background: rgba(0, 0, 0, 0.7);
         z-index: 1000;
+        backdrop-filter: blur(4px);
     }
+    
     .overlay.active {
         display: block;
     }
+    
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+    }
+    
+    .card {
+        padding: 15px;
+    }
 }
+
+/* Mobil telefonlar (max-width: 768px) */
 @media (max-width: 768px) {
-    .stats-grid { grid-template-columns: 1fr; }
-    .filter-controls { grid-template-columns: 1fr; }
-    .page-header { flex-direction: column; align-items: flex-start; }
+    .admin-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .main-content {
+        padding: 15px 10px;
+        margin-top: 60px;
+    }
+    
+    .mobile-menu-toggle {
+        width: 40px;
+        height: 40px;
+        top: 10px;
+        left: 10px;
+    }
+    
+    .sidebar {
+        width: 260px;
+        left: -260px;
+    }
+    
+    /* Page header mobil uchun */
+    .page-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+        padding: 15px;
+    }
+    
+    .page-title {
+        font-size: 20px;
+        flex-wrap: wrap;
+    }
+    
+    .page-title i {
+        width: 24px !important;
+        height: 24px !important;
+    }
+    
+    /* Stats grid mobil uchun */
+    .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .stat-card {
+        padding: 15px;
+    }
+    
+    /* Filter controls mobil uchun */
+    .filter-controls {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    /* Cards mobil uchun */
+    .card {
+        padding: 12px;
+        margin-bottom: 15px;
+    }
+    
+    .card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .card-title {
+        font-size: 16px;
+    }
+    
+    /* Buttons mobil uchun */
+    .btn {
+        padding: 12px 16px;
+        font-size: 14px;
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+    
+    .btn-icon {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+    }
+    
+    /* Form controls mobil uchun */
+    .form-control {
+        padding: 12px;
+        font-size: 16px; /* iOS zoom oldini olish */
+        min-height: 44px;
+    }
+    
+    .form-group {
+        margin-bottom: 15px;
+    }
+    
+    /* Data table mobil uchun */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .data-table {
+        min-width: 600px;
+        font-size: 13px;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 10px 8px;
+        font-size: 12px;
+    }
+    
+    /* User cards mobil uchun */
+    .user-card {
+        padding: 12px;
+    }
+    
+    .user-card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    /* Settings grid mobil uchun */
+    .settings-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    /* Modal mobil uchun */
+    .modal-content {
+        width: 95%;
+        max-width: 95%;
+        margin: 10px auto;
+        max-height: 90vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 15px;
+    }
+    
+    .modal-header-enhanced {
+        padding: 15px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .modal-title {
+        font-size: 18px;
+    }
+    
+    /* Accordion mobil uchun */
+    .accordion-item {
+        margin-bottom: 10px;
+    }
+    
+    .accordion-header {
+        padding: 12px 15px;
+        font-size: 14px;
+    }
+    
+    /* Pagination mobil uchun */
+    .pagination-controls {
+        padding: 10px;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    
+    .pagination-btn {
+        min-width: 44px;
+        height: 44px;
+    }
+    
+    /* Daily status grid mobil uchun */
+    .daily-status-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .status-card {
+        padding: 12px;
+    }
+    
+    /* Charts container mobil uchun */
+    .charts-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .chart-wrapper {
+        height: 250px;
+    }
+    
+    /* KPI table mobil uchun */
+    .kpi-table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Location filter mobil uchun */
+    .locations-summary {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .summary-item {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+}
+
+/* Kichik mobil telefonlar (max-width: 480px) */
+@media (max-width: 480px) {
+    .main-content {
+        padding: 10px 8px;
+    }
+    
+    .mobile-menu-toggle {
+        width: 36px;
+        height: 36px;
+        top: 8px;
+        left: 8px;
+    }
+    
+    .sidebar {
+        width: 240px;
+        left: -240px;
+        padding: 20px 15px;
+    }
+    
+    .page-header {
+        padding: 12px;
+    }
+    
+    .page-title {
+        font-size: 18px;
+    }
+    
+    .card {
+        padding: 10px;
+    }
+    
+    .btn {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+    
+    .data-table {
+        font-size: 11px;
+        min-width: 500px;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 8px 6px;
+        font-size: 11px;
+    }
+    
+    .modal-content {
+        width: 98%;
+        max-width: 98%;
+        margin: 5px auto;
+        padding: 12px;
+        max-height: 98vh;
+    }
+    
+    .form-control {
+        padding: 12px;
+        font-size: 16px;
+        min-height: 44px;
+    }
+    
+    /* User form modal kichik ekranlar uchun */
+    #user-form-modal .modal-dialog {
+        width: 98%;
+        max-width: 98%;
+        margin: 5px auto;
+    }
+    
+    #user-form-modal .modal-body {
+        padding: 12px;
+    }
+    
+    #user-form-modal .modal-footer {
+        padding: 12px;
+        gap: 8px;
+    }
+    
+    #user-form-modal .modal-footer .btn {
+        min-width: 80px;
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+    
+    /* Select modals mobil uchun */
+    #locations-select-modal .modal-dialog,
+    #brands-select-modal .modal-dialog {
+        width: 98%;
+        max-width: 98%;
+        max-height: 95vh;
+    }
+    
+    #locations-select-modal .modal-content,
+    #brands-select-modal .modal-content {
+        max-height: 95vh;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    #locations-select-modal .modal-body,
+    #brands-select-modal .modal-body {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        flex: 1;
+        min-height: 0;
+    }
+    
+    #locations-select-modal .modal-footer,
+    #brands-select-modal .modal-footer {
+        flex-shrink: 0;
+    }
+    
+    .stats-grid {
+        gap: 10px;
+    }
+    
+    .stat-card {
+        padding: 12px;
+    }
 }
 
 /* --- Mobil menyu tugmasi --- */
@@ -12621,6 +13094,7 @@ tr:hover .quick-actions {
 .selected-items-display {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-auto-rows: min-content;
     gap: 10px;
     padding: 15px;
     min-height: 60px;
@@ -12630,6 +13104,7 @@ tr:hover .quick-actions {
     margin-bottom: 15px;
     position: relative;
     overflow: hidden;
+    align-items: stretch;
 }
 
 .selected-items-display::before {
@@ -12680,6 +13155,13 @@ tr:hover .quick-actions {
     box-shadow: 0 2px 8px rgba(79, 172, 254, 0.1);
     -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
+    min-height: 44px;
+    align-self: stretch;
+    box-sizing: border-box;
+}
+
+.selected-item-tag > * {
+    vertical-align: middle;
 }
 
 .selected-item-tag::before {
@@ -12711,11 +13193,17 @@ tr:hover .quick-actions {
     flex: 1;
     min-width: 0;
     overflow: hidden;
+    align-self: center;
+    line-height: 1;
 }
 
 .selected-item-tag .tag-icon {
     font-size: 16px;
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
 }
 
 .selected-item-tag .tag-text {
@@ -12723,6 +13211,9 @@ tr:hover .quick-actions {
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1.2;
 }
 
 .selected-item-tag .remove-btn {
@@ -12730,15 +13221,25 @@ tr:hover .quick-actions {
     border: 1px solid rgba(255, 107, 107, 0.3);
     color: #ff6b6b;
     cursor: pointer;
-    padding: 4px;
+    padding: 0;
     width: 22px;
     height: 22px;
+    min-width: 22px;
+    min-height: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 6px;
     transition: all 0.2s;
     flex-shrink: 0;
+    align-self: center;
+    line-height: 1;
+}
+
+.selected-item-tag .remove-btn svg {
+    width: 14px;
+    height: 14px;
+    display: block;
 }
 
 .selected-item-tag .remove-btn:hover {

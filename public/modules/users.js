@@ -783,11 +783,8 @@ function setupUserCardEventListeners() {
     
     // Agar allaqachon sozlangan bo'lsa, qayta sozlamaslik
     if (userCardEventListenersSetup) {
-        console.log('⚠️ [SETUP] Event listener allaqachon qo\'shilgan, qayta qo\'shilmaydi');
         return;
     }
-    
-    console.log('✅ [SETUP] Event listener qo\'shilmoqda...');
     
     // Event delegation - barcha user card action buttonlar uchun
     const clickHandler = async (e) => {
@@ -1956,22 +1953,14 @@ async function executeOpenUserModalForEdit(userId) {
         return;
     }
     
-    console.log(`🔍 [USERS] openUserModalForEdit chaqirildi - User ID: ${userId}`);
     const user = state.users.find(u => u.id == userId);
     if (!user || !DOM.userForm) {
-        console.warn(`⚠️ [USERS] Foydalanuvchi topilmadi yoki form mavjud emas`);
+        console.error(`⚠️ [USERS] Foydalanuvchi topilmadi yoki form mavjud emas`);
         return;
     }
     
     isUserModalOpen = true;
     currentEditingUserId = userId;
-    
-    console.log(`📝 [USERS] Foydalanuvchi ma'lumotlari:`, {
-        id: user.id,
-        username: user.username,
-        currentRole: user.role,
-        currentUserRole: state.currentUser?.role
-    });
     
     DOM.userForm.reset();
     DOM.editUserIdInput.value = user.id;
@@ -1987,15 +1976,6 @@ async function executeOpenUserModalForEdit(userId) {
     const isEditingSelf = parseInt(userId) === parseInt(state.currentUser?.id);
     const isSuperadminEditingSelf = isCurrentUserSuperadmin && isEditingSuperadmin && isEditingSelf;
     
-    console.log(`🔐 [USERS] Rol tekshiruvi:`, {
-        isCurrentUserSuperadmin,
-        isEditingSuperadmin,
-        isEditingSelf,
-        isSuperadminEditingSelf,
-        currentUserRole: state.currentUser?.role,
-        editingUserRole: user.role
-    });
-    
     if (!state.roles || !Array.isArray(state.roles)) {
         DOM.userRoleSelect.innerHTML = `<option value="${user.role || ''}" selected>${user.role || 'Rollar yuklanmoqda...'}</option>`;
     } else {
@@ -2006,24 +1986,19 @@ async function executeOpenUserModalForEdit(userId) {
         
         if (isEditingSuperadmin) {
             // Superadminni tahrirlashda - faqat joriy rolini ko'rsatish, o'zgartirish mumkin emas
-            console.log(`🚫 [USERS] Superadminni tahrirlash - rol o'zgartirish mumkin emas`);
             filteredRoles = state.roles.filter(r => r.role_name === user.role);
         } else if (isCurrentUserSuperadmin) {
             // Superadmin tomonidan yaratilgan barcha rollarga o'zgartirish imkoniyati
             // Superadmin va super_admin dan tashqari barcha rollarni ko'rsatish
-            console.log(`✅ [USERS] Superadmin tomonidan - barcha rollarga o'zgartirish imkoniyati`);
             filteredRoles = state.roles.filter(r => 
                 r.role_name !== 'superadmin' && r.role_name !== 'super_admin'
             );
         } else {
             // Boshqa foydalanuvchilar uchun - admin va superadmin olib tashlash
-            console.log(`🔒 [USERS] Oddiy foydalanuvchi - admin va superadmin olib tashlangan`);
             filteredRoles = state.roles.filter(r => 
                 r.role_name !== 'admin' && r.role_name !== 'superadmin' && r.role_name !== 'super_admin'
             );
         }
-        
-        console.log(`📋 [USERS] Ko'rsatiladigan rollar:`, filteredRoles.map(r => r.role_name));
         
         DOM.userRoleSelect.innerHTML = filteredRoles
             .map(r => 
@@ -2033,7 +2008,6 @@ async function executeOpenUserModalForEdit(userId) {
         // Agar superadminni tahrirlashda bo'lsa, rol select'ni disabled qilish
         if (isEditingSuperadmin) {
             DOM.userRoleSelect.disabled = true;
-            console.log(`🔒 [USERS] Rol select disabled qilindi (superadmin)`);
         } else {
             DOM.userRoleSelect.disabled = false;
         }
@@ -2041,7 +2015,6 @@ async function executeOpenUserModalForEdit(userId) {
     
     // Superadmin o'zini tahrirlayotgan bo'lsa, faqat login, to'liq ism, parol o'zgartirish imkoniyati
     if (isSuperadminEditingSelf) {
-        console.log(`🔧 [USERS] Superadmin o'zini tahrirlayapti - login, to'liq ism, parol va qurulma soni o'zgartirish mumkin`);
         
         // Rol select'ni yashirish
         if (DOM.userRoleSelect && DOM.userRoleSelect.parentElement) {
@@ -2308,26 +2281,82 @@ async function openLocationsSelectModal() {
             });
         }
         
+        // Foydalanuvchiga biriktirilgan filiallarni tekshirish (tahrirlash holati uchun)
+        let userAttachedLocations = [];
+        const userIdInput = document.getElementById('edit-user-id');
+        if (userIdInput && userIdInput.value) {
+            const userId = parseInt(userIdInput.value);
+            try {
+                // Avval state'dan foydalanuvchini topish
+                let userData = null;
+                if (state.users && Array.isArray(state.users)) {
+                    userData = state.users.find(u => u.id === userId);
+                }
+                
+                // Agar state'da topilmasa, API'dan olish
+                if (!userData) {
+                    const userRes = await safeFetch(`/api/users/${userId}`);
+                    if (userRes && userRes.ok) {
+                        const contentType = userRes.headers.get('content-type');
+                        if (contentType && contentType.includes('application/json')) {
+                            userData = await userRes.json();
+                        }
+                    }
+                }
+                
+                if (userData && userData.locations && Array.isArray(userData.locations) && userData.locations.length > 0) {
+                    userAttachedLocations = userData.locations;
+                }
+            } catch (error) {
+                console.error('User data fetch error:', error);
+                // Xatolikni e'tiborsiz qoldirish, davom etish
+            }
+        }
+        
         let locations = [];
         if (selectedBrandIds.length > 0 && selectedLocations.length === 0) {
             // Brend tanlangan, filial tanlanmagan - faqat tanlangan brendlardagi filiallarni olish
-            console.log(`🔍 [USERS] Brend tanlangan (${selectedBrandIds.length} ta), faqat shu brendlardagi filiallarni yuklayapman...`);
             const allLocationsSet = new Set();
             for (const brandId of selectedBrandIds) {
-                const res = await safeFetch(`/api/brands/${brandId}/locations`);
-                if (res && res.ok) {
-                    const brandLocations = await res.json();
-                    brandLocations.forEach(loc => allLocationsSet.add(loc));
+                try {
+                    const res = await safeFetch(`/api/brands/${brandId}/locations`);
+                    if (res && res.ok) {
+                        const contentType = res.headers.get('content-type');
+                        if (contentType && contentType.includes('application/json')) {
+                            const brandLocations = await res.json();
+                            if (Array.isArray(brandLocations)) {
+                                brandLocations.forEach(loc => allLocationsSet.add(loc));
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Brand ${brandId} locations fetch error:`, error);
+                    // Xatolikni e'tiborsiz qoldirish, davom etish
                 }
             }
             locations = Array.from(allLocationsSet);
-            console.log(`✅ [USERS] ${locations.length} ta filial topildi (tanlangan brendlarda)`);
+            
+            // Tahrirlash holatida barcha mavjud filiallarni ko'rsatish (biriktirilgan filiallar allaqachon tanlangan bo'ladi)
+            // Faqat yangi foydalanuvchi yaratishda biriktirilgan filiallarni cheklov sifatida ishlatish
+            // Shuning uchun bu yerda filter qilmaymiz - barcha brenddagi filiallarni ko'rsatamiz
         } else {
-            // Barcha filiallarni olish
+            // Barcha filiallarni olish - tahrirlash holatida ham barcha filiallarni ko'rsatish
             const settingsRes = await safeFetch('/api/settings');
-            if (!settingsRes || !settingsRes.ok) throw new Error('Filiallarni yuklab bo\'lmadi');
-            const settings = await settingsRes.json();
-            locations = settings.app_settings?.locations || [];
+            if (!settingsRes || !settingsRes.ok) {
+                throw new Error('Filiallarni yuklab bo\'lmadi');
+            }
+            try {
+                const contentType = settingsRes.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const settings = await settingsRes.json();
+                    locations = settings.app_settings?.locations || [];
+                } else {
+                    throw new Error('Filiallarni yuklab bo\'lmadi - noto\'g\'ri javob formati');
+                }
+            } catch (parseError) {
+                console.error('Settings parse error:', parseError);
+                throw new Error('Filiallarni yuklab bo\'lmadi - server xatolik');
+            }
         }
         
         // "Barchasini belgilash" tugmasi
@@ -2430,7 +2459,14 @@ async function openLocationsSelectModal() {
         
         modal.classList.remove('hidden');
     } catch (error) {
-        showToast(error.message, 'error');
+        console.error('❌ [USERS] openLocationsSelectModal xatolik:', error);
+        const errorMessage = error.message || 'Filiallarni yuklashda xatolik yuz berdi';
+        showToast(errorMessage, true);
+        
+        // Modal'ni yopish
+        if (modal) {
+            modal.classList.add('hidden');
+        }
     }
 }
 
@@ -2491,12 +2527,24 @@ async function openBrandsSelectModal() {
                 try {
                     const res = await safeFetch(`/api/brands/by-location/${encodeURIComponent(location)}`);
                     if (res && res.ok) {
-                        const locationBrands = await res.json();
-                        locationBrands.forEach(brand => {
-                            if (!allBrandsMap.has(brand.id)) {
-                                allBrandsMap.set(brand.id, brand);
+                        try {
+                            const contentType = res.headers.get('content-type');
+                            if (contentType && contentType.includes('application/json')) {
+                                const locationBrands = await res.json();
+                                if (Array.isArray(locationBrands)) {
+                                    locationBrands.forEach(brand => {
+                                        if (!allBrandsMap.has(brand.id)) {
+                                            allBrandsMap.set(brand.id, brand);
+                                        }
+                                    });
+                                }
+                            } else {
+                                hasError = true;
                             }
-                        });
+                        } catch (parseError) {
+                            console.error(`Parse error for location ${location}:`, parseError);
+                            hasError = true;
+                        }
                     } else {
                         hasError = true;
                     }
@@ -2517,7 +2565,14 @@ async function openBrandsSelectModal() {
                 } else {
                     const allBrandsRes = await safeFetch('/api/brands');
                     if (allBrandsRes && allBrandsRes.ok) {
-                        brands = await allBrandsRes.json();
+                        try {
+                            const contentType = allBrandsRes.headers.get('content-type');
+                            if (contentType && contentType.includes('application/json')) {
+                                brands = await allBrandsRes.json();
+                            }
+                        } catch (parseError) {
+                            console.error('Brends parse error:', parseError);
+                        }
                     }
                 }
             }
@@ -2529,9 +2584,29 @@ async function openBrandsSelectModal() {
                 // Agar for-user endpoint ishlamasa, fallback sifatida barcha brendlarni olish
                 const fallbackRes = await safeFetch('/api/brands');
                 if (!fallbackRes || !fallbackRes.ok) throw new Error('Brendlarni yuklab bo\'lmadi');
-                brands = await fallbackRes.json();
+                try {
+                    const contentType = fallbackRes.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        brands = await fallbackRes.json();
+                    } else {
+                        throw new Error('Brendlarni yuklab bo\'lmadi - noto\'g\'ri javob formati');
+                    }
+                } catch (parseError) {
+                    console.error('Brends parse error:', parseError);
+                    throw new Error('Brendlarni yuklab bo\'lmadi - server xatolik');
+                }
             } else {
-                brands = await res.json();
+                try {
+                    const contentType = res.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        brands = await res.json();
+                    } else {
+                        throw new Error('Brendlarni yuklab bo\'lmadi - noto\'g\'ri javob formati');
+                    }
+                } catch (parseError) {
+                    console.error('Brends parse error:', parseError);
+                    throw new Error('Brendlarni yuklab bo\'lmadi - server xatolik');
+                }
             }
         }
         
@@ -3144,29 +3219,43 @@ export async function handleUserActions(e) {
             console.log('❌ [HANDLE] Bekor qilindi, flag qaytarildi');
         }
     } else if (button.classList.contains('manage-sessions-btn')) {
-        console.log('🔐 [HANDLE] manage-sessions-btn bosildi');
-        console.log('🔐 [HANDLE] Modal holati:', DOM.sessionsModal ? (DOM.sessionsModal.classList.contains('hidden') ? 'yopiq' : 'ochiq') : 'topilmadi');
-        console.log('🔐 [HANDLE] isOpeningSessionsModal:', isOpeningSessionsModal);
-        
         // Agar modal allaqachon ochilgan bo'lsa, qayta ochmaslik
         if (DOM.sessionsModal && !DOM.sessionsModal.classList.contains('hidden')) {
-            console.log('⚠️ [HANDLE] Modal allaqachon ochiq, qayta ochilmaydi');
             isHandlingUserAction = false;
             return;
+        }
+        
+        // Agar flag stuck bo'lsa va modal yopiq bo'lsa, flag'ni reset qilish
+        if (isOpeningSessionsModal && DOM.sessionsModal && DOM.sessionsModal.classList.contains('hidden')) {
+            isOpeningSessionsModal = false;
+            if (isOpeningSessionsModalTimeout) {
+                clearTimeout(isOpeningSessionsModalTimeout);
+                isOpeningSessionsModalTimeout = null;
+            }
         }
         
         if (isOpeningSessionsModal) {
-            console.log('⚠️ [HANDLE] Modal ochilmoqda, qayta ochilmaydi');
             isHandlingUserAction = false;
             return;
         }
         
-        console.log('🚀 [HANDLE] openSessionsModal chaqirilmoqda...');
         const username = button.dataset.username;
-        await openSessionsModal(userId, username);
+        try {
+            await openSessionsModal(userId, username);
+        } catch (error) {
+            console.error('❌ [HANDLE] openSessionsModal xatolik:', error);
+            // Xatolik bo'lsa ham flag'larni reset qilish
+            isOpeningSessionsModal = false;
+            isHandlingUserAction = false;
+            if (isOpeningSessionsModalTimeout) {
+                clearTimeout(isOpeningSessionsModalTimeout);
+                isOpeningSessionsModalTimeout = null;
+            }
+            showToast('Sessiyalar modalini ochishda xatolik yuz berdi', true);
+            return;
+        }
         // Flag'ni qaytarish
         isHandlingUserAction = false;
-        console.log('✅ [HANDLE] isHandlingUserAction flag qaytarildi');
     } else if (button.classList.contains('change-password-btn')) {
         openCredentialsModal(userId, 'password');
         isHandlingUserAction = false;
@@ -3455,43 +3544,62 @@ async function handleDeleteUser(userId, username) {
 
 // Modal ochilish flag'i - ikki marta ochilishni oldini olish
 let isOpeningSessionsModal = false;
+let isOpeningSessionsModalTimeout = null;
 
 async function openSessionsModal(userId, username) {
-    console.log('🚪 [MODAL] openSessionsModal chaqirildi');
-    console.log('🚪 [MODAL] User ID:', userId, 'Username:', username);
-    console.log('🚪 [MODAL] isOpeningSessionsModal:', isOpeningSessionsModal);
-    
     if (!DOM.sessionsModal || !DOM.sessionsModalTitle || !DOM.sessionsListContainer) {
         console.error('❌ [MODAL] Sessions modal elementlari topilmadi');
         isHandlingUserAction = false;
         isOpeningSessionsModal = false;
+        if (isOpeningSessionsModalTimeout) {
+            clearTimeout(isOpeningSessionsModalTimeout);
+            isOpeningSessionsModalTimeout = null;
+        }
         return;
     }
     
     const isModalHidden = DOM.sessionsModal.classList.contains('hidden');
-    console.log('🚪 [MODAL] Modal holati:', isModalHidden ? 'yopiq' : 'ochiq');
     
     // Agar modal allaqachon ochilgan bo'lsa va yangilanish kerak bo'lsa, yangilash
     if (!isModalHidden) {
         if (isOpeningSessionsModal) {
-            console.log('⚠️ [MODAL] Modal allaqachon ochilmoqda, qayta ochilmaydi');
+            // Flag stuck bo'lsa, reset qilish
+            isOpeningSessionsModal = false;
             isHandlingUserAction = false;
+            if (isOpeningSessionsModalTimeout) {
+                clearTimeout(isOpeningSessionsModalTimeout);
+                isOpeningSessionsModalTimeout = null;
+            }
             return;
         }
-        // Modal ochiq, lekin yangilash kerak - flag'ni o'rnatish va davom etish
-        console.log('🔄 [MODAL] Modal ochiq, yangilanmoqda...');
     }
     
     // Agar modal yopiq bo'lsa va ochilmoqda bo'lsa, qayta ochmaslik
+    // Lekin agar flag stuck bo'lsa (modal yopiq lekin flag true), reset qilish
     if (isModalHidden && isOpeningSessionsModal) {
-        console.log('⚠️ [MODAL] Modal ochilmoqda, qayta ochilmaydi');
+        isOpeningSessionsModal = false;
         isHandlingUserAction = false;
-        return;
+        if (isOpeningSessionsModalTimeout) {
+            clearTimeout(isOpeningSessionsModalTimeout);
+            isOpeningSessionsModalTimeout = null;
+        }
     }
     
     // Flag'ni o'rnatish
     isOpeningSessionsModal = true;
-    console.log('✅ [MODAL] isOpeningSessionsModal = true o\'rnatildi');
+    
+    // Safety timeout - agar 5 soniyadan keyin flag hali ham true bo'lsa, reset qilish
+    if (isOpeningSessionsModalTimeout) {
+        clearTimeout(isOpeningSessionsModalTimeout);
+    }
+    isOpeningSessionsModalTimeout = setTimeout(() => {
+        if (isOpeningSessionsModal) {
+            console.error('⚠️ [MODAL] Safety timeout: Flag 5 soniyadan keyin hali ham true, reset qilinmoqda');
+            isOpeningSessionsModal = false;
+            isHandlingUserAction = false;
+        }
+        isOpeningSessionsModalTimeout = null;
+    }, 5000);
     
     // Modal header va subtitle yangilash
     DOM.sessionsModalTitle.textContent = `${username}ning Sessiyalari`;
@@ -3626,13 +3734,23 @@ async function openSessionsModal(userId, username) {
         if (window.feather) {
             window.feather.replace();
         }
+        // Xatolik bo'lsa ham flag'larni reset qilish
+        isOpeningSessionsModal = false;
+        isHandlingUserAction = false;
+        if (isOpeningSessionsModalTimeout) {
+            clearTimeout(isOpeningSessionsModalTimeout);
+            isOpeningSessionsModalTimeout = null;
+        }
     }
     
     // Flag'ni qaytarish
-    console.log('✅ [MODAL] Modal ochildi, flag\'lar qaytarilmoqda...');
     isOpeningSessionsModal = false;
     isHandlingUserAction = false;
-    console.log('✅ [MODAL] Flag\'lar qaytarildi. isOpeningSessionsModal:', isOpeningSessionsModal, 'isHandlingUserAction:', isHandlingUserAction);
+    // Safety timeout'ni tozalash
+    if (isOpeningSessionsModalTimeout) {
+        clearTimeout(isOpeningSessionsModalTimeout);
+        isOpeningSessionsModalTimeout = null;
+    }
 }
 
 // Modal yopish funksiyasi
