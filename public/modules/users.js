@@ -2319,13 +2319,13 @@ async function openLocationsSelectModal() {
             const allLocationsSet = new Set();
             for (const brandId of selectedBrandIds) {
                 try {
-                    const res = await safeFetch(`/api/brands/${brandId}/locations`);
-                    if (res && res.ok) {
+                const res = await safeFetch(`/api/brands/${brandId}/locations`);
+                if (res && res.ok) {
                         const contentType = res.headers.get('content-type');
                         if (contentType && contentType.includes('application/json')) {
-                            const brandLocations = await res.json();
+                    const brandLocations = await res.json();
                             if (Array.isArray(brandLocations)) {
-                                brandLocations.forEach(loc => allLocationsSet.add(loc));
+                    brandLocations.forEach(loc => allLocationsSet.add(loc));
                             }
                         }
                     }
@@ -2348,8 +2348,8 @@ async function openLocationsSelectModal() {
             try {
                 const contentType = settingsRes.headers.get('content-type');
                 if (contentType && contentType.includes('application/json')) {
-                    const settings = await settingsRes.json();
-                    locations = settings.app_settings?.locations || [];
+            const settings = await settingsRes.json();
+            locations = settings.app_settings?.locations || [];
                 } else {
                     throw new Error('Filiallarni yuklab bo\'lmadi - noto\'g\'ri javob formati');
                 }
@@ -2530,13 +2530,13 @@ async function openBrandsSelectModal() {
                         try {
                             const contentType = res.headers.get('content-type');
                             if (contentType && contentType.includes('application/json')) {
-                                const locationBrands = await res.json();
+                        const locationBrands = await res.json();
                                 if (Array.isArray(locationBrands)) {
-                                    locationBrands.forEach(brand => {
-                                        if (!allBrandsMap.has(brand.id)) {
-                                            allBrandsMap.set(brand.id, brand);
-                                        }
-                                    });
+                        locationBrands.forEach(brand => {
+                            if (!allBrandsMap.has(brand.id)) {
+                                allBrandsMap.set(brand.id, brand);
+                            }
+                        });
                                 }
                             } else {
                                 hasError = true;
@@ -2568,7 +2568,7 @@ async function openBrandsSelectModal() {
                         try {
                             const contentType = allBrandsRes.headers.get('content-type');
                             if (contentType && contentType.includes('application/json')) {
-                                brands = await allBrandsRes.json();
+                        brands = await allBrandsRes.json();
                             }
                         } catch (parseError) {
                             console.error('Brends parse error:', parseError);
@@ -2587,8 +2587,8 @@ async function openBrandsSelectModal() {
                 try {
                     const contentType = fallbackRes.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
-                        brands = await fallbackRes.json();
-                    } else {
+                brands = await fallbackRes.json();
+            } else {
                         throw new Error('Brendlarni yuklab bo\'lmadi - noto\'g\'ri javob formati');
                     }
                 } catch (parseError) {
@@ -2599,7 +2599,7 @@ async function openBrandsSelectModal() {
                 try {
                     const contentType = res.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
-                        brands = await res.json();
+                brands = await res.json();
                     } else {
                         throw new Error('Brendlarni yuklab bo\'lmadi - noto\'g\'ri javob formati');
                     }
@@ -3241,7 +3241,7 @@ export async function handleUserActions(e) {
         
         const username = button.dataset.username;
         try {
-            await openSessionsModal(userId, username);
+        await openSessionsModal(userId, username);
         } catch (error) {
             console.error('❌ [HANDLE] openSessionsModal xatolik:', error);
             // Xatolik bo'lsa ham flag'larni reset qilish
