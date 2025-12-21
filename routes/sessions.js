@@ -185,14 +185,12 @@ router.delete('/:sid', isAuthenticated, async (req, res) => {
         const isStillOnline = remainingSessions.length > 0;
         
         if (global.broadcastWebSocket) {
-            log.debug(`📡 [SESSIONS] Sessiya tugatildi, online status yangilanmoqda...`);
             const user = await db('users').where('id', sessionOwnerId).first();
             global.broadcastWebSocket('user_status_changed', {
                 userId: sessionOwnerId,
                 username: user?.username || 'Unknown',
                 isOnline: isStillOnline
             });
-            log.debug(`✅ [SESSIONS] WebSocket yuborildi: user_status_changed (${isStillOnline ? 'online' : 'offline'})`);
         }
 
         res.json({ message: "Sessiya muvaffaqiyatli tugatildi." });

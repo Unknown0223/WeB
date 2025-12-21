@@ -10,8 +10,6 @@ const log = createLogger('SESSIONMANAGER');
  */
 async function refreshUserSessions(userId = null) {
     try {
-        log.debug(`Sessiyalarni yangilash boshlandi. Foydalanuvchi ID: ${userId || 'Barcha'}`);
-
         // Barcha aktiv sessiyalarni bazadan olamiz
         const sessions = await db('sessions').select('sid', 'sess');
         
@@ -20,7 +18,7 @@ async function refreshUserSessions(userId = null) {
             try {
                 sessionData = JSON.parse(session.sess);
             } catch (e) {
-                log.warn(`Sessiya (sid: ${session.sid}) ma'lumotini parse qilib bo'lmadi.`);
+                log.error(`Sessiya (sid: ${session.sid}) ma'lumotini parse qilib bo'lmadi.`);
                 continue;
             }
 
@@ -38,7 +36,6 @@ async function refreshUserSessions(userId = null) {
                 if (!user) {
                     // Agar foydalanuvchi o'chirilgan bo'lsa, uning sessiyasini tugatamiz
                     await db('sessions').where({ sid: session.sid }).del();
-                    log.debug(`O'chirilgan foydalanuvchi (ID: ${sessionUserId}) sessiyasi (sid: ${session.sid}) tugatildi.`);
                     continue;
                 }
 
@@ -83,8 +80,6 @@ async function refreshUserSessions(userId = null) {
                 await db('sessions')
                     .where({ sid: session.sid })
                     .update({ sess: JSON.stringify(sessionData) });
-                    
-                log.debug(`Foydalanuvchi (ID: ${sessionUserId}) sessiyasi (sid: ${session.sid}) muvaffaqiyatli yangilandi.`);
             }
         }
     } catch (error) {
@@ -98,11 +93,9 @@ async function refreshUserSessions(userId = null) {
  */
 async function refreshSessionsByRole(roleName) {
     try {
-        log.debug(`"${roleName}" rolidagi foydalanuvchilar uchun sessiyalar yangilanmoqda...`);
         // Shu roldagi barcha foydalanuvchilarni topamiz
         const usersInRole = await db('users').where({ role: roleName }).select('id');
         if (usersInRole.length === 0) {
-            log.debug(`"${roleName}" rolida aktiv foydalanuvchilar topilmadi.`);
             return;
         }
 

@@ -641,6 +641,7 @@ router.post('/logout', isAuthenticated, async (req, res) => {
     
     req.session.destroy(err => {
         if (err) {
+            log.error('Session destroy xatoligi:', err);
             return res.status(500).json({ message: "Tizimdan chiqishda xatolik." });
         }
         res.clearCookie('connect.sid');
