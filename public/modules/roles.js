@@ -4,7 +4,10 @@
 import { state } from './state.js';
 import { DOM } from './dom.js';
 import { safeFetch } from './api.js';
-import { showToast, showConfirmDialog } from './utils.js';
+import { showToast, showConfirmDialog, createLogger } from './utils.js';
+
+// Logger yaratish
+const log = createLogger('ROLES');
 
 const permissionExclusionGroups = {
     view: ['reports:view_all', 'reports:view_assigned', 'reports:view_own'],
@@ -56,7 +59,7 @@ window.toggleRoleCategory = function(header) {
 };
 
 export function renderRoles(autoSelectRole = null) {
-    console.log('🔄 [ROLES] renderRoles chaqirildi:', { 
+    log.debug('renderRoles chaqirildi:', { 
         autoSelectRole, 
         currentEditingRole: state.currentEditingRole,
         rolesCount: state.roles?.length || 0,
@@ -64,19 +67,19 @@ export function renderRoles(autoSelectRole = null) {
     });
     
     if (!state.roles || !state.allPermissions) {
-        console.warn('⚠️ [ROLES] renderRoles: state.roles yoki state.allPermissions mavjud emas');
+        log.warn('renderRoles: state.roles yoki state.allPermissions mavjud emas');
         return;
     }
     
     // Joriy tanlangan rolni saqlash
     const currentSelectedRole = autoSelectRole || state.currentEditingRole;
-    console.log('📌 [ROLES] Tanlash uchun rol:', currentSelectedRole);
+    log.debug('Tanlash uchun rol:', currentSelectedRole);
     
     // Superadmin'ni ro'yxatdan olib tashlash (super_admin va superadmin)
     const filteredRoles = state.roles.filter(role => 
         role.role_name !== 'super_admin' && role.role_name !== 'superadmin'
     );
-    console.log('📋 [ROLES] Filtrlangan rollar soni:', filteredRoles.length);
+    log.debug('Filtrlangan rollar soni:', filteredRoles.length);
     
     DOM.rolesList.innerHTML = filteredRoles.map(role => 
         `<li data-role="${role.role_name}" class="role-list-item">
@@ -175,7 +178,7 @@ export function renderRoles(autoSelectRole = null) {
         }
         
         const roleElement = DOM.rolesList.querySelector(`[data-role="${roleToSelect.role_name}"]`);
-        console.log('🎯 [ROLES] Tanlash uchun rol elementi:', { 
+        log.debug('Tanlash uchun rol elementi:', { 
             roleName: roleToSelect.role_name, 
             elementFound: !!roleElement 
         });
@@ -184,17 +187,17 @@ export function renderRoles(autoSelectRole = null) {
             // requestAnimationFrame va setTimeout kombinatsiyasi - DOM to'liq tayyor bo'lishi uchun
             requestAnimationFrame(() => {
                 setTimeout(() => {
-                    console.log('✅ [ROLES] Rol tanlanmoqda:', roleToSelect.role_name);
+                    log.debug('Rol tanlanmoqda:', roleToSelect.role_name);
                     const element = DOM.rolesList.querySelector(`[data-role="${roleToSelect.role_name}"]`);
                     if (element) {
                         handleRoleSelection({ target: element });
                     } else {
-                        console.error('❌ [ROLES] Rol elementi topilmadi tanlash vaqtida:', roleToSelect.role_name);
+                        log.error('Rol elementi topilmadi tanlash vaqtida:', roleToSelect.role_name);
                     }
                 }, 150); // 100ms dan 150ms ga oshirildi
             });
         } else {
-            console.error('❌ [ROLES] Rol elementi topilmadi:', roleToSelect.role_name);
+            log.error('Rol elementi topilmadi:', roleToSelect.role_name);
         }
     } else {
         // Agar hech qanday rol bo'lmasa (faqat superadmin bo'lsa), hech narsa ko'rsatmaslik
@@ -218,7 +221,7 @@ function setupRoleListEventListeners() {
 // Edit role function
 window.editRole = async function(roleName) {
     if (!state.roles || !Array.isArray(state.roles)) {
-        console.warn('[ROLES] state.roles mavjud emas yoki array emas');
+        log.warn('state.roles mavjud emas yoki array emas');
         showToast('Rollar yuklanmagan. Iltimos, sahifani yangilang.', 'error');
         return;
     }
@@ -380,19 +383,19 @@ window.deleteRole = async function(roleName) {
 };
 
 export function handleRoleSelection(e) {
-    console.log('🎯 [ROLES] handleRoleSelection chaqirildi:', { 
+    log.debug('handleRoleSelection chaqirildi:', { 
         target: e.target, 
         closest: e.target?.closest('li') 
     });
     
     const li = e.target.closest('li');
     if (!li) {
-        console.error('❌ [ROLES] handleRoleSelection: li elementi topilmadi');
+        log.error('handleRoleSelection: li elementi topilmadi');
         return;
     }
     
     const roleName = li.dataset.role;
-    console.log('✅ [ROLES] Rol tanlandi:', roleName);
+    log.success('Rol tanlandi:', roleName);
     state.currentEditingRole = roleName;
     
     DOM.rolesList.querySelectorAll('li').forEach(item => item.classList.remove('active'));
@@ -403,7 +406,7 @@ export function handleRoleSelection(e) {
     
     // state.roles mavjudligini tekshirish
     if (!state.roles || !Array.isArray(state.roles)) {
-        console.warn('[ROLES] state.roles mavjud emas yoki array emas, roleData olinmadi');
+        log.warn('state.roles mavjud emas yoki array emas, roleData olinmadi');
         const rolePermissions = [];
         const roleData = null;
         
@@ -1218,7 +1221,7 @@ export async function confirmImportSelectedTables() {
         showProgress('✅ Import muvaffaqiyatli!', 100);
         
         const result = await response.json();
-        console.log('✅ [ROLES] Import muvaffaqiyatli:', result);
+        log.success('Import muvaffaqiyatli:', result);
         
         // Import qilinganda rollar yangilanishi kerak
         // Avval rollarni yangilash, keyin sahifani reload qilish

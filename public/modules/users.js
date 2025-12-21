@@ -4,7 +4,10 @@
 import { state } from './state.js';
 import { DOM } from './dom.js';
 import { safeFetch, fetchUsers, fetchPendingUsers } from './api.js';
-import { showToast, parseUserAgent, showConfirmDialog, hasPermission } from './utils.js';
+import { showToast, parseUserAgent, showConfirmDialog, hasPermission, createLogger } from './utils.js';
+
+// Logger yaratish
+const log = createLogger('USERS');
 
 // Selected users for bulk actions
 let selectedUsers = new Set();
@@ -112,7 +115,7 @@ async function refreshUsersList() {
             renderModernUsers(true); // Immediate render after data fetch
         }
     } catch (error) {
-        console.error('❌ [USERS] Ro\'yxatni yangilashda xatolik:', error);
+        log.error('Ro\'yxatni yangilashda xatolik:', error);
         showToast('Ro\'yxatni yangilashda xatolik', 'error');
     }
 }
@@ -783,11 +786,11 @@ function setupUserCardEventListeners() {
     
     // Agar allaqachon sozlangan bo'lsa, qayta sozlamaslik
     if (userCardEventListenersSetup) {
-        console.log('⚠️ [SETUP] Event listener allaqachon qo\'shilgan, qayta qo\'shilmaydi');
+        log.warn('Event listener allaqachon qo\'shilgan, qayta qo\'shilmaydi');
         return;
     }
     
-    console.log('✅ [SETUP] Event listener qo\'shilmoqda...');
+    log.debug('Event listener qo\'shilmoqda...');
     
     // Event delegation - barcha user card action buttonlar uchun
     const clickHandler = async (e) => {
@@ -2015,17 +2018,17 @@ async function executeOpenUserModalForEdit(userId) {
         return;
     }
     
-    console.log(`🔍 [USERS] openUserModalForEdit chaqirildi - User ID: ${userId}`);
+    log.debug('openUserModalForEdit chaqirildi - User ID:', userId);
     const user = state.users.find(u => u.id == userId);
     if (!user || !DOM.userForm) {
-        console.warn(`⚠️ [USERS] Foydalanuvchi topilmadi yoki form mavjud emas`);
+        log.warn('Foydalanuvchi topilmadi yoki form mavjud emas');
         return;
     }
     
     isUserModalOpen = true;
     currentEditingUserId = userId;
     
-    console.log(`📝 [USERS] Foydalanuvchi ma'lumotlari:`, {
+    log.debug('Foydalanuvchi ma\'lumotlari:', {
         id: user.id,
         username: user.username,
         currentRole: user.role,
@@ -2334,12 +2337,12 @@ window.removeBrand = function(brandId) {
 
 // Filiallar va brendlar selector'larini sozlash
 function setupLocationBrandSelectors() {
-    console.log('🔧 [SETUP] setupLocationBrandSelectors chaqirildi');
+    log.debug('setupLocationBrandSelectors chaqirildi');
     
     const selectLocationsBtn = document.getElementById('select-locations-btn');
     const selectBrandsBtn = document.getElementById('select-brands-btn');
     
-    console.log('🔍 [SETUP] Button elementlari:', {
+    log.debug('Button elementlari:', {
         selectLocationsBtn: !!selectLocationsBtn,
         selectBrandsBtn: !!selectBrandsBtn,
         selectLocationsBtnId: selectLocationsBtn?.id,
@@ -2347,7 +2350,7 @@ function setupLocationBrandSelectors() {
     });
     
     if (selectLocationsBtn) {
-        console.log('✅ [SETUP] Filiallar button topildi, event listener qo\'shilmoqda...');
+        log.debug('Filiallar button topildi, event listener qo\'shilmoqda...');
         
         // Eski event listener'larni olib tashlash - addEventListener ishlatish
         const oldBtn = selectLocationsBtn;
@@ -2358,9 +2361,9 @@ function setupLocationBrandSelectors() {
         const handleLocationsClick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('🖱️ [SETUP] Filiallar button bosildi');
+            log.debug('Filiallar button bosildi');
             if (window.openLocationsSelectModal) {
-                console.log('✅ [SETUP] Global openLocationsSelectModal funksiyasi mavjud');
+                log.debug('Global openLocationsSelectModal funksiyasi mavjud');
                 window.openLocationsSelectModal();
             } else {
                 console.log('⚠️ [SETUP] Global funksiya yo\'q, lokal funksiyani chaqiryapman');
@@ -2374,9 +2377,9 @@ function setupLocationBrandSelectors() {
         // Button'ga handler reference'ni saqlash (keyinroq olib tashlash uchun)
         newBtn._locationsHandler = handleLocationsClick;
         
-        console.log('✅ [SETUP] Filiallar button event listener qo\'shildi');
+        log.debug('Filiallar button event listener qo\'shildi');
     } else {
-        console.error('❌ [SETUP] Filiallar button topilmadi!');
+        log.error('Filiallar button topilmadi!');
     }
     
     if (selectBrandsBtn) {
@@ -4918,7 +4921,7 @@ window.deleteUserQuick = async function(userId) {
 
 // Initialize modern users page
 export function initModernUsersPage() {
-    console.log('🔄 [USERS] initModernUsersPage chaqirildi');
+    log.debug('initModernUsersPage chaqirildi');
     
     // Setup filters (this also sets up view toggle buttons)
     setupUsersFilters();
@@ -4927,7 +4930,7 @@ export function initModernUsersPage() {
     const filtersCard = document.querySelector('.users-filters-card');
     const toggleFiltersBtn = document.getElementById('toggle-users-filters-btn');
     const filtersHeader = document.querySelector('.users-filters-header');
-    console.log('🔍 [USERS] Filters card topildi:', !!filtersCard, 'Toggle btn topildi:', !!toggleFiltersBtn, 'Header topildi:', !!filtersHeader);
+    log.debug('Filters card topildi:', !!filtersCard, 'Toggle btn topildi:', !!toggleFiltersBtn, 'Header topildi:', !!filtersHeader);
 
     // Global funksiya (header / ikonka bosilganda ishlashi uchun)
     window.toggleUsersFilters = function () {

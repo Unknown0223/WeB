@@ -9,6 +9,22 @@ Write-Host ""
 # Joriy papkaga o'tish
 Set-Location $PSScriptRoot
 
+# Avval eski server jarayonlarini to'xtatish
+Write-Host "[INFO] Eski server jarayonlarini tekshirish..." -ForegroundColor Cyan
+$processes = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique
+
+if ($processes) {
+    foreach ($pid in $processes) {
+        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -eq "node") {
+            Write-Host "[INFO] Eski server jarayoni to'xtatilmoqda: PID $pid" -ForegroundColor Yellow
+            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Start-Sleep -Seconds 1
+    Write-Host "[OK] Eski jarayonlar to'xtatildi" -ForegroundColor Green
+}
+
 # .env faylini tekshirish
 if (-not (Test-Path .env)) {
     Write-Host "[WARNING] .env fayli topilmadi. env.example.txt dan yaratilmoqda..." -ForegroundColor Yellow

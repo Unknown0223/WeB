@@ -407,3 +407,78 @@ export function replaceFeatherIcons(root = document) {
         }
     }
 }
+
+/* ===================================================== */
+/* === 📝 FRONTEND LOGGER UTILITY === */
+/* ===================================================== */
+
+/**
+ * Frontend logger utility
+ * Development rejimida barcha loglar, production'da faqat error loglar
+ */
+const isDevelopment = window.location.hostname === 'localhost' || 
+                      window.location.hostname === '127.0.0.1' ||
+                      window.location.hostname.includes('localhost');
+
+// LocalStorage'dan log level o'qish (agar mavjud bo'lsa)
+const getLogLevel = () => {
+    const stored = localStorage.getItem('LOG_LEVEL');
+    if (stored) return stored;
+    // Development'da ham faqat warn va error loglar (performance uchun)
+    return isDevelopment ? 'warn' : 'error';
+};
+
+const LOG_LEVELS = {
+    debug: 0,
+    info: 1,
+    warn: 2,
+    error: 3,
+    silent: 4
+};
+
+const currentLogLevel = () => LOG_LEVELS[getLogLevel()] ?? LOG_LEVELS.error;
+
+/**
+ * Frontend logger yaratish
+ * @param {string} moduleName - Modul nomi (masalan: 'USERS', 'ROLES')
+ * @returns {Object} Logger obyekti
+ */
+export function createLogger(moduleName = '') {
+    const prefix = moduleName ? `[${moduleName}]` : '';
+    
+    return {
+        debug: (...args) => {
+            if (currentLogLevel() <= LOG_LEVELS.debug) {
+                console.log(`🔄 ${prefix}`, ...args);
+            }
+        },
+        info: (...args) => {
+            if (currentLogLevel() <= LOG_LEVELS.info) {
+                console.log(`ℹ️ ${prefix}`, ...args);
+            }
+        },
+        success: (...args) => {
+            if (currentLogLevel() <= LOG_LEVELS.info) {
+                console.log(`✅ ${prefix}`, ...args);
+            }
+        },
+        warn: (...args) => {
+            if (currentLogLevel() <= LOG_LEVELS.warn) {
+                console.warn(`⚠️ ${prefix}`, ...args);
+            }
+        },
+        error: (...args) => {
+            if (currentLogLevel() <= LOG_LEVELS.error) {
+                console.error(`❌ ${prefix}`, ...args);
+            }
+        },
+        log: (...args) => {
+            if (currentLogLevel() <= LOG_LEVELS.debug) {
+                console.log(`📋 ${prefix}`, ...args);
+            }
+        }
+    };
+}
+
+// Global logger (default)
+export const logger = createLogger();

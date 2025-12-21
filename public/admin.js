@@ -56,6 +56,11 @@ import { initRealTime } from './modules/realtime.js';
 import { initEnhancedSecurity } from './modules/security.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // Log levelni optimallashtirish (performance uchun)
+    if (!localStorage.getItem('LOG_LEVEL')) {
+        localStorage.setItem('LOG_LEVEL', 'warn'); // Faqat warn va error loglar
+    }
+    
     await init();
 });
 

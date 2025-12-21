@@ -1,12 +1,10 @@
 @echo off
-REM Server ishga tushirish skripti (Windows CMD uchun)
-chcp 65001 >nul
 echo ========================================
 echo   SERVER ISHGA TUSHIRILMOQDA...
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+cd /d %~dp0
 
 REM Eski node jarayonlarini to'xtatish
 echo [INFO] Eski server jarayonlarini to'xtatish...
@@ -37,6 +35,4 @@ echo.
 
 REM Serverni ishga tushirish
 node server.js
-
-pause
 
