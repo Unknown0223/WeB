@@ -30,12 +30,10 @@ export function initRealTime() {
 function connectWebSocket() {
     // Agar allaqachon ulanish mavjud bo'lsa, uni yopish
     if (ws && ws.readyState === WebSocket.OPEN) {
-        console.log('ℹ️ [WEBSOCKET] Ulanish allaqachon mavjud');
         return;
     }
     
     if (ws && ws.readyState === WebSocket.CONNECTING) {
-        console.log('ℹ️ [WEBSOCKET] Ulanish allaqachon amalga oshirilmoqda');
         return;
     }
     
@@ -65,11 +63,9 @@ function connectWebSocket() {
     }
     
     try {
-        console.log(`🔌 [WEBSOCKET] Ulanishga harakat qilinmoqda: ${wsUrl}`);
         ws = new WebSocket(wsUrl);
         
         ws.onopen = () => {
-            console.log('✅ [WEBSOCKET] Ulanish muvaffaqiyatli');
             if (reconnectAttempts > 0) {
                 showToast('Real-time rejim yoqildi', 'success');
             }
@@ -96,7 +92,9 @@ function connectWebSocket() {
         };
         
         ws.onclose = (event) => {
-            console.log('❌ [WEBSOCKET] Ulanish yopildi. Code:', event.code, 'Reason:', event.reason || 'N/A');
+            if (event.code !== 1000 && event.code !== 1001) {
+                console.error('[WEBSOCKET] Ulanish yopildi. Code:', event.code, 'Reason:', event.reason || 'N/A');
+            }
             
             // Faqat noqonuniy yopilish holatlarida qayta ulanish
             // 1000 - normal closure (qayta ulanish kerak emas)
@@ -121,12 +119,11 @@ function showComparisonAlertModal(notification) {
     
     // Agar bu bildirishnoma allaqachon navbatda bo'lsa, qo'shmaslik
     if (comparisonNotificationsQueue.some(n => n.id === notificationId)) {
-        console.log('⚠️ [REALTIME] Bu bildirishnoma allaqachon navbatda');
         return;
     }
     
     if (!notification?.details?.differences || !Array.isArray(notification.details.differences)) {
-        console.warn('⚠️ [REALTIME] Differences array mavjud emas');
+        console.error('[REALTIME] Differences array mavjud emas');
         return;
     }
     
@@ -137,7 +134,6 @@ function showComparisonAlertModal(notification) {
         timestamp: Date.now()
     });
     
-    console.log(`📬 [REALTIME] Bildirishnoma navbatga qo'shildi. Navbatda: ${comparisonNotificationsQueue.length} ta`);
     
     // Modal'ni ochish va render qilish
     renderComparisonModal();
@@ -281,7 +277,6 @@ function renderComparisonModal() {
             window.feather.replace();
         }
         
-        console.log('✅ [REALTIME] Barcha bildirishnomalar tushunildi, modal yopildi');
     };
     
     // Modal'ni ochish
@@ -293,7 +288,6 @@ function renderComparisonModal() {
         window.feather.replace();
     }
     
-    console.log(`✅ [REALTIME] Comparison alert modal ochildi. ${comparisonNotificationsQueue.length} ta bildirishnoma ko'rsatilmoqda`);
 }
 
 function handleWebSocketMessage(data) {
@@ -309,7 +303,6 @@ function handleWebSocketMessage(data) {
             
         case 'user_status_changed':
             // Foydalanuvchi statusi o'zgardi (online/offline)
-            console.log('🔔 [REALTIME] User status o\'zgardi:', payload);
             
             const user = state.users?.find(u => u.id === payload.userId);
             if (user) {
@@ -318,7 +311,6 @@ function handleWebSocketMessage(data) {
                 // Admin panelda yangilash (darhol)
                 const usersPage = document.getElementById('users');
                 if (usersPage && usersPage.classList.contains('active')) {
-                    console.log('🔄 [REALTIME] Users sahifasi aktiv, darhol yangilanmoqda...');
                     
                     // Modern render funksiyasini darhol chaqirish (immediate = true)
                     if (typeof renderModernUsers === 'function') {
@@ -371,7 +363,6 @@ function handleWebSocketMessage(data) {
             
         case 'new_report':
             // Yangi hisobot qo'shildi
-            console.log('🔔 [REALTIME] Yangi hisobot qo\'shildi:', payload);
             
             // Dashboard yangilash
             const dashboardPage = document.getElementById('dashboard');
@@ -404,7 +395,6 @@ function handleWebSocketMessage(data) {
             
         case 'report_edited':
             // Hisobot tahrirlandi
-            console.log('🔔 [REALTIME] Hisobot tahrirlandi:', payload);
             
             // Dashboard yangilash
             const dashboardPageEdit = document.getElementById('dashboard');
@@ -436,7 +426,6 @@ function handleWebSocketMessage(data) {
             
         case 'user_registered':
             // Yangi foydalanuvchi ro'yxatdan o'tdi
-            console.log('🔔 [REALTIME] Yangi foydalanuvchi ro\'yxatdan o\'tdi:', payload);
             
             // Pending users ro'yxatiga qo'shish
             if (!state.pendingUsers) {
@@ -452,7 +441,6 @@ function handleWebSocketMessage(data) {
             // Admin panelda yangilash
             const requestsPage = document.getElementById('requests');
             if (requestsPage && requestsPage.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Requests sahifasi aktiv, yangilanmoqda...');
                 import('./users.js').then(module => {
                     if (module.renderPendingUsers) {
                         module.renderPendingUsers();
@@ -486,7 +474,6 @@ function handleWebSocketMessage(data) {
             
         case 'account_status_changed':
             // Akkaunt statusi o'zgardi (active/blocked/archived)
-            console.log('🔔 [REALTIME] Account status o\'zgardi:', payload);
             
             // Users ro'yxatini yangilash
             if (state.users) {
@@ -497,7 +484,6 @@ function handleWebSocketMessage(data) {
                     // Admin panelda yangilash
                     const usersPage = document.getElementById('users');
                     if (usersPage && usersPage.classList.contains('active')) {
-                        console.log('🔄 [REALTIME] Users sahifasi aktiv, yangilanmoqda...');
                         
                         // Modern render funksiyasini chaqirish
                         if (typeof renderModernUsers === 'function') {
@@ -517,7 +503,7 @@ function handleWebSocketMessage(data) {
                     });
                 } else {
                     // Agar user topilmasa, ma'lumotlarni qayta yuklash
-                    console.log('⚠️ [REALTIME] User topilmadi, yangi ma\'lumotlar yuklash kerak');
+                    console.error('[REALTIME] User topilmadi, yangi ma\'lumotlar yuklash kerak');
                     if (typeof fetchUsers === 'function') {
                         fetchUsers().then(users => {
                             if (users) {
@@ -561,12 +547,10 @@ function handleWebSocketMessage(data) {
             
         case 'brand_updated':
             // Brend yangilandi (yaratildi/yangilandi/o'chirildi)
-            console.log('🔔 [REALTIME] Brend yangilandi:', payload);
             
             // Settings sahifasini yangilash
             const settingsPage = document.getElementById('settings');
             if (settingsPage && settingsPage.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Settings sahifasi aktiv, brendlar yangilanmoqda...');
                 import('./brands.js').then(module => {
                     if (module.loadBrands) {
                         module.loadBrands();
@@ -580,12 +564,10 @@ function handleWebSocketMessage(data) {
         case 'role_updated':
         case 'role_deleted':
             // Rol yangilandi yoki o'chirildi
-            console.log(`🔔 [REALTIME] Rol ${type === 'role_deleted' ? 'o\'chirildi' : 'yangilandi'}:`, payload);
             
             // Roles sahifasini yangilash
             const rolesPage = document.getElementById('roles');
             if (rolesPage && rolesPage.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Roles sahifasi aktiv, yangilanmoqda...');
                 Promise.all([
                     import('./api.js'),
                     import('./state.js'),
@@ -595,19 +577,8 @@ function handleWebSocketMessage(data) {
                     const currentRole = stateModule.state.currentEditingRole;
                     const roleNameFromPayload = payload?.role_name;
                     
-                    console.log('🔄 [REALTIME] Role yangilanishi:', {
-                        type,
-                        action: payload?.action,
-                        roleName: roleNameFromPayload,
-                        currentRole
-                    });
-                    
                     if (apiModule.fetchRoles) {
                         apiModule.fetchRoles().then(rolesData => {
-                            console.log('📥 [REALTIME] Roles ma\'lumotlari yuklandi:', {
-                                rolesCount: rolesData?.roles?.length || 0,
-                                hasPermissions: !!rolesData?.all_permissions
-                            });
                             
                             if (rolesData && rolesData.roles && Array.isArray(rolesData.roles)) {
                                 stateModule.state.roles = rolesData.roles;
@@ -620,11 +591,10 @@ function handleWebSocketMessage(data) {
                                         ? roleNameFromPayload 
                                         : currentRole;
                                     
-                                    console.log('✅ [REALTIME] Rol tanlash:', roleToSelect);
                                     rolesModule.renderRoles(roleToSelect);
                                 }
                             } else {
-                                console.warn('⚠️ [REALTIME] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
+                                console.error('[REALTIME] Roles ma\'lumotlari to\'g\'ri formatda emas:', rolesData);
                             }
                         }).catch(error => {
                             console.error('❌ [REALTIME] Roles yuklashda xatolik:', error);
@@ -648,12 +618,10 @@ function handleWebSocketMessage(data) {
             
         case 'settings_updated':
             // Sozlama yangilandi
-            console.log('🔔 [REALTIME] Sozlama yangilandi:', payload);
             
             // Settings sahifasini yangilash
             const settingsPageUpdate = document.getElementById('settings');
             if (settingsPageUpdate && settingsPageUpdate.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Settings sahifasi aktiv, yangilanmoqda...');
                 
                 // Sozlamalarni qayta yuklash
                 import('./api.js').then(module => {
@@ -698,7 +666,6 @@ function handleWebSocketMessage(data) {
             
         case 'report_deleted':
             // Hisobot o'chirildi
-            console.log('🔔 [REALTIME] Hisobot o\'chirildi:', payload);
             
             // Dashboard yangilash
             const dashboardPageDelete = document.getElementById('dashboard');
@@ -710,7 +677,6 @@ function handleWebSocketMessage(data) {
             // Reports sahifasini yangilash
             const reportsPageDelete = document.getElementById('reports');
             if (reportsPageDelete && reportsPageDelete.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Reports sahifasi aktiv, yangilanmoqda...');
                 import('./reports.js').then(module => {
                     if (module.fetchAndRenderReports) {
                         module.fetchAndRenderReports();
@@ -740,7 +706,6 @@ function handleWebSocketMessage(data) {
             
         case 'user_created':
             // Yangi foydalanuvchi yaratildi (admin tomonidan)
-            console.log('🔔 [REALTIME] Yangi foydalanuvchi yaratildi:', payload);
             
             // Users sahifasini yangilash
             const usersPageCreate = document.getElementById('users');
@@ -766,12 +731,10 @@ function handleWebSocketMessage(data) {
             
         case 'comparison_updated':
             // Solishtirish yangilandi
-            console.log('🔔 [REALTIME] Solishtirish yangilandi:', payload);
             
             // Comparison sahifasini yangilash
             const comparisonPage = document.getElementById('comparison');
             if (comparisonPage && comparisonPage.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Comparison sahifasi aktiv, yangilanmoqda...');
                 import('./comparison.js').then(module => {
                     if (module.loadComparisonData) {
                         module.loadComparisonData(payload.date, payload.brandId);
@@ -784,12 +747,10 @@ function handleWebSocketMessage(data) {
             
         case 'audit_log_added':
             // Audit log qo'shildi
-            console.log('🔔 [REALTIME] Audit log qo\'shildi:', payload);
             
             // Audit log sahifasini yangilash
             const auditPage = document.getElementById('audit');
             if (auditPage && auditPage.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Audit log sahifasi aktiv, yangilanmoqda...');
                 import('./audit.js').then(module => {
                     if (module.loadAuditLogs) {
                         module.loadAuditLogs();
@@ -803,7 +764,6 @@ function handleWebSocketMessage(data) {
             if (payload.action === 'login_success' || payload.action === 'login_fail' || payload.action === 'logout' || payload.action === 'account_lock') {
                 const securityPage = document.getElementById('security');
                 if (securityPage && securityPage.classList.contains('active')) {
-                    console.log('🔄 [REALTIME] Security sahifasi aktiv, yangilanmoqda...');
                     import('./security.js').then(module => {
                         if (module.loadSecurityData) {
                             module.loadSecurityData();
@@ -815,7 +775,6 @@ function handleWebSocketMessage(data) {
             
         case 'user_updated':
             // Foydalanuvchi yangilandi
-            console.log('🔔 [REALTIME] Foydalanuvchi yangilandi:', payload);
             
             // Users sahifasini yangilash
             const usersPageUpdate = document.getElementById('users');
@@ -877,7 +836,6 @@ function handleWebSocketMessage(data) {
         case 'user_password_changed':
         case 'user_secret_word_changed':
             // Parol yoki maxfiy so'z o'zgartirildi
-            console.log(`🔔 [REALTIME] ${type === 'user_password_changed' ? 'Parol' : 'Maxfiy so\'z'} o'zgartirildi:`, payload);
             
             // Users sahifasini yangilash (agar kerak bo'lsa)
             const usersPagePassword = document.getElementById('users');
@@ -904,7 +862,6 @@ function handleWebSocketMessage(data) {
         case 'user_permissions_updated':
         case 'user_permissions_reset':
             // Foydalanuvchi huquqlari o'zgartirildi
-            console.log(`🔔 [REALTIME] Foydalanuvchi huquqlari ${type === 'user_permissions_reset' ? 'tiklandi' : 'yangilandi'}:`, payload);
             
             // Users sahifasini yangilash
             const usersPagePerms = document.getElementById('users');
@@ -932,12 +889,10 @@ function handleWebSocketMessage(data) {
         case 'pivot_template_updated':
         case 'pivot_template_deleted':
             // Pivot template yaratildi/yangilandi/o'chirildi
-            console.log(`🔔 [REALTIME] Pivot template ${type === 'pivot_template_created' ? 'yaratildi' : type === 'pivot_template_updated' ? 'yangilandi' : 'o\'chirildi'}:`, payload);
             
             // Pivot sahifasini yangilash
             const pivotPageTemplate = document.getElementById('pivot-reports');
             if (pivotPageTemplate && pivotPageTemplate.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Pivot sahifasi aktiv, template ro\'yxati yangilanmoqda...');
                 import('./pivot.js').then(module => {
                     if (module.loadTemplates) {
                         module.loadTemplates();
@@ -949,7 +904,6 @@ function handleWebSocketMessage(data) {
         case 'notification_read':
         case 'notifications_read_all':
             // Bildirishnoma o'qilgan deb belgilandi
-            console.log(`🔔 [REALTIME] Bildirishnoma ${type === 'notifications_read_all' ? 'barchasi' : ''} o'qilgan deb belgilandi:`, payload);
             
             // Notification count'ni yangilash
             if (typeof window.checkUnreadNotifications === 'function') {
@@ -967,12 +921,10 @@ function handleWebSocketMessage(data) {
             
         case 'exchange_rates_updated':
             // Valyuta kurslari yangilandi
-            console.log('🔔 [REALTIME] Valyuta kurslari yangilandi:', payload);
             
             // Settings sahifasini yangilash (agar exchange rates ko'rsatilsa)
             const settingsPageRates = document.getElementById('settings');
             if (settingsPageRates && settingsPageRates.classList.contains('active')) {
-                console.log('🔄 [REALTIME] Settings sahifasi aktiv, kurslar yangilanmoqda...');
                 // Exchange rates yangilanishi kerak bo'lsa, bu yerda qo'shiladi
             }
             break;
@@ -1010,13 +962,12 @@ function handleWebSocketMessage(data) {
             break;
             
         default:
-            console.log('ℹ️ [REALTIME] Noma\'lum xabar turi:', type, payload);
+            console.error('[REALTIME] Noma\'lum xabar turi:', type, payload);
     }
 }
 
 function scheduleReconnect() {
     if (reconnectTimeout) {
-        console.log('ℹ️ [WEBSOCKET] Qayta ulanish allaqachon rejalashtirilgan');
         return;
     }
     
@@ -1027,7 +978,7 @@ function scheduleReconnect() {
     reconnectAttempts++;
     
     if (reconnectAttempts > maxAttempts) {
-        console.log('⚠️ [WEBSOCKET] Qayta ulanish urinishlari tugadi. Auto-refresh rejimiga o\'tildi.');
+        console.error('[WEBSOCKET] Qayta ulanish urinishlari tugadi. Auto-refresh rejimiga o\'tildi.');
         stopReconnecting();
         return;
     }
@@ -1035,14 +986,12 @@ function scheduleReconnect() {
     // Exponential backoff - har bir urinishda kechikish oshadi
     const delay = Math.min(initialDelay * Math.pow(2, reconnectAttempts - 1), maxDelay);
     
-    console.log(`🔄 [WEBSOCKET] Qayta ulanish urinishi ${reconnectAttempts}/${maxAttempts} (${delay}ms keyin)`);
     
     reconnectTimeout = setTimeout(() => {
         reconnectTimeout = null;
         
         // Agar allaqachon ulanish mavjud bo'lsa, to'xtatish
         if (ws && ws.readyState === WebSocket.OPEN) {
-            console.log('✅ [WEBSOCKET] Ulanish allaqachon mavjud');
             stopReconnecting();
             return;
         }
@@ -1055,7 +1004,6 @@ function stopReconnecting() {
     if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;
-        console.log('✅ [WEBSOCKET] Qayta ulanish to\'xtatildi');
     }
     reconnectAttempts = 0;
 }

@@ -910,6 +910,65 @@ async function handleSessionTerminate(e) {
             throw new Error('Server bilan bog\'lanishda xatolik');
         }
         
+        // 404 holatida sessiya allaqachon o'chirilgan yoki topilmagan
+        // Bu holat muvaffaqiyatli deb hisoblanadi, chunki maqsad sessiyani o'chirish edi
+        if (res.status === 404) {
+            showToast('Sessiya allaqachon tugatilgan', 'success');
+            
+            // Modal'ni yangilash - saqlangan userId va username dan foydalanish
+            const userId = DOM.sessionsModal?.dataset.userId;
+            const username = DOM.sessionsModal?.dataset.username;
+            if (userId && username) {
+                // Modal'ni darhol yangilash (flag'ni o'rnatish)
+                isOpeningSessionsModal = true;
+                
+                // Button holatini darhol qaytarish (modal yangilanishidan oldin)
+                button.disabled = false;
+                button.innerHTML = originalText;
+                
+                // Kichik kechikish - toast ko'rsatilishi uchun
+                setTimeout(async () => {
+                    try {
+                        await openSessionsModal(userId, username);
+                    } catch (error) {
+                        console.error('❌ [TERMINATE] Modal yangilashda xatolik:', error);
+                        isOpeningSessionsModal = false;
+                    }
+                }, 300);
+            } else {
+                // Agar modal ochiq bo'lsa, sessiyani DOM'dan olib tashlash
+                const sessionItem = button.closest('.session-item-modern');
+                if (sessionItem) {
+                    sessionItem.style.transition = 'opacity 0.3s, transform 0.3s';
+                    sessionItem.style.opacity = '0';
+                    sessionItem.style.transform = 'translateX(-20px)';
+                    setTimeout(() => {
+                        sessionItem.remove();
+                        // Agar barcha sessiyalar tugatilgan bo'lsa, empty state ko'rsatish
+                        const remainingSessions = DOM.sessionsListContainer?.querySelectorAll('.session-item-modern');
+                        if (remainingSessions && remainingSessions.length === 0) {
+                            DOM.sessionsListContainer.innerHTML = `
+                                <div class="empty-state-modern">
+                                    <div class="empty-state-icon">
+                                        <i data-feather="monitor"></i>
+                                    </div>
+                                    <h4>Aktiv sessiyalar topilmadi</h4>
+                                    <p>Bu foydalanuvchining hozirgi vaqtda aktiv sessiyalari yo'q.</p>
+                                </div>
+                            `;
+                            if (window.feather) {
+                                window.feather.replace();
+                            }
+                        }
+                    }, 300);
+                }
+                // Button holatini qaytarish
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+            return;
+        }
+        
         if (!res.ok) {
             const errorData = await res.json().catch(() => ({ message: 'Sessiyani tugatishda xatolik' }));
             throw new Error(errorData.message || `Sessiyani tugatishda xatolik (${res.status})`);
@@ -2130,8 +2189,25 @@ async function executeOpenUserModalForEdit(userId) {
         }
     }
     
-    // Event listener'larni qo'shish
-    setupLocationBrandSelectors();
+    // Event listener'larni qo'shish - modal ochilgandan keyin
+    // Button'lar DOM'da mavjudligini ta'minlash uchun kichik kechikish
+    setTimeout(() => {
+        console.log('🔧 [EDIT_MODAL] setupLocationBrandSelectors chaqirilmoqda...');
+        setupLocationBrandSelectors();
+        console.log('✅ [EDIT_MODAL] setupLocationBrandSelectors chaqirildi');
+        
+        // Button'larni tekshirish
+        const selectLocationsBtn = document.getElementById('select-locations-btn');
+        const selectBrandsBtn = document.getElementById('select-brands-btn');
+        console.log('🔍 [EDIT_MODAL] Button tekshiruvi (setTimeout dan keyin):', {
+            selectLocationsBtn: !!selectLocationsBtn,
+            selectBrandsBtn: !!selectBrandsBtn,
+            selectLocationsBtnId: selectLocationsBtn?.id,
+            selectBrandsBtnId: selectBrandsBtn?.id,
+            selectLocationsBtnParent: selectLocationsBtn?.parentElement?.id,
+            selectBrandsBtnParent: selectBrandsBtn?.parentElement?.id
+        });
+    }, 50);
     
     // Feather icons
     if (window.feather) {
@@ -2258,25 +2334,113 @@ window.removeBrand = function(brandId) {
 
 // Filiallar va brendlar selector'larini sozlash
 function setupLocationBrandSelectors() {
+    console.log('🔧 [SETUP] setupLocationBrandSelectors chaqirildi');
+    
     const selectLocationsBtn = document.getElementById('select-locations-btn');
     const selectBrandsBtn = document.getElementById('select-brands-btn');
     
+    console.log('🔍 [SETUP] Button elementlari:', {
+        selectLocationsBtn: !!selectLocationsBtn,
+        selectBrandsBtn: !!selectBrandsBtn,
+        selectLocationsBtnId: selectLocationsBtn?.id,
+        selectBrandsBtnId: selectBrandsBtn?.id
+    });
+    
     if (selectLocationsBtn) {
-        selectLocationsBtn.onclick = () => openLocationsSelectModal();
+        console.log('✅ [SETUP] Filiallar button topildi, event listener qo\'shilmoqda...');
+        
+        // Eski event listener'larni olib tashlash - addEventListener ishlatish
+        const oldBtn = selectLocationsBtn;
+        const newBtn = oldBtn.cloneNode(true);
+        oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+        
+        // Handler funksiyasini tashqarida e'lon qilish
+        const handleLocationsClick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('🖱️ [SETUP] Filiallar button bosildi');
+            if (window.openLocationsSelectModal) {
+                console.log('✅ [SETUP] Global openLocationsSelectModal funksiyasi mavjud');
+                window.openLocationsSelectModal();
+            } else {
+                console.log('⚠️ [SETUP] Global funksiya yo\'q, lokal funksiyani chaqiryapman');
+                openLocationsSelectModal();
+            }
+        };
+        
+        // Yangi event listener qo'shish
+        newBtn.addEventListener('click', handleLocationsClick);
+        
+        // Button'ga handler reference'ni saqlash (keyinroq olib tashlash uchun)
+        newBtn._locationsHandler = handleLocationsClick;
+        
+        console.log('✅ [SETUP] Filiallar button event listener qo\'shildi');
+    } else {
+        console.error('❌ [SETUP] Filiallar button topilmadi!');
     }
     
     if (selectBrandsBtn) {
-        selectBrandsBtn.onclick = () => openBrandsSelectModal();
+        console.log('✅ [SETUP] Brendlar button topildi, event listener qo\'shilmoqda...');
+        
+        // Eski event listener'larni olib tashlash - addEventListener ishlatish
+        const oldBtn = selectBrandsBtn;
+        const newBtn = oldBtn.cloneNode(true);
+        oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+        
+        // Handler funksiyasini tashqarida e'lon qilish
+        const handleBrandsClick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('🖱️ [SETUP] Brendlar button bosildi');
+            if (window.openBrandsSelectModal) {
+                console.log('✅ [SETUP] Global openBrandsSelectModal funksiyasi mavjud');
+                window.openBrandsSelectModal();
+            } else {
+                console.log('⚠️ [SETUP] Global funksiya yo\'q, lokal funksiyani chaqiryapman');
+                openBrandsSelectModal();
+            }
+        };
+        
+        // Yangi event listener qo'shish
+        newBtn.addEventListener('click', handleBrandsClick);
+        
+        // Button'ga handler reference'ni saqlash (keyinroq olib tashlash uchun)
+        newBtn._brandsHandler = handleBrandsClick;
+        
+        console.log('✅ [SETUP] Brendlar button event listener qo\'shildi');
+    } else {
+        console.warn('⚠️ [SETUP] Brendlar button topilmadi (bu normal bo\'lishi mumkin)');
     }
 }
 
 // Filiallar tanlash modal'ini ochish
 async function openLocationsSelectModal() {
+    console.log('🚪 [LOCATIONS_MODAL] openLocationsSelectModal chaqirildi');
+    
+    // Funksiyani global qilish (xatolikdan keyin qayta yuklash uchun)
+    if (!window.openLocationsSelectModal) {
+        window.openLocationsSelectModal = openLocationsSelectModal;
+        console.log('✅ [LOCATIONS_MODAL] Funksiya global qilindi');
+    }
+    
     const modal = document.getElementById('locations-select-modal');
     const list = document.getElementById('locations-modal-list');
     const searchInput = document.getElementById('locations-search-input');
     
-    if (!modal || !list) return;
+    console.log('🔍 [LOCATIONS_MODAL] Modal elementlari:', {
+        modal: !!modal,
+        list: !!list,
+        searchInput: !!searchInput,
+        modalId: modal?.id,
+        listId: list?.id
+    });
+    
+    if (!modal || !list) {
+        console.error('❌ [LOCATIONS_MODAL] Modal yoki list elementlari topilmadi!');
+        console.error('❌ [LOCATIONS_MODAL] Modal:', modal);
+        console.error('❌ [LOCATIONS_MODAL] List:', list);
+        return;
+    }
     
     // Hozirgi tanlangan filiallarni olish - selected-locations-display dan
     const selectedLocationsDisplay = document.getElementById('selected-locations-display');
@@ -2428,8 +2592,29 @@ async function openLocationsSelectModal() {
             selectAllCheckbox.addEventListener('change', selectAllLocations);
         }
         
+        console.log('✅ [LOCATIONS_MODAL] Modal ochilmoqda...');
+        console.log('🔍 [LOCATIONS_MODAL] Modal holati (ochilishdan oldin):', {
+            hasHidden: modal.classList.contains('hidden'),
+            display: window.getComputedStyle(modal).display,
+            visibility: window.getComputedStyle(modal).visibility
+        });
+        
         modal.classList.remove('hidden');
+        
+        // Modal'ni ko'rsatish uchun display style'ni ham o'rnatish
+        if (modal.style.display === 'none') {
+            modal.style.display = 'flex';
+        }
+        
+        console.log('✅ [LOCATIONS_MODAL] Modal ochildi');
+        console.log('🔍 [LOCATIONS_MODAL] Modal holati (ochilishdan keyin):', {
+            hasHidden: modal.classList.contains('hidden'),
+            display: window.getComputedStyle(modal).display,
+            visibility: window.getComputedStyle(modal).visibility,
+            opacity: window.getComputedStyle(modal).opacity
+        });
     } catch (error) {
+        console.error('❌ [LOCATIONS_MODAL] Xatolik:', error);
         showToast(error.message, 'error');
     }
 }

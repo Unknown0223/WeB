@@ -5865,30 +5865,60 @@ input.form-control.comparison-input {
 @media (max-width: 1200px) {
     .settings-layout, .roles-management-container, .branding-grid { grid-template-columns: 1fr; }
 }
+/* ===================================== */
+/* ADMIN SAHIFA UCHUN MOBIL RESPONSIVE */
+/* ===================================== */
+
+/* Tablet va kichik ekranlar (max-width: 992px) */
 @media (max-width: 992px) {
-    .admin-layout { grid-template-columns: 1fr; }
+    .admin-layout { 
+        grid-template-columns: 1fr; 
+    }
+    
     .sidebar {
         position: fixed;
-        left: -260px; /* Boshida yashirin */
+        left: -260px;
         top: 0;
         height: 100vh;
+        width: 260px;
         z-index: 1001;
         transition: left 0.3s ease;
+        overflow-y: auto;
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
     }
+    
     .sidebar.open {
         left: 0;
     }
+    
     .main-content {
         margin-left: 0;
         padding: 20px;
     }
+    
     .mobile-menu-toggle {
-        display: block; /* Mobil qurilmalarda ko'rsatish */
+        display: flex;
+        align-items: center;
+        justify-content: center;
         position: fixed;
         top: 15px;
         left: 15px;
+        width: 44px;
+        height: 44px;
+        background: var(--surface-color);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
         z-index: 1002;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
+    
+    .mobile-menu-toggle i {
+        width: 24px;
+        height: 24px;
+    }
+    
     .overlay {
         display: none;
         position: fixed;
@@ -5896,17 +5926,311 @@ input.form-control.comparison-input {
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(0,0,0,0.5);
+        background: rgba(0, 0, 0, 0.7);
         z-index: 1000;
+        backdrop-filter: blur(4px);
     }
+    
     .overlay.active {
         display: block;
     }
+    
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+    }
+    
+    .card {
+        padding: 15px;
+    }
 }
+
+/* Mobil telefonlar (max-width: 768px) */
 @media (max-width: 768px) {
-    .stats-grid { grid-template-columns: 1fr; }
-    .filter-controls { grid-template-columns: 1fr; }
-    .page-header { flex-direction: column; align-items: flex-start; }
+    .admin-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .main-content {
+        padding: 15px 10px;
+        margin-top: 60px;
+    }
+    
+    .mobile-menu-toggle {
+        width: 40px;
+        height: 40px;
+        top: 10px;
+        left: 10px;
+    }
+    
+    .sidebar {
+        width: 260px;
+        left: -260px;
+    }
+    
+    /* Page header mobil uchun */
+    .page-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+        padding: 15px;
+    }
+    
+    .page-title {
+        font-size: 20px;
+        flex-wrap: wrap;
+    }
+    
+    .page-title i {
+        width: 24px !important;
+        height: 24px !important;
+    }
+    
+    /* Stats grid mobil uchun */
+    .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .stat-card {
+        padding: 15px;
+    }
+    
+    /* Filter controls mobil uchun */
+    .filter-controls {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    /* Cards mobil uchun */
+    .card {
+        padding: 12px;
+        margin-bottom: 15px;
+    }
+    
+    .card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .card-title {
+        font-size: 16px;
+    }
+    
+    /* Buttons mobil uchun */
+    .btn {
+        padding: 12px 16px;
+        font-size: 14px;
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+    
+    .btn-icon {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+    }
+    
+    /* Form controls mobil uchun */
+    .form-control {
+        padding: 12px;
+        font-size: 16px; /* iOS zoom oldini olish */
+        min-height: 44px;
+    }
+    
+    .form-group {
+        margin-bottom: 15px;
+    }
+    
+    /* Data table mobil uchun */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .data-table {
+        min-width: 600px;
+        font-size: 13px;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 10px 8px;
+        font-size: 12px;
+    }
+    
+    /* User cards mobil uchun */
+    .user-card {
+        padding: 12px;
+    }
+    
+    .user-card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    /* Settings grid mobil uchun */
+    .settings-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    /* Modal mobil uchun */
+    .modal-content {
+        width: 95%;
+        max-width: 95%;
+        margin: 10px auto;
+        max-height: 90vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 15px;
+    }
+    
+    .modal-header-enhanced {
+        padding: 15px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .modal-title {
+        font-size: 18px;
+    }
+    
+    /* Accordion mobil uchun */
+    .accordion-item {
+        margin-bottom: 10px;
+    }
+    
+    .accordion-header {
+        padding: 12px 15px;
+        font-size: 14px;
+    }
+    
+    /* Pagination mobil uchun */
+    .pagination-controls {
+        padding: 10px;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    
+    .pagination-btn {
+        min-width: 44px;
+        height: 44px;
+    }
+    
+    /* Daily status grid mobil uchun */
+    .daily-status-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .status-card {
+        padding: 12px;
+    }
+    
+    /* Charts container mobil uchun */
+    .charts-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .chart-wrapper {
+        height: 250px;
+    }
+    
+    /* KPI table mobil uchun */
+    .kpi-table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Location filter mobil uchun */
+    .locations-summary {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .summary-item {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+}
+
+/* Kichik mobil telefonlar (max-width: 480px) */
+@media (max-width: 480px) {
+    .main-content {
+        padding: 10px 8px;
+    }
+    
+    .mobile-menu-toggle {
+        width: 36px;
+        height: 36px;
+        top: 8px;
+        left: 8px;
+    }
+    
+    .sidebar {
+        width: 240px;
+        left: -240px;
+        padding: 20px 15px;
+    }
+    
+    .page-header {
+        padding: 12px;
+    }
+    
+    .page-title {
+        font-size: 18px;
+    }
+    
+    .card {
+        padding: 10px;
+    }
+    
+    .btn {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+    
+    .data-table {
+        font-size: 11px;
+        min-width: 500px;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 8px 6px;
+        font-size: 11px;
+    }
+    
+    .modal-content {
+        width: 98%;
+        max-width: 98%;
+        margin: 5px auto;
+        padding: 12px;
+    }
+    
+    .form-control {
+        padding: 10px;
+        font-size: 16px;
+    }
+    
+    .stats-grid {
+        gap: 10px;
+    }
+    
+    .stat-card {
+        padding: 12px;
+    }
 }
 
 /* --- Mobil menyu tugmasi --- */

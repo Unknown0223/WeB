@@ -18,8 +18,16 @@ export function setDateFilter(instance) {
 }
 
 export async function fetchAndRenderReports() {
+    // Ko'rish ruxsatlari
     const viewPermissions = ['reports:view_own', 'reports:view_assigned', 'reports:view_all'];
-    if (!viewPermissions.some(p => state.currentUser.permissions.includes(p))) {
+    // Tahrirlash ruxsatlari (agar bo'lsa, ko'rish ruxsati ham beriladi)
+    const editPermissions = ['reports:edit_own', 'reports:edit_assigned', 'reports:edit_all'];
+    
+    // Ko'rish yoki tahrirlash ruxsati borligini tekshirish
+    const hasViewPermission = viewPermissions.some(p => state.currentUser.permissions.includes(p));
+    const hasEditPermission = editPermissions.some(p => state.currentUser.permissions.includes(p));
+    
+    if (!hasViewPermission && !hasEditPermission) {
         if (DOM.savedReportsList) DOM.savedReportsList.innerHTML = '<div class="empty-state">Hisobotlarni ko\'rish uchun ruxsat yo\'q.</div>';
         return;
     }

@@ -291,8 +291,6 @@ global.broadcastWebSocket = (type, payload) => {
 
         // Serverni ishga tushirish
         server.listen(PORT, '0.0.0.0', () => {
-            log.info(`Server ${PORT} portda ishga tushdi`);
-
             // PM2 uchun ready signal
             if (process.send) {
                 process.send('ready');
@@ -328,7 +326,6 @@ global.broadcastWebSocket = (type, payload) => {
                         if (response.data.ok) {
                             // Webhook rejimida botni ishga tushirish
                             await initializeBot(botToken, { polling: false });
-                            botLog.success('Webhook muvaffaqiyatli o\'rnatildi');
                         } else {
                             botLog.error('Telegram webhookni o\'rnatishda xatolik:', response.data.description);
                             
@@ -349,7 +346,6 @@ global.broadcastWebSocket = (type, payload) => {
                     // Lokal yoki webhook sozlanmagan - polling rejimi (faqat development uchun)
                     if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
                         await initializeBot(botToken, { polling: true });
-                        botLog.info('Polling rejimida ishga tushdi');
                     }
                 }
                 })(); // Async IIFE - bot initialization server bloklamaydi
@@ -363,8 +359,6 @@ global.broadcastWebSocket = (type, payload) => {
 
 // Graceful shutdown funksiyasi
 async function gracefulShutdown(signal) {
-    log.info(`${signal} signali qabul qilindi. Graceful shutdown...`);
-    
     let shutdownTimeout;
     
     // Timeout - agar 10 soniyada to'xtatilmasa, majburiy to'xtatish
@@ -381,7 +375,7 @@ async function gracefulShutdown(signal) {
             try {
                 await bot.stopPolling();
             } catch (botError) {
-                log.warn('Bot polling to\'xtatishda xatolik:', botError.message);
+                log.error('Bot polling to\'xtatishda xatolik:', botError.message);
             }
         }
         
@@ -417,12 +411,11 @@ async function gracefulShutdown(signal) {
             try {
                 await db.destroy();
             } catch (dbError) {
-                log.warn('Database yopishda xatolik:', dbError.message);
+                log.error('Database yopishda xatolik:', dbError.message);
             }
         }
         
         clearTimeout(shutdownTimeout);
-        log.success('Graceful shutdown completed');
         process.exit(0);
         
     } catch (error) {

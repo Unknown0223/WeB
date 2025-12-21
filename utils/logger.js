@@ -18,13 +18,13 @@ const LOG_LEVELS = {
     silent: 4
 };
 
-// Default: production'da 'warn', development'da 'debug'
+// Default: har doim 'error' - faqat xatoliklar loglanadi
 const getLogLevel = () => {
     const envLevel = process.env.LOG_LEVEL?.toLowerCase();
     if (envLevel && LOG_LEVELS[envLevel] !== undefined) {
         return envLevel;
     }
-    return process.env.NODE_ENV === 'production' ? 'warn' : 'debug';
+    return 'error'; // Har doim faqat error loglar
 };
 
 const currentLevel = () => LOG_LEVELS[getLogLevel()];

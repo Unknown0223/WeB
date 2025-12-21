@@ -27,22 +27,17 @@ function startTokenCleanup() {
                 .where('token', 'like', 'bot_connect_%')
                 .del();
             
-            if (deletedCount > 0) {
-                botLog.info(`[CLEANUP] ${deletedCount} ta eskirgan bot_connect token o'chirildi`);
-            }
+            // Cleanup completed silently
         } catch (error) {
             botLog.error(`[CLEANUP] Esirgan tokenlarni tozalashda xatolik: ${error.message}`);
         }
     }, 60 * 60 * 1000); // 1 soat
-    
-    botLog.info('[CLEANUP] Esirgan tokenlarni avtomatik tozalash mexanizmi ishga tushirildi');
 }
 
 function stopTokenCleanup() {
     if (cleanupInterval) {
         clearInterval(cleanupInterval);
         cleanupInterval = null;
-        botLog.info('[CLEANUP] Esirgan tokenlarni avtomatik tozalash mexanizmi to\'xtatildi');
     }
 }
 
@@ -196,7 +191,7 @@ async function safeSendMessage(chatId, text, options = {}) {
         } else if (body?.error_code === 400) {
             botLog.error(`Bad Request (400). Chat ID: ${chatId}, Description: ${body?.description}`);
             if (body?.description?.includes("group chat was upgraded to a supergroup chat")) {
-                botLog.warn(`Guruh supergroup'ga o'zgartirilgan. Eski chat ID: ${chatId}`);
+                botLog.error(`Guruh supergroup'ga o'zgartirilgan. Eski chat ID: ${chatId}`);
             }
         } else {
             botLog.error(`Telegramga xabar yuborishda xatolik (chat_id: ${chatId}): ${body?.description || error.message}`);
@@ -666,7 +661,7 @@ async function sendToTelegram(payload) {
 
 const initializeBot = async (botToken, options = { polling: true }) => {
     if (!botToken) {
-        botLog.warn('[INIT] Bot token topilmadi, bot ishga tushirilmaydi');
+        botLog.error('[INIT] Bot token topilmadi, bot ishga tushirilmaydi');
         return;
     }
     
@@ -747,7 +742,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         .first();
 
                     if (!magicLink) {
-                        botLog.warn(`[TOKEN] Token topilmadi yoki muddati tugagan. Token: ${token.substring(0, 30)}..., Chat ID: ${chatId}`);
+                        botLog.error(`[TOKEN] Token topilmadi yoki muddati tugagan. Token: ${token.substring(0, 30)}..., Chat ID: ${chatId}`);
                         await safeSendMessage(chatId, `❌ Bot bog'lash havolasi noto'g'ri yoki muddati tugagan. Iltimos, yangi havola oling.`);
                         return;
                     }
@@ -1105,6 +1100,9 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         const state = userStates[chatId];
         if (state && state.state === 'awaiting_secret_word') {
             const { user_id } = state;
+            
+            // Text'ni trim qilish
+            const text = (msg.text || '').trim();
 
             try {
                 const response = await fetch(new URL('api/telegram/verify-secret-word', NODE_SERVER_URL).href, {
@@ -1112,27 +1110,33 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id, secret_word: text })
                 });
+                
+                if (!response.ok) {
+                    botLog.error(`[BOT] Server javob bermadi - Status: ${response.status}`);
+                    throw new Error(`Server javob bermadi: ${response.status}`);
+                }
+                
                 const result = await response.json();
 
                 if (result.status === 'success') {
 
-                    const magicLink = new URL(path.join('api/verify-session/', result.magic_token), NODE_SERVER_URL).href;
-                    const messageText = `Salom, <b>${escapeHtml(msg.from.username)}</b>! \n\nYangi qurilmadan kirishni tasdiqlash uchun quyidagi tugmani bosing. Bu havola 5 daqiqa amal qiladi.`;
+                    const magicLink = new URL(path.join('api/auth/verify-session/', result.magic_token), NODE_SERVER_URL).href;
+                    const messageText = `Salom, <b>${escapeHtml(msg.from.username || 'Foydalanuvchi')}</b>! \n\nYangi qurilmadan kirishni tasdiqlash uchun quyidagi tugmani bosing. Bu havola 5 daqiqa amal qiladi.`;
                     const keyboard = { inline_keyboard: [[{ text: "✅ Yangi Qurilmada Kirish", url: magicLink }]] };
                     await safeSendMessage(chatId, messageText, { reply_markup: keyboard });
                     delete userStates[chatId];
 
                 } else if (result.status === 'locked') {
-
                     await safeSendMessage(chatId, "Xavfsizlik qoidasi buzildi. Kirishga urinish bloklandi. Administrator bilan bog'laning.");
                     delete userStates[chatId];
+                    botLog.error(`[BOT] Akkaunt bloklandi - User ID: ${user_id}`);
                 } else {
                     state.attempts_left--;
+                    botLog.error(`[BOT] Maxfiy so'z noto'g'ri - User ID: ${user_id}, Qolgan urinishlar: ${state.attempts_left}`);
 
                     if (state.attempts_left > 0) {
                         await safeSendMessage(chatId, `Maxfiy so'z noto'g'ri. Qayta urinib ko'ring. (Qolgan urinishlar: ${state.attempts_left})`);
                     } else {
-
                         await safeSendMessage(chatId, "Urinishlar soni tugadi. Jarayon bloklandi.");
                         fetch(new URL('api/telegram/notify-admin-lock', NODE_SERVER_URL).href, {
                             method: 'POST',
@@ -1143,8 +1147,8 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     }
                 }
             } catch (error) {
-                botLog.error("Node.js serveriga maxfiy so'zni tekshirish uchun ulanishda xatolik:", error.message);
-                await safeSendMessage(chatId, "Tizimda vaqtinchalik xatolik.");
+                botLog.error(`[BOT] Maxfiy so'z tekshirish xatoligi - User ID: ${user_id}`, error);
+                await safeSendMessage(chatId, "Tizimda vaqtinchalik xatolik. Iltimos, keyinroq qayta urinib ko'ring.");
             }
         }
         } catch (error) {

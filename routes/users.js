@@ -1377,26 +1377,23 @@ router.post('/:id/generate-telegram-link', isAuthenticated, hasPermission('users
         const { createLogger } = require('../utils/logger.js');
         const log = createLogger('TELEGRAM_LINK');
 
-        log.info(`[GENERATE_LINK] Admin ${adminId} foydalanuvchi ${userId} uchun Telegram obunasi linkini yaratmoqda`);
-
         // Foydalanuvchini tekshirish
         const user = await db('users').where({ id: userId }).first();
         
         if (!user) {
-            log.warn(`[GENERATE_LINK] Foydalanuvchi topilmadi: ${userId}`);
+            log.error(`[GENERATE_LINK] Foydalanuvchi topilmadi: ${userId}`);
             return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
         }
 
         // Superadmin uchun bot obunasi majburiy emas
         const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
         if (isSuperAdmin) {
-            log.warn(`[GENERATE_LINK] Superadmin uchun link yaratishga urinish: ${userId}`);
+            log.error(`[GENERATE_LINK] Superadmin uchun link yaratishga urinish: ${userId}`);
             return res.status(400).json({ message: "Superadmin uchun bot obunasi majburiy emas." });
         }
 
         // Agar allaqachon ulangan bo'lsa
         if (user.telegram_chat_id && user.is_telegram_connected) {
-            log.info(`[GENERATE_LINK] Foydalanuvchi allaqachon Telegram'ga ulangan: ${userId}, chat_id: ${user.telegram_chat_id}`);
             return res.status(400).json({ 
                 message: "Foydalanuvchi allaqachon Telegram'ga ulangan.",
                 alreadyConnected: true,
@@ -1420,10 +1417,6 @@ router.post('/:id/generate-telegram-link', isAuthenticated, hasPermission('users
             .where('token', 'like', 'bot_connect_%')
             .del();
 
-        if (deletedTokens > 0) {
-            log.info(`[GENERATE_LINK] ${deletedTokens} ta eski token o'chirildi: ${userId}`);
-        }
-
         // Yangi token yaratish
         const { v4: uuidv4 } = require('uuid');
         const token = `bot_connect_${uuidv4()}`;
@@ -1438,8 +1431,6 @@ router.post('/:id/generate-telegram-link', isAuthenticated, hasPermission('users
 
         // Bot havolasi yaratish
         const botLink = `https://t.me/${botUsername}?start=${token}`;
-
-        log.success(`[GENERATE_LINK] Telegram obunasi linki yaratildi: ${userId}, Token: ${token.substring(0, 20)}..., Muddat: ${expires_at.toISOString()}`);
 
         // Audit log
         await db('audit_logs').insert({
@@ -1499,20 +1490,19 @@ router.post('/:id/clear-telegram', isAuthenticated, hasPermission('users:edit'),
 
         const user = await db('users').where({ id: userId }).first();
         if (!user) {
-            log.warn(`[CLEAR] Foydalanuvchi topilmadi: ${userId}`);
+            log.error(`[CLEAR] Foydalanuvchi topilmadi: ${userId}`);
             return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
         }
 
         // Superadmin uchun Telegram bog'lanishni tozalashga ruxsat bermaymiz
         const isTargetSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
         if (isTargetSuperAdmin) {
-            log.warn(`[CLEAR] Superadmin uchun Telegram bog'lanishni tozalashga urinish: ${userId}`);
+            log.error(`[CLEAR] Superadmin uchun Telegram bog'lanishni tozalashga urinish: ${userId}`);
             return res.status(400).json({ message: "Superadmin uchun Telegram bog'lanishini tozalashga ruxsat berilmaydi." });
         }
 
         // Agar foydalanuvchi allaqachon botga ulanmagan bo'lsa
         if (!user.telegram_chat_id && !user.is_telegram_connected) {
-            log.info(`[CLEAR] Foydalanuvchi botga ulanmagan, tozalash shart emas: ${userId}`);
             return res.status(400).json({ message: "Foydalanuvchi Telegram botga ulanmagan." });
         }
 
@@ -1533,9 +1523,6 @@ router.post('/:id/clear-telegram', isAuthenticated, hasPermission('users:edit'),
                 .where('token', 'like', 'bot_connect_%')
                 .del();
 
-            if (deletedTokens > 0) {
-                log.info(`[CLEAR] ${deletedTokens} ta eski bot_connect token o'chirildi: ${userId}`);
-            }
         });
 
         // Audit log
@@ -1562,7 +1549,6 @@ router.post('/:id/clear-telegram', isAuthenticated, hasPermission('users:edit'),
         }
 
         const message = "Foydalanuvchining Telegram bog'lanishi muvaffaqiyatli tozalandi.";
-        log.success(`[CLEAR] ${message} UserID=${userId}`);
 
         res.json({ message });
     } catch (error) {

@@ -524,8 +524,19 @@ router.get('/verify-session/:token', async (req, res) => {
     try {
         const link = await db('magic_links').where({ token: token }).first();
 
-        if (!link || new Date() > new Date(link.expires_at)) {
-            await logAction(link ? link.user_id : null, '2fa_fail', 'magic_link', null, { token, reason: 'Invalid or expired token', ip: ipAddress, userAgent });
+        if (!link) {
+            log.error(`[VERIFY_SESSION] Token topilmadi: ${token.substring(0, 10)}...`);
+            await logAction(null, '2fa_fail', 'magic_link', null, { token, reason: 'Token not found', ip: ipAddress, userAgent });
+            return res.status(400).send("<h1>Havola yaroqsiz yoki muddati o'tgan</h1><p>Iltimos, tizimga qayta kirishga urinib ko'ring.</p>");
+        }
+
+        // Timezone muammosini hal qilish - UTC vaqt bilan solishtirish
+        const now = new Date();
+        const expiresAt = new Date(link.expires_at);
+        
+        if (now > expiresAt) {
+            log.error(`[VERIFY_SESSION] Token muddati o'tgan - Token: ${token.substring(0, 10)}..., User ID: ${link.user_id}`);
+            await logAction(link.user_id, '2fa_fail', 'magic_link', null, { token, reason: 'Token expired', ip: ipAddress, userAgent, expiresAt: expiresAt.toISOString(), now: now.toISOString() });
             return res.status(400).send("<h1>Havola yaroqsiz yoki muddati o'tgan</h1><p>Iltimos, tizimga qayta kirishga urinib ko'ring.</p>");
         }
 
@@ -565,7 +576,7 @@ router.get('/verify-session/:token', async (req, res) => {
 
         req.session.regenerate(async (err) => {
             if (err) {
-                log.error("Sessiyani qayta yaratishda xatolik:", err.message);
+                log.error(`[VERIFY_SESSION] Sessiya yaratish xatoligi - User ID: ${link.user_id}`, err);
                 return res.status(500).send("<h1>Ichki xatolik</h1><p>Sessiyani yaratib bo'lmadi.</p>");
             }
 
@@ -592,17 +603,21 @@ router.get('/verify-session/:token', async (req, res) => {
                         await bot.deleteMessage(user.telegram_chat_id, user.bot_login_message_id);
                         await db('users').where({ id: user.id }).update({ bot_login_message_id: null });
                     } catch (error) {
-                        // Silent fail - old message deletion is optional
+                        log.error(`[VERIFY_SESSION] Bot xabarini o'chirishda xatolik - User ID: ${user.id}`, error.message);
                     }
                 }
             }
 
+            // Token'ni o'chirish
             await db('magic_links').where({ token: token }).del();
-            res.redirect('/');
+            
+            // Redirect'ni to'g'ri qilish
+            const baseUrl = process.env.APP_BASE_URL || req.protocol + '://' + req.get('host');
+            res.redirect(baseUrl + '/');
         });
 
     } catch (error) {
-        log.error("/verify-session xatoligi:", error.message);
+        log.error(`[VERIFY_SESSION] Xatolik - Token: ${token?.substring(0, 10)}...`, error);
         res.status(500).send("<h1>Serverda kutilmagan xatolik</h1>");
     }
 });

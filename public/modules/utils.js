@@ -167,7 +167,28 @@ export function parseUserAgent(uaString) {
 }
 
 export function hasPermission(currentUser, permissionKey) {
-    return currentUser?.permissions?.includes(permissionKey);
+    const userPermissions = currentUser?.permissions || [];
+    
+    // Agar to'g'ridan-to'g'ri ruxsat bo'lsa
+    if (userPermissions.includes(permissionKey)) {
+        return true;
+    }
+    
+    // Ruxsatlar mapping (tahrirlash ruxsati bo'lsa, ko'rish ruxsati ham beriladi)
+    const permissionMapping = {
+        'reports:edit_all': 'reports:view_all',
+        'reports:edit_assigned': 'reports:view_assigned',
+        'reports:edit_own': 'reports:view_own'
+    };
+    
+    // Tahrirlash ruxsati bo'lsa, ko'rish ruxsati ham beriladi
+    for (const [editPerm, viewPerm] of Object.entries(permissionMapping)) {
+        if (userPermissions.includes(editPerm) && permissionKey === viewPerm) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 /**

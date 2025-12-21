@@ -63,7 +63,6 @@ router.get('/backup-db', async (req, res) => {
         const fileStream = require('fs').createReadStream(dbPath);
         fileStream.pipe(res);
         
-        log.debug(`✅ Database backup yuklab olindi: ${fileName} (${fileSizeInMB} MB)`);
 
     } catch (error) {
         log.error("Baza nusxasini yuklashda kutilmagan xatolik:", error);
@@ -99,14 +98,12 @@ router.post('/restore-db', uploadDb.single('database'), async (req, res) => {
         
         try {
             await fs.copyFile(dbPath, backupPath);
-            log.debug(`✅ Eski database backup qilindi: ${backupFileName}`);
         } catch (error) {
-            log.warn(`⚠️ Eski database backup qilishda xatolik (ehtimol fayl mavjud emas): ${error.message}`);
+            log.error(`Eski database backup qilishda xatolik (ehtimol fayl mavjud emas): ${error.message}`);
         }
 
         // Yangi database faylini yozish
         await fs.writeFile(dbPath, req.file.buffer);
-        log.debug(`✅ Yangi database yozildi: ${req.file.originalname} (${(req.file.size / (1024 * 1024)).toFixed(2)} MB)`);
 
         // Database'ni tekshirish (bazaga ulanishni sinab ko'rish)
         try {
@@ -122,13 +119,11 @@ router.post('/restore-db', uploadDb.single('database'), async (req, res) => {
             // Oddiy so'rovni sinab ko'rish
             await testDb.raw('SELECT 1');
             await testDb.destroy();
-            
-            log.debug(`✅ Database to'g'ri ishlayapti`);
         } catch (error) {
             // Agar yangi database noto'g'ri bo'lsa, eski database'ni qaytarish
             try {
                 await fs.copyFile(backupPath, dbPath);
-                log.debug(`⚠️ Yangi database noto'g'ri, eski database qaytarildi`);
+                log.error(`Yangi database noto'g'ri, eski database qaytarildi`);
             } catch (restoreError) {
                 log.error(`❌ Eski database'ni qaytarishda xatolik: ${restoreError.message}`);
             }
@@ -171,7 +166,6 @@ router.post('/clear-sessions', async (req, res) => {
 // GET /api/admin/export-full-db - To'liq ma'lumotlar bazasini JSON formatda export qilish
 router.get('/export-full-db', async (req, res) => {
     try {
-        log.debug('📥 To\'liq database export boshlandi...');
         
         // Barcha jadvallardan ma'lumot olish (to'liq ro'yxat)
         const tables = {
@@ -260,8 +254,6 @@ router.get('/export-full-db', async (req, res) => {
             counts: counts
         };
         
-        log.debug(`✅ Export tayyor: ${Object.keys(tables).length} jadval, ${fullExport.export_info.total_records} yozuv`);
-        log.debug(`📊 Jadval statistikasi:`, counts);
         
         // JSON fayl sifatida yuborish
         const fileName = `full_database_export_${new Date().toISOString().split('T')[0]}.json`;
@@ -278,7 +270,6 @@ router.get('/export-full-db', async (req, res) => {
 // POST /api/admin/import-full-db - To'liq ma'lumotlar bazasini JSON dan import qilish
 router.post('/import-full-db', async (req, res) => {
     try {
-        log.debug('📤 To\'liq database import boshlandi...');
         
         const importData = req.body;
         
@@ -297,7 +288,6 @@ router.post('/import-full-db', async (req, res) => {
         const superAdminUsers = await db('users').where('role', 'super_admin').select('id', 'username', 'role');
         const superAdminIds = superAdminUsers.map(u => u.id);
         
-        log.debug(`🛡️ Super admin'lar himoya qilinmoqda: ${superAdminIds.length} ta`);
         
         // Transaction ichida import qilish (xatolik bo'lsa rollback)
         const importCounts = {};
@@ -306,7 +296,6 @@ router.post('/import-full-db', async (req, res) => {
         
         await db.transaction(async (trx) => {
             // 1. Ma'lumotlarni import qilish (tozalash emas, faqat yangi ma'lumotlarni qo'shish)
-            log.debug('📥 Yangi ma\'lumotlarni yuklash...');
             
             // Import oldidan rollarni tekshirish va saqlash (keyinroq solishtirish uchun)
             let existingRoleNames = [];
@@ -315,29 +304,21 @@ router.post('/import-full-db', async (req, res) => {
                 existingRoleNames = existingRoles.map(r => r.role_name);
                 const importRoleNames = data.roles.map(r => r.role_name).filter(Boolean);
                 
-                log.debug(`🔍 [ROLES] Import oldidan rollar tekshiruvi:`);
-                log.debug(`  📊 Mavjud rollar (${existingRoleNames.length} ta):`, existingRoleNames);
-                log.debug(`  📊 Import qilinadigan rollar (${importRoleNames.length} ta):`, importRoleNames);
                 
                 // O'chirilgan rollarni topish (import faylida yo'q, lekin bazada mavjud)
                 const deletedRoles = existingRoleNames.filter(role => !importRoleNames.includes(role));
                 if (deletedRoles.length > 0) {
-                    log.debug(`  ⚠️ [ROLES] EHTIYOT: Quyidagi rollar import faylida yo'q (o'chirilishi mumkin):`, deletedRoles);
-                    log.debug(`  ⚠️ [ROLES] Bu rollar bazada qoladi, chunki import faqat yangi ma'lumotlarni qo'shadi/yangilaydi`);
                 } else {
-                    log.debug(`  ✅ [ROLES] Barcha mavjud rollar import faylida mavjud`);
                 }
                 
                 // Yangi rollarni topish
                 const newRoles = importRoleNames.filter(role => !existingRoleNames.includes(role));
                 if (newRoles.length > 0) {
-                    log.debug(`  ➕ [ROLES] Yangi qo'shiladigan rollar (${newRoles.length} ta):`, newRoles);
                 }
                 
                 // Yangilanadigan rollarni topish
                 const updatedRoles = importRoleNames.filter(role => existingRoleNames.includes(role));
                 if (updatedRoles.length > 0) {
-                    log.debug(`  🔄 [ROLES] Yangilanadigan rollar (${updatedRoles.length} ta):`, updatedRoles);
                 }
             }
             
@@ -358,14 +339,12 @@ router.post('/import-full-db', async (req, res) => {
                         try {
                             // Super admin himoyasi - users jadvali uchun
                             if (tableName === 'users' && record.role === 'super_admin') {
-                                log.debug(`  ⚠ Super admin o'tkazib yuborildi: ${record.username || record.id}`);
                                 skipped++;
                                 continue;
                             }
                             
                             // Super admin ID'larni o'tkazib yuborish
                             if (tableName === 'users' && superAdminIds.includes(record.id)) {
-                                log.debug(`  ⚠ Super admin ID o'tkazib yuborildi: ${record.id}`);
                                 skipped++;
                                 continue;
                             }
@@ -395,7 +374,7 @@ router.post('/import-full-db', async (req, res) => {
                                         .first();
                                     
                                     if (!relatedRecord) {
-                                        log.debug(`  ⚠ Foreign key tekshiruvi: ${fk.table}.${fk.column} = ${record[fk.reference]} topilmadi`);
+                                        log.error(`Foreign key tekshiruvi: ${fk.table}.${fk.column} = ${record[fk.reference]} topilmadi`);
                                         canImport = false;
                                         break;
                                     }
@@ -439,9 +418,6 @@ router.post('/import-full-db', async (req, res) => {
                                     // Rollar jadvali uchun log
                                     if (tableName === 'roles') {
                                         const roleName = record.role_name || record[options.upsert.key];
-                                        log.debug(`  🔄 [ROLES] Rol yangilanmoqda: ${roleName}`);
-                                        log.debug(`  📋 [ROLES] Eski ma'lumot:`, JSON.stringify(existing));
-                                        log.debug(`  📋 [ROLES] Yangi ma'lumot:`, JSON.stringify(record));
                                     }
                                     
                                     // Users jadvali uchun telegram_chat_id unique constraint tekshiruvi
@@ -482,7 +458,6 @@ router.post('/import-full-db', async (req, res) => {
                                     // Rollar jadvali uchun log
                                     if (tableName === 'roles') {
                                         const roleName = record.role_name || record[options.upsert.key];
-                                        log.debug(`  ✅ [ROLES] Rol yangilandi: ${roleName}`);
                                     }
                                 } else {
                                     // ID'ni o'chirib, insert qilish (avtomatik generatsiya uchun)
@@ -494,8 +469,6 @@ router.post('/import-full-db', async (req, res) => {
                                     // Rollar jadvali uchun log
                                     if (tableName === 'roles') {
                                         const roleName = recordToInsert.role_name || recordToInsert[options.upsert?.key];
-                                        log.debug(`  ➕ [ROLES] Yangi rol qo'shilmoqda: ${roleName}`);
-                                        log.debug(`  📋 [ROLES] Rol ma'lumotlari:`, JSON.stringify(recordToInsert));
                                     }
                                     
                                     // Users jadvali uchun telegram_chat_id unique constraint tekshiruvi
@@ -514,7 +487,6 @@ router.post('/import-full-db', async (req, res) => {
                                     // Rollar jadvali uchun log
                                     if (tableName === 'roles') {
                                         const roleName = recordToInsert.role_name || recordToInsert[options.upsert?.key];
-                                        log.debug(`  ✅ [ROLES] Yangi rol qo'shildi: ${roleName}`);
                                     }
                                 }
                                 imported++;
@@ -531,7 +503,6 @@ router.post('/import-full-db', async (req, res) => {
                                         const existing = await trx(tableName).where(whereClause).first();
                                         if (existing) {
                                             // Mavjud bo'lsa, update qilish
-                                            log.debug(`  🔄 [${tableName}] Composite key bilan mavjud yozuv yangilanmoqda:`, whereClause);
                                             await trx(tableName)
                                                 .where(whereClause)
                                                 .update(record);
@@ -548,7 +519,6 @@ router.post('/import-full-db', async (req, res) => {
                                         .first();
                                     if (existing) {
                                         // Mavjud bo'lsa, update qilish
-                                        log.debug(`  🔄 [${tableName}] ID ${record.id} mavjud, yangilanmoqda...`);
                                         await trx(tableName)
                                             .where('id', record.id)
                                             .update(record);
@@ -556,12 +526,10 @@ router.post('/import-full-db', async (req, res) => {
                                         continue;
                                     }
                                     // ID mavjud lekin bazada yo'q, ID bilan insert qilish
-                                    log.debug(`  ➕ [${tableName}] Yangi yozuv ID ${record.id} bilan qo'shilmoqda...`);
                                     await trx(tableName).insert(record);
                                     imported++;
                                 } else {
                                     // ID yo'q, insert qilish (avtomatik generatsiya uchun)
-                                    log.debug(`  ➕ [${tableName}] Yangi yozuv qo'shilmoqda (avtomatik ID)...`);
                                     await trx(tableName).insert(record);
                                 imported++;
                                 }
@@ -581,7 +549,6 @@ router.post('/import-full-db', async (req, res) => {
                     skippedCounts[tableName] = skipped;
                     errorCounts[tableName] = errors;
                     
-                    log.debug(`  ✓ ${tableName}: ${imported} import, ${skipped} o'tkazib yuborildi, ${errors} xatolik`);
                 } catch (err) {
                     log.error(`  ❌ ${tableName} import xatolik:`, err.message);
                     importCounts[tableName] = 0;
@@ -767,15 +734,10 @@ router.post('/import-full-db', async (req, res) => {
                 const finalRoleNames = finalRoles.map(r => r.role_name);
                 const importRoleNames = data.roles.map(r => r.role_name).filter(Boolean);
                 
-                log.debug(`🔍 [ROLES] Import keyin rollar tekshiruvi:`);
-                log.debug(`  📊 Import oldin bazadagi rollar (${existingRoleNames.length} ta):`, existingRoleNames);
-                log.debug(`  📊 Import keyin bazadagi rollar (${finalRoleNames.length} ta):`, finalRoleNames);
                 
                 // O'chirilgan rollarni topish (import faylida yo'q, lekin bazada mavjud)
                 const deletedRoles = finalRoleNames.filter(role => !importRoleNames.includes(role));
                 if (deletedRoles.length > 0) {
-                    log.debug(`  ⚠️ [ROLES] EHTIYOT: Quyidagi rollar import faylida yo'q, lekin bazada qolgan (${deletedRoles.length} ta):`, deletedRoles);
-                    log.debug(`  ⚠️ [ROLES] Bu rollar o'chirilmagan, chunki import faqat yangi ma'lumotlarni qo'shadi/yangilaydi`);
                 }
                 
                 // Qo'shilgan yangi rollarni topish (import oldin yo'q edi, keyin qo'shildi)
@@ -785,20 +747,15 @@ router.post('/import-full-db', async (req, res) => {
                     return wasInImport && !wasInDbBefore;
                 });
                 if (actuallyNewRoles.length > 0) {
-                    log.debug(`  ✅ [ROLES] Muvaffaqiyatli qo'shilgan yangi rollar (${actuallyNewRoles.length} ta):`, actuallyNewRoles);
                 }
                 
                 // Yo'qolgan rollarni topish (import oldin bor edi, keyin yo'qoldi)
                 const lostRoles = existingRoleNames.filter(role => !finalRoleNames.includes(role));
                 if (lostRoles.length > 0) {
-                    log.debug(`  ❌ [ROLES] XATOLIK: Quyidagi rollar import oldin bor edi, lekin keyin yo'qoldi (${lostRoles.length} ta):`, lostRoles);
-                    log.debug(`  ❌ [ROLES] Bu rollar o'chirilgan bo'lishi mumkin!`);
-                } else {
-                    log.debug(`  ✅ [ROLES] Barcha mavjud rollar saqlanib qoldi`);
+                    log.error(`[ROLES] XATOLIK: Quyidagi rollar import oldin bor edi, lekin keyin yo'qoldi (${lostRoles.length} ta):`, lostRoles);
+                    log.error(`[ROLES] Bu rollar o'chirilgan bo'lishi mumkin!`);
                 }
             }
-            
-            log.debug('✅ Import muvaffaqiyatli yakunlandi!');
         });
         
         // Import yakunlandi

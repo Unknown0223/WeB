@@ -19,18 +19,14 @@ const router = express.Router();
 router.post('/finalize-approval', async (req, res) => {
     const { user_id, role, locations = [], brands = [] } = req.body;
     
-    log.debug(`📥 [TELEGRAM API] Finalize approval so'rovi qabul qilindi. User ID: ${user_id}, Role: ${role}`);
-    log.debug(`   - Locations: ${locations.length} ta`, locations);
-    log.debug(`   - Brands: ${brands.length} ta`, brands);
-    
     if (!user_id || !role) {
-        log.debug(`❌ [TELEGRAM API] Validatsiya xatosi: user_id yoki role yo'q`);
+        log.error(`[TELEGRAM API] Validatsiya xatosi: user_id yoki role yo'q`);
         return res.status(400).json({ message: "Foydalanuvchi ID si va rol yuborilishi shart." });
     }
 
     // Super admin yaratish mumkin emas
     if (role === 'super_admin') {
-        log.debug(`❌ [TELEGRAM API] Super admin yaratishga urinish`);
+        log.error(`[TELEGRAM API] Super admin yaratishga urinish`);
         return res.status(403).json({ message: "Super admin yaratish mumkin emas." });
     }
 
@@ -38,14 +34,14 @@ router.post('/finalize-approval', async (req, res) => {
     const { db } = require('../db.js');
     const roleExists = await db('roles').where({ role_name: role }).first();
     if (!roleExists) {
-        log.debug(`❌ [TELEGRAM API] Rol topilmadi. Role: ${role}`);
+        log.error(`[TELEGRAM API] Rol topilmadi. Role: ${role}`);
         return res.status(400).json({ message: "Tanlangan rol mavjud emas." });
     }
 
     // Rol talablarini bazadan olish
     const roleData = await db('roles').where({ role_name: role }).first();
     if (!roleData) {
-        log.debug(`❌ [TELEGRAM API] Rol ma'lumotlari topilmadi. Role: ${role}`);
+        log.error(`[TELEGRAM API] Rol ma'lumotlari topilmadi. Role: ${role}`);
         return res.status(400).json({ message: "Tanlangan rol mavjud emas." });
     }
     
@@ -106,16 +102,14 @@ router.post('/finalize-approval', async (req, res) => {
 
         await db('pending_registrations').where({ user_id: user_id }).del();
 
-        log.debug(`✅ [TELEGRAM API] Foydalanuvchi muvaffaqiyatli tasdiqlandi. User ID: ${user_id}, Role: ${role}, Locations: ${locations.length} ta, Brands: ${brands.length} ta`);
         res.json({ status: 'success', message: 'Foydalanuvchi muvaffaqiyatli tasdiqlandi.' });
 
     } catch (error) {
-        log.error(`❌ [TELEGRAM API] /api/telegram/finalize-approval xatoligi:`, error);
-        log.error(`❌ [TELEGRAM API] Error stack:`, error.stack);
+        log.error(`[TELEGRAM API] /api/telegram/finalize-approval xatoligi:`, error);
+        log.error(`[TELEGRAM API] Error stack:`, error.stack);
         // Agar xatolik yuz bersa, statusni qaytarish
         try {
             await db('users').where({ id: user_id, status: 'status_in_process' }).update({ status: 'pending_approval' });
-            log.debug(`🔄 [TELEGRAM API] Foydalanuvchi statusi qaytarildi: pending_approval`);
         } catch (updateError) {
             log.error(`❌ [TELEGRAM API] Statusni qaytarishda xatolik:`, updateError);
         }
@@ -133,14 +127,23 @@ router.post('/verify-secret-word', async (req, res) => {
         const user = await db('users').where({ id: user_id }).first();
 
         if (!user || !user.secret_word) {
+            log.error(`[VERIFY_SECRET] Foydalanuvchi yoki maxfiy so'z topilmadi - User ID: ${user_id}`);
             return res.status(400).json({ status: 'fail', message: "Foydalanuvchi yoki maxfiy so'z topilmadi." });
         }
 
-        const match = await bcrypt.compare(secret_word, user.secret_word);
+        // Maxfiy so'zni trim qilish va bo'sh joylarni olib tashlash
+        const trimmedSecretWord = (secret_word || '').trim();
+        
+        if (!trimmedSecretWord) {
+            log.error(`[VERIFY_SECRET] Maxfiy so'z bo'sh - User ID: ${user_id}`);
+            return res.status(400).json({ status: 'fail', message: "Maxfiy so'z kiritilmadi." });
+        }
+
+        const match = await bcrypt.compare(trimmedSecretWord, user.secret_word);
 
         if (match) {
             const token = uuidv4();
-            const expires_at = new Date(Date.now() + 5 * 60 * 1000);
+            const expires_at = new Date(Date.now() + 5 * 60 * 1000); // 5 daqiqa
             
             await db('magic_links').insert({
                 token: token,
@@ -155,6 +158,8 @@ router.post('/verify-secret-word', async (req, res) => {
             const newAttempts = (user.login_attempts || 0) + 1;
             await db('users').where({ id: user_id }).update({ login_attempts: newAttempts });
 
+            log.error(`[VERIFY_SECRET] Maxfiy so'z noto'g'ri - User ID: ${user_id}, Urinishlar: ${newAttempts}/${MAX_SECRET_ATTEMPTS}`);
+
             if (newAttempts >= MAX_SECRET_ATTEMPTS) {
                 await sendToTelegram({
                     type: 'security_alert',
@@ -166,7 +171,7 @@ router.post('/verify-secret-word', async (req, res) => {
             return res.json({ status: 'fail', message: "Maxfiy so'z noto'g'ri." });
         }
     } catch (error) {
-        log.error("/api/telegram/verify-secret-word xatoligi:", error);
+        log.error(`[VERIFY_SECRET] Xatolik - User ID: ${user_id}`, error);
         res.status(500).json({ message: "Serverda kutilmagan xatolik." });
     }
 });

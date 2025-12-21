@@ -180,7 +180,7 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
         reports.forEach(report => {
             try {
                 if (!report || !report.data || !report.settings) {
-                    console.warn('[reports] Noto\'g\'ri report formati:', report);
+                    // Invalid report format - skip silently
                     return;
                 }
                 const parsedData = JSON.parse(report.data);

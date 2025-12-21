@@ -11,7 +11,6 @@ const router = express.Router();
 
 async function setWebhook(botToken) {
     if (!botToken) {
-        log.debug("Bot tokeni mavjud emas, webhook o'rnatilmadi.");
         return;
     }
 
@@ -25,31 +24,24 @@ async function setWebhook(botToken) {
 
     // HTTPS tekshiruvi (faqat ogohlantirish, bloklamaymiz)
     if (!appBaseUrl.startsWith('https://')) {
-        log.warn(`⚠️  DIQQAT: APP_BASE_URL (${appBaseUrl}) 'https://' bilan boshlanmagan. Telegram webhooklari faqat HTTPS manzillarni qabul qiladi.`);
-        log.warn(`⚠️  Railway.com'da bu avtomatik HTTPS bo'ladi. Agar boshqa platformada bo'lsangiz, HTTPS sozlang.`);
+        log.error(`DIQQAT: APP_BASE_URL (${appBaseUrl}) 'https://' bilan boshlanmagan. Telegram webhooklari faqat HTTPS manzillarni qabul qiladi.`);
     }
 
     const webhookUrl = `${appBaseUrl}/telegram-webhook/${botToken}`;
     const telegramApiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
 
     try {
-        log.debug(`🔗 Webhook o'rnatilmoqda: ${webhookUrl}`);
         const response = await axios.post(telegramApiUrl, { url: webhookUrl });
         if (response.data.ok) {
-            log.debug(`✅ Webhook muvaffaqiyatli ${webhookUrl} manziliga o'rnatildi.`);
             // Bot allaqachon initialize qilingan bo'lishi mumkin, shuning uchun faqat tekshiramiz
             if (!require('../utils/bot').getBot()) {
                 await initializeBot(botToken, { polling: false });
             }
         } else {
-            log.error("❌ Telegram webhookni o'rnatishda xatolik:", response.data.description);
+            log.error("Telegram webhookni o'rnatishda xatolik:", response.data.description);
         }
     } catch (error) {
-        log.error("❌ Telegram API'ga ulanishda xatolik:", error.response ? error.response.data : error.message);
-        // Xatolik bo'lsa ham, bot polling rejimida ishlashi mumkin (development uchun)
-        if (process.env.NODE_ENV !== 'production') {
-            log.warn("⚠️  Development rejimida bot polling rejimida ishlashi mumkin.");
-        }
+        log.error("Telegram API'ga ulanishda xatolik:", error.response ? error.response.data : error.message);
     }
 }
 

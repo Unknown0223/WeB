@@ -203,9 +203,8 @@ const renderKpiCards = (stats) => {
             try {
                 const { state: globalState } = await import('./modules/state.js');
                 globalState.currentUser = state.currentUser;
-                console.log('✅ [INIT] Global state.currentUser o\'rnatildi:', state.currentUser.username);
             } catch (error) {
-                console.warn('⚠️ [INIT] Global state modulini yuklashda xatolik:', error);
+                console.error('[INIT] Global state modulini yuklashda xatolik:', error);
             }
             
             // Window obyektiga ham qo'shish (realtime modul uchun)
@@ -266,7 +265,6 @@ const renderKpiCards = (stats) => {
             try {
                 const { initRealTime } = await import('./modules/realtime.js');
                 initRealTime();
-                console.log('✅ [INIT] Real-time modul ishga tushirildi');
             } catch (error) {
                 console.error('❌ [INIT] Real-time modulni yuklashda xatolik:', error);
             }
@@ -300,9 +298,24 @@ const renderKpiCards = (stats) => {
     function applyRolePermissions() {
         const userPermissions = state.currentUser.permissions || [];
         
+        // Ruxsatlar mapping (tahrirlash ruxsati bo'lsa, ko'rish ruxsati ham beriladi)
+        const permissionMapping = {
+            'reports:edit_all': 'reports:view_all',
+            'reports:edit_assigned': 'reports:view_assigned',
+            'reports:edit_own': 'reports:view_own'
+        };
+        
+        // Virtual permissions qo'shish (tahrirlash ruxsati bo'lsa, ko'rish ruxsati ham qo'shiladi)
+        const virtualPermissions = [...userPermissions];
+        userPermissions.forEach(perm => {
+            if (permissionMapping[perm] && !virtualPermissions.includes(permissionMapping[perm])) {
+                virtualPermissions.push(permissionMapping[perm]);
+            }
+        });
+        
         // Admin panel tugmasini ko'rsatish - agar quyidagi huquqlardan biri bo'lsa
         const adminPanelPermissions = ['dashboard:view', 'users:view', 'settings:view', 'roles:manage', 'audit:view'];
-        const hasAdminAccess = adminPanelPermissions.some(p => userPermissions.includes(p));
+        const hasAdminAccess = adminPanelPermissions.some(p => virtualPermissions.includes(p));
         
         if (hasAdminAccess) {
             const adminPanelBtn = document.getElementById('admin-panel-btn');
@@ -312,10 +325,12 @@ const renderKpiCards = (stats) => {
         }
         
         document.querySelectorAll('[data-permission]').forEach(el => {
-            const requiredPermissions = el.dataset.permission.split(',');
-            const hasPermission = requiredPermissions.some(p => userPermissions.includes(p));
+            const requiredPermissions = el.dataset.permission.split(',').map(p => p.trim());
+            const hasPermission = requiredPermissions.some(p => virtualPermissions.includes(p));
             if (!hasPermission) {
                 el.style.display = 'none';
+            } else {
+                el.style.display = '';
             }
         });
     }
@@ -363,8 +378,16 @@ const renderKpiCards = (stats) => {
     }
 
     async function fetchAndRenderReports() {
+        // Ko'rish ruxsatlari
         const viewPermissions = ['reports:view_own', 'reports:view_assigned', 'reports:view_all'];
-        if (!viewPermissions.some(p => state.currentUser.permissions.includes(p))) {
+        // Tahrirlash ruxsatlari (agar bo'lsa, ko'rish ruxsati ham beriladi)
+        const editPermissions = ['reports:edit_own', 'reports:edit_assigned', 'reports:edit_all'];
+        
+        // Ko'rish yoki tahrirlash ruxsati borligini tekshirish
+        const hasViewPermission = viewPermissions.some(p => state.currentUser.permissions.includes(p));
+        const hasEditPermission = editPermissions.some(p => state.currentUser.permissions.includes(p));
+        
+        if (!hasViewPermission && !hasEditPermission) {
             if (DOM.savedReportsList) DOM.savedReportsList.innerHTML = '<div class="empty-state">Hisobotlarni ko\'rish uchun ruxsat yo\'q.</div>';
             return;
         }
@@ -384,14 +407,6 @@ const renderKpiCards = (stats) => {
             }
             
             const data = await res.json();
-            console.log('[FRONTEND] API javob:', { 
-                reportsType: typeof data.reports, 
-                reportsIsArray: Array.isArray(data.reports),
-                reportsKeys: data.reports ? Object.keys(data.reports) : [],
-                reportsCount: data.reports ? (Array.isArray(data.reports) ? data.reports.length : Object.keys(data.reports).length) : 0,
-                total: data.total,
-                pages: data.pages
-            });
             
             // Reports formatini to'g'rilash
             state.existingDates = {};
@@ -426,12 +441,6 @@ const renderKpiCards = (stats) => {
             
             state.pagination = { total: data.total, pages: data.pages, currentPage: data.currentPage };
 
-            console.log('[FRONTEND] State.savedReports:', {
-                type: typeof state.savedReports,
-                isArray: Array.isArray(state.savedReports),
-                keys: state.savedReports ? Object.keys(state.savedReports) : [],
-                count: state.savedReports ? (Array.isArray(state.savedReports) ? state.savedReports.length : Object.keys(state.savedReports).length) : 0
-            });
 
             renderSavedReports();
             renderPagination();
@@ -593,31 +602,21 @@ const renderKpiCards = (stats) => {
 
     function renderSavedReports() {
         if (!DOM.savedReportsList) {
-            console.warn('[FRONTEND] DOM.savedReportsList topilmadi!');
+            console.error('[FRONTEND] DOM.savedReportsList topilmadi!');
             return;
         }
         
-        console.log('[FRONTEND] renderSavedReports chaqirildi:', {
-            savedReportsType: typeof state.savedReports,
-            savedReportsIsArray: Array.isArray(state.savedReports),
-            savedReportsKeys: state.savedReports ? Object.keys(state.savedReports) : [],
-            savedReportsCount: state.savedReports ? (Array.isArray(state.savedReports) ? state.savedReports.length : Object.keys(state.savedReports).length) : 0
-        });
-        
         const reportIds = Object.keys(state.savedReports || {});
-        console.log('[FRONTEND] Report IDs:', reportIds);
         
         if (reportIds.length === 0) {
-            console.warn('[FRONTEND] Report IDs bo\'sh, "Hisobotlar topilmadi" ko\'rsatilmoqda');
             DOM.savedReportsList.innerHTML = '<div class="empty-state">Hisobotlar topilmadi.</div>';
             return;
         }
         const htmlContent = reportIds.map(id => {
             const report = state.savedReports[id];
-            console.log(`[FRONTEND] Rendering report ${id} (script.js):`, report);
             
             if (!report) {
-                console.warn(`[FRONTEND] Report ${id} topilmadi! (script.js)`);
+                console.error(`[FRONTEND] Report ${id} topilmadi!`);
                 return '';
             }
             
@@ -626,7 +625,7 @@ const renderKpiCards = (stats) => {
             // Sanani formatlash
             const reportDate = report.date || report.report_date;
             if (!reportDate) {
-                console.warn(`[FRONTEND] Report ${id} da sana yo'q! (script.js)`);
+                console.error(`[FRONTEND] Report ${id} da sana yo'q!`);
                 return '';
             }
             
@@ -648,12 +647,7 @@ const renderKpiCards = (stats) => {
                 </div>`;
         }).join('');
         
-        console.log(`[FRONTEND] Generated HTML content length: ${htmlContent.length}, Content:`, htmlContent);
-        console.log(`[FRONTEND] DOM.savedReportsList element:`, DOM.savedReportsList);
-        
         DOM.savedReportsList.innerHTML = htmlContent;
-        
-        console.log(`[FRONTEND] After setting innerHTML, DOM.savedReportsList.innerHTML length: ${DOM.savedReportsList.innerHTML.length}`);
     }
     
     function updateTableValues(reportData = {}) {
@@ -759,7 +753,6 @@ const renderKpiCards = (stats) => {
                 }, 100);
             }
 
-            console.log('[LOCALSTORAGE] Form ma\'lumotlari yuklandi');
             return true;
         } catch (error) {
             console.error('[LOCALSTORAGE] Yuklashda xatolik:', error);
@@ -837,10 +830,15 @@ const renderKpiCards = (stats) => {
 
         let locationsToShow = [];
         
-        if (userPermissions.includes('reports:view_all')) {
+        // Agar foydalanuvchiga biriktirilgan filiallar bo'lsa, faqat ularni ko'rsatish
+        if (userAssignedLocations.length > 0) {
+            locationsToShow = userAssignedLocations;
+        } else if (userPermissions.includes('reports:view_all')) {
+            // Agar biriktirilgan filiallar yo'q bo'lsa va view_all permission bor bo'lsa, barcha filiallarni ko'rsatish
             locationsToShow = allSystemLocations;
         } else {
-            locationsToShow = userAssignedLocations;
+            // Hech qanday filial ko'rsatilmaydi
+            locationsToShow = [];
         }
         
         state.userLocations = locationsToShow;
@@ -1696,6 +1694,150 @@ const renderKpiCards = (stats) => {
         const addSafeListener = (element, event, handler) => {
             if (element) element.addEventListener(event, handler);
         };
+
+        // Mobile menu toggle
+        const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+        const sidebar = document.querySelector('.sidebar');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+        
+        function toggleMobileMenu() {
+            if (sidebar && sidebarOverlay) {
+                sidebar.classList.toggle('open');
+                sidebarOverlay.classList.toggle('active');
+                // Body scroll ni to'xtatish/yochish
+                if (sidebar.classList.contains('open')) {
+                    document.body.style.overflow = 'hidden';
+                } else {
+                    document.body.style.overflow = '';
+                }
+            }
+        }
+        
+        function closeMobileMenu() {
+            if (sidebar && sidebarOverlay) {
+                sidebar.classList.remove('open');
+                sidebarOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        }
+        
+        addSafeListener(mobileMenuToggle, 'click', (e) => {
+            e.stopPropagation();
+            toggleMobileMenu();
+        });
+        
+        addSafeListener(sidebarOverlay, 'click', closeMobileMenu);
+        
+        // Sidebar ichidagi report item bosilganda mobil menyuni yopish
+        addSafeListener(DOM.savedReportsList, 'click', (e) => {
+            const item = e.target.closest('.report-item');
+            if (item && item.dataset.id) {
+                if (window.innerWidth <= 768) {
+                    closeMobileMenu();
+                }
+            }
+        });
+        
+        // Window resize - katta ekranda sidebar ochiq bo'lishi kerak
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 768) {
+                closeMobileMenu();
+            }
+        });
+        
+        // Sidebar collapse/expand toggle
+        const leftSidebar = document.getElementById('left-sidebar');
+        const rightSidebar = document.getElementById('right-sidebar');
+        const toggleLeftSidebar = document.getElementById('toggle-left-sidebar');
+        const toggleRightSidebar = document.getElementById('toggle-right-sidebar');
+        const mainWrapper = document.querySelector('.main-wrapper');
+        
+        function toggleLeftSidebarCollapse() {
+            if (leftSidebar && mainWrapper) {
+                leftSidebar.classList.toggle('collapsed');
+                mainWrapper.classList.toggle('sidebar-left-collapsed');
+                
+                // LocalStorage'ga saqlash
+                const isCollapsed = leftSidebar.classList.contains('collapsed');
+                localStorage.setItem('leftSidebarCollapsed', isCollapsed);
+            }
+        }
+        
+        function toggleRightSidebarCollapse() {
+            if (rightSidebar && mainWrapper) {
+                rightSidebar.classList.toggle('collapsed');
+                mainWrapper.classList.toggle('sidebar-right-collapsed');
+                
+                // LocalStorage'ga saqlash
+                const isCollapsed = rightSidebar.classList.contains('collapsed');
+                localStorage.setItem('rightSidebarCollapsed', isCollapsed);
+            }
+        }
+        
+        // LocalStorage'dan yuklash
+        if (leftSidebar && mainWrapper) {
+            const leftCollapsed = localStorage.getItem('leftSidebarCollapsed') === 'true';
+            if (leftCollapsed) {
+                leftSidebar.classList.add('collapsed');
+                mainWrapper.classList.add('sidebar-left-collapsed');
+            }
+        }
+        
+        if (rightSidebar && mainWrapper) {
+            const rightCollapsed = localStorage.getItem('rightSidebarCollapsed') === 'true';
+            if (rightCollapsed) {
+                rightSidebar.classList.add('collapsed');
+                mainWrapper.classList.add('sidebar-right-collapsed');
+            }
+        }
+        
+        addSafeListener(toggleLeftSidebar, 'click', (e) => {
+            e.stopPropagation();
+            toggleLeftSidebarCollapse();
+            if (window.feather) feather.replace();
+        });
+        
+        addSafeListener(toggleRightSidebar, 'click', (e) => {
+            e.stopPropagation();
+            toggleRightSidebarCollapse();
+            if (window.feather) feather.replace();
+        });
+        
+        // Mobil uchun right column toggle button
+        if (window.innerWidth <= 768) {
+            const rightColumnToggleMobile = document.createElement('button');
+            rightColumnToggleMobile.className = 'right-column-toggle-mobile';
+            rightColumnToggleMobile.id = 'right-column-toggle-mobile';
+            rightColumnToggleMobile.innerHTML = '<i data-feather="bar-chart-2"></i>';
+            rightColumnToggleMobile.title = 'KPI va Statistika';
+            document.body.appendChild(rightColumnToggleMobile);
+            
+            if (window.feather) feather.replace();
+            
+            addSafeListener(rightColumnToggleMobile, 'click', () => {
+                if (rightSidebar) {
+                    rightSidebar.classList.toggle('open');
+                    if (rightSidebar.classList.contains('open')) {
+                        document.body.style.overflow = 'hidden';
+                    } else {
+                        document.body.style.overflow = '';
+                    }
+                }
+            });
+            
+            // Right sidebar overlay
+            const rightSidebarOverlay = document.createElement('div');
+            rightSidebarOverlay.className = 'sidebar-overlay right-sidebar-overlay';
+            rightSidebarOverlay.id = 'right-sidebar-overlay';
+            document.body.appendChild(rightSidebarOverlay);
+            
+            addSafeListener(rightSidebarOverlay, 'click', () => {
+                if (rightSidebar) {
+                    rightSidebar.classList.remove('open');
+                    document.body.style.overflow = '';
+                }
+            });
+        }
 
         addSafeListener(DOM.newReportBtn, 'click', createNewReport);
         addSafeListener(DOM.savedReportsList, 'click', e => {
