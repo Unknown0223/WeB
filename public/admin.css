@@ -5963,10 +5963,13 @@ input.form-control.comparison-input {
     }
     
     .mobile-menu-toggle {
-        width: 40px;
-        height: 40px;
+        display: flex !important; /* Mobil versiyada ko'rsatish */
+        width: 44px;
+        height: 44px;
         top: 10px;
         left: 10px;
+        position: fixed;
+        z-index: 1002;
     }
     
     .sidebar {
@@ -6163,6 +6166,63 @@ input.form-control.comparison-input {
         font-size: 12px;
         padding: 6px 10px;
     }
+    
+    /* Locations controls mobil uchun */
+    .locations-controls {
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+    }
+    
+    .locations-controls .form-group {
+        width: 100%;
+        min-width: 100%;
+    }
+    
+    .filter-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        width: 100%;
+        justify-content: flex-start;
+    }
+    
+    .filter-btn {
+        flex: 1 1 auto;
+        min-width: calc(50% - 4px);
+        padding: 10px 12px;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .filter-btn i {
+        margin-right: 4px;
+    }
+    
+    .view-toggle {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+    }
+    
+    .view-toggle-btn {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+    }
+    
+    /* Card header mobil uchun */
+    .card-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    
+    .card-header > div {
+        width: 100%;
+    }
 }
 
 /* Kichik mobil telefonlar (max-width: 480px) */
@@ -6172,10 +6232,11 @@ input.form-control.comparison-input {
     }
     
     .mobile-menu-toggle {
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
         top: 8px;
         left: 8px;
+        display: flex !important;
     }
     
     .sidebar {
@@ -6199,6 +6260,7 @@ input.form-control.comparison-input {
     .btn {
         padding: 10px 12px;
         font-size: 13px;
+        min-height: 44px;
     }
     
     .data-table {
@@ -6222,6 +6284,7 @@ input.form-control.comparison-input {
     .form-control {
         padding: 10px;
         font-size: 16px;
+        min-height: 44px;
     }
     
     .stats-grid {
@@ -6230,6 +6293,27 @@ input.form-control.comparison-input {
     
     .stat-card {
         padding: 12px;
+    }
+    
+    /* Filter buttons kichik ekranlar uchun */
+    .filter-buttons {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .filter-btn {
+        width: 100%;
+        min-width: 100%;
+        padding: 12px;
+    }
+    
+    .locations-controls {
+        gap: 10px;
+    }
+    
+    .view-toggle {
+        width: 100%;
+        justify-content: center;
     }
 }
 
@@ -6243,6 +6327,13 @@ input.form-control.comparison-input {
     height: 40px;
     border-radius: 8px;
     cursor: pointer;
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 1002;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    align-items: center;
+    justify-content: center;
 }
 
 /* --- Data Table (Audit Log uchun) --- */
