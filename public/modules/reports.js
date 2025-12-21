@@ -257,7 +257,16 @@ function updateUIForReportState() {
     const isNew = state.currentReportId === null;
     const report = state.savedReports?.[state.currentReportId];
     const hasEditAll = state.currentUser?.permissions?.includes('reports:edit_all');
-    const hasEditAssigned = state.currentUser?.permissions?.includes('reports:edit_assigned') && report && report.location && state.currentUser?.locations?.includes(report.location);
+    
+    // Tahrirlash huquqlarini to'g'ri tekshirish
+    let hasEditAssigned = false;
+    if (state.currentUser?.permissions?.includes('reports:edit_assigned') && report && report.location) {
+        const userLocations = Array.isArray(state.currentUser?.locations) 
+            ? state.currentUser.locations 
+            : (state.currentUser?.locations ? [state.currentUser.locations] : []);
+        hasEditAssigned = userLocations.includes(report.location);
+    }
+    
     const hasEditOwn = state.currentUser?.permissions?.includes('reports:edit_own') && report && report.created_by && String(report.created_by) === String(state.currentUser?.id);
     
     const canEdit = report && (hasEditAll || hasEditAssigned || hasEditOwn);

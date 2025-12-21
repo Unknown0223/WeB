@@ -70,6 +70,32 @@ router.post('/user/preferred-currency', isAuthenticated, async (req, res) => {
     }
 });
 
+// Audit log statistikasini olish
+router.get('/audit-logs/stats', isAuthenticated, hasPermission('audit:view'), async (req, res) => {
+    try {
+        // Jami audit loglar soni
+        const totalResult = await db('audit_logs').count('* as total').first();
+        const total = totalResult.total || 0;
+        
+        // Bugungi audit loglar soni
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayResult = await db('audit_logs')
+            .where('timestamp', '>=', today.toISOString())
+            .count('* as today')
+            .first();
+        const todayCount = todayResult.today || 0;
+        
+        res.json({
+            total,
+            today: todayCount
+        });
+    } catch (error) {
+        log.error("/api/audit-logs/stats GET xatoligi:", error);
+        res.status(500).json({ message: "Audit log statistikasini yuklashda xatolik." });
+    }
+});
+
 // Audit jurnallarini olish uchun endpoint
 router.get('/audit-logs', isAuthenticated, hasPermission('audit:view'), async (req, res) => {
     // ... (bu qism o'zgarishsiz qoladi)

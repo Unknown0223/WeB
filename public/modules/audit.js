@@ -312,6 +312,7 @@ async function updateAuditStats() {
             return; // Not JSON, skip silently
         }
         
+        try {
         const data = await res.json();
         
         const totalCountEl = document.getElementById('total-logs-count');
@@ -323,6 +324,10 @@ async function updateAuditStats() {
         
         if (todayCountEl) {
             todayCountEl.textContent = data.today || 0;
+            }
+        } catch (parseError) {
+            console.error('Audit stats parse error:', parseError);
+            // Silently ignore parse errors
         }
     } catch (error) {
         // Silently ignore if stats endpoint doesn't exist
