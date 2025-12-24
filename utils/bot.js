@@ -623,6 +623,61 @@ async function sendToTelegram(payload) {
             }
             
             await formatAndSendReport({ ...payload, group_id: groupId });
+        } else if (type === 'delete') {
+            // O'chirish xabari
+            const groupIdSetting = await db('settings').where({ key: 'telegram_group_id' }).first();
+            let groupId = groupIdSetting ? groupIdSetting.value : null;
+
+            if (!groupId) {
+                botLog.error("Telegram guruh ID si topilmadi. O'chirish xabari yuborilmadi.");
+                return;
+            }
+            
+            // Group ID ni number'ga o'tkazish (agar string bo'lsa)
+            if (typeof groupId === 'string') {
+                const parsedId = parseInt(groupId, 10);
+                if (!isNaN(parsedId)) {
+                    groupId = parsedId;
+                } else {
+                    botLog.error(`Group ID noto'g'ri format: "${groupId}". Number bo'lishi kerak.`);
+                    return;
+                }
+            }
+
+            const { report_id, location, date, brand_name, deleted_by, deleted_by_fullname, deleted_by_id } = payload;
+            
+            // Foydalanuvchi ma'lumotlarini olish
+            let userFullname = deleted_by_fullname || deleted_by;
+            let userTelegramUsername = null;
+            
+            try {
+                if (deleted_by_id) {
+                    const user = await db('users').where({ id: deleted_by_id }).select('fullname', 'telegram_username', 'username').first();
+                    if (user) {
+                        userFullname = user.fullname || user.username || deleted_by;
+                        userTelegramUsername = user.telegram_username;
+                    }
+                }
+            } catch (error) {
+                botLog.error('Foydalanuvchi ma\'lumotlarini olishda xatolik:', error.message);
+            }
+
+            const formattedDate = format(new Date(date), 'dd.MM.yyyy');
+            
+            let messageText = `🗑️ <b>Hisobot O'chirildi</b>\n\n`;
+            messageText += `📋 Hisobot #${String(report_id).padStart(4, '0')}\n`;
+            messageText += `📍 Filial: <b>${escapeHtml(location)}</b>\n`;
+            if (brand_name) {
+                messageText += `🏢 Brend: <b>${escapeHtml(brand_name)}</b>\n`;
+            }
+            messageText += `📅 Sana: ${formattedDate}\n\n`;
+            messageText += `👤 O'chirdi: <b>${escapeHtml(userFullname)}</b>\n`;
+            if (userTelegramUsername) {
+                messageText += `📱 @${escapeHtml(userTelegramUsername)}\n`;
+            }
+            messageText += `\n⚠️ <i>Bu amalni qaytarib bo'lmaydi!</i>`;
+
+            await safeSendMessage(groupId, messageText);
         } else if ([
             'secret_word_request', 
             'magic_link_request', 
@@ -1260,9 +1315,65 @@ const getBot = () => {
     return bot;
 };
 
+// Botni to'xtatish funksiyasi (takrorlanishni oldini olish uchun flag)
+let isStopping = false;
+
+const stopBot = async () => {
+    // Agar allaqachon to'xtatilmoqda bo'lsa, qayta chaqirmaslik
+    if (isStopping) {
+        return;
+    }
+    
+    try {
+        isStopping = true;
+        
+        if (bot && botIsInitialized) {
+            // Polling rejimida bo'lsa, to'xtatish
+            if (bot.isPolling && bot.isPolling()) {
+                await bot.stopPolling();
+                botLog.info('Bot polling to\'xtatildi');
+            }
+            
+            // Webhook rejimida bo'lsa, webhookni o'chirish
+            const { getSetting } = require('./settingsCache.js');
+            const botToken = await getSetting('telegram_bot_token', null);
+            if (botToken) {
+                try {
+                    const axios = require('axios');
+                    await axios.post(`https://api.telegram.org/bot${botToken}/deleteWebhook`, { 
+                        drop_pending_updates: true 
+                    });
+                    botLog.info('Telegram webhook o\'chirildi');
+                } catch (error) {
+                    // Rate limit xatoliklarini tushunish
+                    if (error.response && error.response.data && error.response.data.error_code === 429) {
+                        botLog.warn(`Telegram API rate limit: ${error.response.data.description}`);
+                    } else {
+                        botLog.error('Webhook o\'chirishda xatolik:', error.message);
+                    }
+                }
+            }
+            
+            botIsInitialized = false;
+            bot = null;
+            
+            // Token cleanup'ni to'xtatish
+            stopTokenCleanup();
+            
+            botLog.info('Bot to\'xtatildi');
+        }
+    } catch (error) {
+        botLog.error('Botni to\'xtatishda xatolik:', error.message);
+    } finally {
+        // Flag'ni qayta tiklash
+        isStopping = false;
+    }
+};
+
 module.exports = {
     initializeBot,
     getBot,
+    stopBot,
     sendToTelegram,
     startTokenCleanup,
     stopTokenCleanup

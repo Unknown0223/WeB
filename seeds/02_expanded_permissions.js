@@ -75,6 +75,11 @@ exports.seed = async function(knex) {
       category: 'Hisobotlar' 
     },
     { 
+      permission_key: 'reports:delete_assigned', 
+      description: 'Biriktirilgan filial hisobotlarini o\'chirish', 
+      category: 'Hisobotlar' 
+    },
+    { 
       permission_key: 'reports:delete_own', 
       description: 'Faqat o\'z hisobotlarini o\'chirish', 
       category: 'Hisobotlar' 

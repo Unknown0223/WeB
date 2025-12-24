@@ -31,6 +31,26 @@ async function getUserAccessFilter(user) {
         };
     }
 
+    // MUAMMO TUZATILDI: reports:view_all permission'ga ega foydalanuvchilar uchun ham cheklov yo'q
+    // Agar foydalanuvchida reports:view_all permission bor va rol shartlari null bo'lsa
+    if (user.permissions && user.permissions.includes('reports:view_all')) {
+        // Rol shartlarini tekshirish
+        const roleData = await db('roles').where('role_name', user.role).first();
+        if (roleData) {
+            const requiresLocations = roleData.requires_locations;
+            const requiresBrands = roleData.requires_brands;
+            
+            // Agar rol shartlari null bo'lsa (ya'ni to'liq dostup), cheklov yo'q
+            if ((requiresLocations === null || requiresLocations === false) && 
+                (requiresBrands === null || requiresBrands === false)) {
+                return {
+                    allowedLocations: null, // null = barcha filiallar
+                    allowedBrandIds: null   // null = barcha brendlar
+                };
+            }
+        }
+    }
+
     // Cache tekshirish
     const cacheKey = getCacheKey(user);
     const cached = cacheManager.get(ACCESS_FILTER_NAMESPACE, cacheKey);
@@ -216,28 +236,94 @@ async function getUserAccessFilter(user) {
  * @param {string} brandIdColumn - Brand ID column nomi (default: 'r.brand_id')
  */
 async function applyReportsFilter(query, user, locationColumn = 'r.location', brandIdColumn = 'r.brand_id') {
+    log.debug(`[USERACCESSFILTER] applyReportsFilter chaqirildi:`, {
+        userId: user?.id,
+        role: user?.role,
+        permissions: user?.permissions,
+        locationColumn: locationColumn,
+        brandIdColumn: brandIdColumn
+    });
+    
     // Superadmin uchun hech qanday filter qo'llanmaydi
     if (user.role === 'superadmin' || user.role === 'super_admin') {
+        log.debug(`[USERACCESSFILTER] ✅ Superadmin - filter qo'llanmaydi`);
         return; // Hech qanday filter qo'llanmaydi, barcha ma'lumotlar ko'rsatiladi
+    }
+    
+    // MUAMMO TUZATILDI: Admin roli uchun ham filter qo'llanmaydi
+    if (user.role === 'admin') {
+        log.debug(`[USERACCESSFILTER] ✅ Admin roli - filter qo'llanmaydi`);
+        return; // Hech qanday filter qo'llanmaydi, barcha ma'lumotlar ko'rsatiladi
+    }
+    
+    // MUAMMO TUZATILDI: reports:view_all permission'ga ega foydalanuvchilar uchun ham filter qo'llanmaydi
+    // Agar foydalanuvchida reports:view_all permission bor va rol shartlari null bo'lsa, filter qo'llanmaydi
+    if (user.permissions && user.permissions.includes('reports:view_all')) {
+        // Rol shartlarini tekshirish
+        const roleData = await db('roles').where('role_name', user.role).first();
+        if (roleData) {
+            const requiresLocations = roleData.requires_locations;
+            const requiresBrands = roleData.requires_brands;
+            
+            log.debug(`[USERACCESSFILTER] 🔍 Rol shartlari tekshirilmoqda:`, {
+                role: user.role,
+                requiresLocations: requiresLocations,
+                requiresBrands: requiresBrands
+            });
+            
+            // Agar rol shartlari null bo'lsa (ya'ni to'liq dostup), filter qo'llanmaydi
+            if ((requiresLocations === null || requiresLocations === false) && 
+                (requiresBrands === null || requiresBrands === false)) {
+                log.debug(`[USERACCESSFILTER] ✅ Rol shartlari null - filter qo'llanmaydi`);
+                return; // Hech qanday filter qo'llanmaydi, barcha ma'lumotlar ko'rsatiladi
+            }
+        }
     }
     
     const filter = await getUserAccessFilter(user);
     
+    log.debug(`[USERACCESSFILTER] 📊 Filter natijasi:`, {
+        allowedLocations: filter.allowedLocations,
+        allowedBrandIds: filter.allowedBrandIds,
+        locationsCount: filter.allowedLocations?.length || 0,
+        brandsCount: filter.allowedBrandIds?.length || 0,
+        locationsIsNull: filter.allowedLocations === null,
+        brandsIsNull: filter.allowedBrandIds === null
+    });
+    
+    // Agar filter null bo'lsa (barcha ma'lumotlar), filter qo'llanmaydi
+    if (filter.allowedLocations === null && filter.allowedBrandIds === null) {
+        log.debug(`[USERACCESSFILTER] ✅ Filter null - filter qo'llanmaydi`);
+        return; // Hech qanday filter qo'llanmaydi
+    }
+    
     if (filter.allowedLocations !== null && filter.allowedLocations.length > 0) {
+        log.debug(`[USERACCESSFILTER] 🔍 Location filter qo'llanmoqda:`, {
+            locations: filter.allowedLocations,
+            locationColumn: locationColumn
+        });
         query.whereIn(locationColumn, filter.allowedLocations);
     } else if (filter.allowedLocations !== null && filter.allowedLocations.length === 0) {
         // Agar hech qanday filialga ruxsat yo'q bo'lsa, bo'sh natija qaytarish
+        log.debug(`[USERACCESSFILTER] ⚠️ Hech qanday filialga ruxsat yo'q - bo'sh natija`);
         query.whereRaw('1 = 0'); // Hech qanday natija qaytarmaslik uchun
         return;
     }
     
     if (filter.allowedBrandIds !== null && filter.allowedBrandIds.length > 0) {
+        log.debug(`[USERACCESSFILTER] 🔍 Brand filter qo'llanmoqda:`, {
+            brandIds: filter.allowedBrandIds,
+            brandIdColumn: brandIdColumn
+        });
         query.whereIn(brandIdColumn, filter.allowedBrandIds);
     } else if (filter.allowedBrandIds !== null && filter.allowedBrandIds.length === 0) {
         // Agar hech qanday brendga ruxsat yo'q bo'lsa, bo'sh natija qaytarish
+        log.debug(`[USERACCESSFILTER] ⚠️ Hech qanday brendga ruxsat yo'q - bo'sh natija`);
         query.whereRaw('1 = 0'); // Hech qanday natija qaytarmaslik uchun
         return;
     }
+    
+    log.debug(`[USERACCESSFILTER] ✅ Filter muvaffaqiyatli qo'llandi`);
 }
 
 /**

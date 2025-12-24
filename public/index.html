@@ -13,11 +13,6 @@
 </head>
 <body class="main-page">
 
-    <!-- Mobile Menu Toggle Button -->
-    <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Menyuni ochish">
-        <i data-feather="menu"></i>
-    </button>
-    
     <!-- Sidebar Overlay (mobil uchun) -->
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -174,7 +169,7 @@
             </div>
 
             <div class="controls">
-                <button id="edit-btn" class="btn btn-warning hidden" data-permission="reports:edit_own"><i data-feather="edit"></i> TAHRIRLASH</button>
+                <button id="edit-btn" class="btn btn-warning hidden" data-permission="reports:edit_own,reports:edit_assigned,reports:edit_all"><i data-feather="edit"></i> TAHRIRLASH</button>
                 <button id="confirm-btn" class="btn btn-success"><i data-feather="check-circle"></i> TASDIQLASH VA SAQLASH</button>
                 <button id="excel-btn" class="btn btn-primary"><i data-feather="download"></i> EXCEL YUKLAB OLISH</button>
             </div>
@@ -291,6 +286,69 @@
             <div class="confirm-actions">
                 <button class="btn btn-secondary" id="confirm-cancel-btn">Yo'q</button>
                 <button class="btn btn-danger" id="confirm-ok-btn">Ha</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Report Modal -->
+    <div id="delete-report-modal" class="modal delete-report-modal hidden">
+        <div class="modal-overlay" onclick="closeDeleteReportModal()"></div>
+        <div class="modal-content delete-report-modal-content">
+            <button class="close-modal-btn" onclick="closeDeleteReportModal()" title="Yopish">
+                <i data-feather="x"></i>
+            </button>
+            <div class="delete-modal-header">
+                <div class="delete-icon-wrapper">
+                    <i data-feather="trash-2"></i>
+                </div>
+                <h2 class="delete-modal-title">Hisobotni O'chirish</h2>
+                <p class="delete-modal-subtitle">Bu amalni qaytarib bo'lmaydi</p>
+            </div>
+            <div class="delete-modal-body">
+                <div class="delete-report-info">
+                    <div class="info-row">
+                        <span class="info-label">
+                            <i data-feather="hash"></i>
+                            Hisobot ID:
+                        </span>
+                        <span class="info-value" id="delete-report-id">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">
+                            <i data-feather="calendar"></i>
+                            Sana:
+                        </span>
+                        <span class="info-value" id="delete-report-date">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">
+                            <i data-feather="map-pin"></i>
+                            Filial:
+                        </span>
+                        <span class="info-value" id="delete-report-location">-</span>
+                    </div>
+                    <div class="info-row" id="delete-report-brand-row" style="display: none;">
+                        <span class="info-label">
+                            <i data-feather="briefcase"></i>
+                            Brend:
+                        </span>
+                        <span class="info-value" id="delete-report-brand">-</span>
+                    </div>
+                </div>
+                <div class="delete-warning">
+                    <i data-feather="alert-triangle"></i>
+                    <p>Ushbu hisobotni o'chirishni tasdiqlaysizmi? Bu amalni qaytarib bo'lmaydi va barcha ma'lumotlar yo'qoladi.</p>
+                </div>
+            </div>
+            <div class="delete-modal-actions">
+                <button class="btn btn-secondary" onclick="closeDeleteReportModal()">
+                    <i data-feather="x"></i>
+                    Bekor qilish
+                </button>
+                <button class="btn btn-danger" id="delete-report-confirm-btn">
+                    <i data-feather="trash-2"></i>
+                    Ha, O'chirish
+                </button>
             </div>
         </div>
     </div>

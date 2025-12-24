@@ -68,13 +68,12 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
         }, {});
 
         // Преобразуем данные в плоский формат для pivot таблицы
-        const flatData = [];
-        
-        // forEach o'rniga for...of ishlatamiz, chunki async/await kerak
-        for (const report of reports) {
+        // Optimizatsiya: Barcha report'larni parallel qayta ishlash (N+1 Query muammosini hal qilish)
+        const flatDataPromises = reports.map(async (report) => {
             try {
                 const reportData = JSON.parse(report.data);
                 const reportCurrency = report.currency || BASE_CURRENCY;
+                const reportFlatData = [];
                 
                 // Обрабатываем каждую запись в отчете
                 for (const key in reportData) {
@@ -83,12 +82,8 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
                     // Valyuta konvertatsiyasi - barcha hisobotlarni tanlangan valyutaga konvertatsiya qilish
                     if (targetCurrency !== reportCurrency && exchangeRates) {
                         try {
-                            const originalValue = value;
-                            // convertCurrency funksiyasidan foydalanish
+                            // convertCurrency funksiyasidan foydalanish (sync bo'lsa ham await qilamiz)
                             value = await convertCurrency(value, reportCurrency, targetCurrency, exchangeRates);
-                            if (originalValue !== value) {
-                                log.debug(`💰 Konvertatsiya: ${originalValue} ${reportCurrency} → ${value.toFixed(2)} ${targetCurrency}`);
-                            }
                         } catch (error) {
                             log.error(`Konvertatsiya xatolik (report #${report.id}, key: ${key}):`, error);
                             // Xatolik bo'lsa, qiymatni o'zgartirmaslik
@@ -103,7 +98,7 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
                     // Получаем имя бренда из map
                     const brandNameFromKey = brandMap[brandId] || `Бренд #${brandId}`;
                     
-                    flatData.push({
+                    reportFlatData.push({
                         "ID": report.id,
                         "Дата": report.report_date,
                         "Бренд": brandNameFromKey,
@@ -115,10 +110,17 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
                         "Комментарий": report.late_comment || ""
                     });
                 }
+                
+                return reportFlatData;
             } catch (error) {
                 log.error(`Ошибка парсинга данных отчета #${report.id}:`, error);
+                return [];
             }
-        }
+        });
+        
+        // Barcha report'larni parallel qayta ishlash
+        const flatDataArrays = await Promise.all(flatDataPromises);
+        const flatData = flatDataArrays.flat(); // Barcha array'larni birlashtirish
 
         res.json(flatData);
 
@@ -232,13 +234,31 @@ router.post('/templates', isManagerOrAdmin, async (req, res) => {
 router.get('/templates/:id', isManagerOrAdmin, async (req, res) => {
     try {
         const user = req.session.user;
+        const templateId = req.params.id;
+        
+        log.debug(`[PIVOT] 📥 Shablon so'rovi qabul qilindi:`, {
+            templateId: templateId,
+            userId: user?.id,
+            username: user?.username,
+            userRole: user?.role
+        });
         
         const template = await db('pivot_templates')
-            .where({ id: req.params.id })
-            .select('report', 'is_public', 'created_by')
+            .where({ id: templateId })
+            .select('report', 'is_public', 'created_by', 'name')
             .first();
         
+        log.debug(`[PIVOT] 🔍 Shablon topildi:`, {
+            templateId: templateId,
+            found: !!template,
+            isPublic: template?.is_public,
+            createdBy: template?.created_by,
+            name: template?.name,
+            hasReport: !!template?.report
+        });
+        
         if (!template) {
+            log.warn(`[PIVOT] ⚠️ Shablon topilmadi:`, { templateId });
             return res.status(404).json({ message: "Шаблон не найден." });
         }
         
@@ -248,16 +268,74 @@ router.get('/templates/:id', isManagerOrAdmin, async (req, res) => {
         const isPublic = template.is_public === true || template.is_public === 1;
         const isOwner = template.created_by === user.id;
         
+        log.debug(`[PIVOT] 🔐 Xavfsizlik tekshiruvi:`, {
+            templateId: templateId,
+            isPublic: isPublic,
+            isOwner: isOwner,
+            userId: user.id,
+            createdBy: template.created_by
+        });
+        
         if (!isPublic && !isOwner) {
+            log.warn(`[PIVOT] ⚠️ Ruxsat rad etildi:`, {
+                templateId: templateId,
+                userId: user.id,
+                createdBy: template.created_by,
+                isPublic: isPublic,
+                isOwner: isOwner
+            });
             return res.status(403).json({ 
                 message: "Bu shablonni ko'rish uchun sizda huquq yo'q. Faqat public shablonlar yoki o'z shablonlaringizni ko'rishingiz mumkin." 
             });
         }
         
-        res.json(JSON.parse(template.report));
+        let reportData;
+        try {
+            log.debug(`[PIVOT] 🔄 Shablon ma'lumotlarini parse qilish boshlandi...`);
+            reportData = JSON.parse(template.report);
+            log.debug(`[PIVOT] ✅ Shablon ma'lumotlari parse qilindi:`, {
+                templateId: templateId,
+                hasDataSource: !!reportData.dataSource,
+                hasSlice: !!reportData.slice,
+                hasOptions: !!reportData.options,
+                hasFormats: !!reportData.formats,
+                reportKeys: Object.keys(reportData),
+                dataSourceType: typeof reportData.dataSource,
+                dataSourceKeys: reportData.dataSource ? Object.keys(reportData.dataSource) : [],
+                sliceKeys: reportData.slice ? Object.keys(reportData.slice) : [],
+                sliceRows: reportData.slice?.rows?.length || 0,
+                sliceColumns: reportData.slice?.columns?.length || 0,
+                sliceMeasures: reportData.slice?.measures?.length || 0
+            });
+        } catch (parseError) {
+            log.error(`[PIVOT] ❌ Shablon ma'lumotlarini parse qilishda xatolik:`, {
+                templateId: templateId,
+                error: parseError.message,
+                stack: parseError.stack,
+                reportLength: template.report?.length || 0,
+                reportPreview: template.report?.substring(0, 200) || 'N/A'
+            });
+            return res.status(500).json({ 
+                message: "Shablon ma'lumotlari noto'g'ri formatda",
+                error: parseError.message 
+            });
+        }
+        
+        log.info(`[PIVOT] ✅ Shablon muvaffaqiyatli yuborildi:`, {
+            templateId: templateId,
+            userId: user.id,
+            templateName: template.name
+        });
+        
+        res.json(reportData);
         
     } catch (error) {
-        log.error("Ошибка получения шаблона:", error);
+        log.error("[PIVOT] ❌ Shablon olishda xatolik:", {
+            error: error.message,
+            stack: error.stack,
+            templateId: req.params.id,
+            userId: req.session.user?.id
+        });
         res.status(500).json({ 
             message: "Ошибка получения шаблона", 
             error: error.message 

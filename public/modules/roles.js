@@ -821,12 +821,36 @@ export async function handleClearSessions() {
     
     try {
         const res = await safeFetch('/api/admin/clear-sessions', { method: 'POST' });
-        if (!res || !res.ok) throw new Error((await res.json()).message);
+        if (!res) {
+            throw new Error('Server bilan bog\'lanishda xatolik');
+        }
+        
+        if (!res.ok) {
+            let errorMessage = 'Sessiyalarni tozalashda xatolik';
+            try {
+                const errorData = await res.json();
+                errorMessage = errorData.message || errorMessage;
+            } catch (parseError) {
+                // JSON parse qilishda xatolik bo'lsa, status kodga qarab xabar berish
+                if (res.status === 403) {
+                    errorMessage = 'Bu amalni bajarish uchun ruxsatingiz yo\'q.';
+                } else if (res.status === 500) {
+                    errorMessage = 'Server xatoligi yuz berdi.';
+                }
+            }
+            throw new Error(errorMessage);
+        }
         
         const result = await res.json();
-        showToast(result.message);
+        showToast(result.message || 'Sessiyalar muvaffaqiyatli tozalandi', false);
+        
+        // Sahifani yangilash (sessiyalar ro'yxatini yangilash uchun)
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
     } catch (error) {
-        showToast(error.message, true);
+        const friendlyMessage = error.message || 'Sessiyalarni tozalashda xatolik yuz berdi';
+        showToast(friendlyMessage, true);
     }
 }
 

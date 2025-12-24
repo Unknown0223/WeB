@@ -4,10 +4,40 @@
 import { state } from './state.js';
 import { DOM } from './dom.js';
 import { safeFetch, fetchUsers, fetchPendingUsers } from './api.js';
-import { showToast, parseUserAgent, showConfirmDialog, hasPermission, createLogger } from './utils.js';
+import { showToast, parseUserAgent, showConfirmDialog, hasPermission, createLogger, getUserFriendlyErrorMessage } from './utils.js';
+import { getModal, openModal, closeModal } from './modal.js';
 
 // Logger yaratish
 const log = createLogger('USERS');
+
+// Development mode tekshiruvi
+const IS_DEVELOPMENT = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+// Optimallashtirilgan logger funksiyalari
+const debugLog = (...args) => {
+    if (IS_DEVELOPMENT) {
+        log.debug(...args);
+    }
+};
+
+const infoLog = (...args) => {
+    log.info(...args);
+};
+
+const errorLog = (...args) => {
+    log.error(...args);
+    // Xatoliklar har doim ko'rinadi
+};
+
+// Umumiy xatolik handler
+function handleError(error, context = 'Amal', showToUser = true) {
+    errorLog(`${context} xatoligi:`, error);
+    
+    if (showToUser) {
+        const friendlyMessage = getUserFriendlyErrorMessage(error);
+        showToast(friendlyMessage, true);
+    }
+}
 
 // Selected users for bulk actions
 let selectedUsers = new Set();
@@ -91,7 +121,7 @@ async function safeApiCall(url, options = {}) {
         }
         return await res.json();
     } catch (error) {
-        console.error(`❌ [API] ${url} xatolik:`, error);
+        errorLog(`API ${url} xatolik:`, error);
         throw error;
     }
 }
@@ -121,35 +151,299 @@ async function refreshUsersList() {
 }
 
 // Brendlarni yuklash va render qilish
-async function loadBrandsForUser(userId = null) {
+// Filiallarni 2 blokli (yonma-yon) ko'rinishga yuklash
+async function loadLocationsForUser(userId = null) {
+    const attachedList = document.getElementById('locations-attached-list');
+    const unattachedList = document.getElementById('locations-unattached-list');
+    if (!attachedList || !unattachedList) {
+        debugLog('Filiallar container\'lari topilmadi');
+        return;
+    }
+    
     try {
-        // Agar userId berilgan bo'lsa, foydalanuvchining brendlarini olish va ko'rsatish
+        // Hozirgi tanlangan filiallarni olish
+        let selectedLocations = [];
         if (userId) {
-            const userBrandsRes = await safeFetch(`/api/brands/user/${userId}`);
-            if (userBrandsRes.ok) {
-                const data = await userBrandsRes.json();
-                const userBrands = data.brands || [];
-                
-                // Tanlangan brendlarni ko'rsatish
-                const selectedBrands = userBrands.map(brand => ({
-                    id: brand.id,
-                    name: brand.name,
-                    emoji: brand.emoji || '🏢'
-                }));
-                updateSelectedBrandsDisplay(selectedBrands);
+            const user = state.users.find(u => u.id == userId);
+            if (user && user.locations) {
+                selectedLocations = Array.isArray(user.locations) ? user.locations : [];
             }
         } else {
-            // Yangi foydalanuvchi - bo'sh ko'rsatish
-            updateSelectedBrandsDisplay([]);
+            // Attached list'dan tanlanganlarni olish
+            selectedLocations = Array.from(attachedList.querySelectorAll('.location-item'))
+                .map(item => item.dataset.location);
         }
         
+        // Filiallarni yuklash - settings'dan
+        const res = await safeFetch('/api/settings');
+        if (!res || !res.ok) {
+            throw new Error('Filiallarni yuklashda xatolik');
+        }
+        
+        const settings = await res.json();
+        
+        // Filiallarni olish - app_settings.locations dan
+        let allLocations = [];
+        if (settings.app_settings?.locations && Array.isArray(settings.app_settings.locations)) {
+            allLocations = settings.app_settings.locations;
+        } else if (settings.locations) {
+            if (Array.isArray(settings.locations)) {
+                allLocations = settings.locations;
+            } else if (typeof settings.locations === 'string') {
+                try {
+                    allLocations = JSON.parse(settings.locations);
+                } catch (e) {
+                    allLocations = [];
+                }
+            }
+        }
+        
+        if (allLocations.length === 0) {
+            showToast('Filiallar topilmadi. Sozlamalarni tekshiring.', true);
+            attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5);">Filiallar topilmadi</div>';
+            unattachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5);">Filiallar topilmadi</div>';
+            return;
+        }
+        
+        // Filiallarni 2 guruhga ajratish
+        const attachedLocations = allLocations.filter(loc => selectedLocations.includes(loc));
+        const unattachedLocations = allLocations.filter(loc => !selectedLocations.includes(loc));
+        
+        // Grid column sonini aniqlash (10 tadan oshsa 3, kam bo'lsa 2)
+        const totalLocations = allLocations.length;
+        const gridColumns = totalLocations > 10 ? 3 : 2;
+        
+        // Grid style'ni o'rnatish
+        attachedList.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+        unattachedList.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+        
+        // Birinchi blok: Biriktirilgan filiallar
+        if (attachedLocations.length === 0) {
+            attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px; grid-column: 1 / -1;">Filiallar tanlanmagan</div>';
+        } else {
+            attachedList.innerHTML = attachedLocations.map(location => `
+                <div class="location-item" data-location="${location}" style="
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 10px;
+                    border-radius: 6px;
+                    background: rgba(79, 172, 254, 0.15);
+                    border: 1px solid rgba(79, 172, 254, 0.3);
+                    cursor: pointer;
+                    transition: all 0.2s;
+                " onclick="moveLocationToUnattached('${location}')" onmouseenter="this.style.background='rgba(79, 172, 254, 0.25)'" onmouseleave="this.style.background='rgba(79, 172, 254, 0.15)'">
+                    <span style="font-size: 14px;">📍</span>
+                    <span style="flex: 1; font-size: 13px; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${location}</span>
+                    <span style="font-size: 11px; color: rgba(79, 172, 254, 0.7);">→</span>
+                </div>
+            `).join('');
+        }
+        
+        // Ikkinchi blok: Biriktirilmagan filiallar
+        if (unattachedLocations.length === 0) {
+            unattachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px; grid-column: 1 / -1;">Barcha filiallar biriktirilgan</div>';
+        } else {
+            unattachedList.innerHTML = unattachedLocations.map(location => `
+                <div class="location-item" data-location="${location}" style="
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 10px;
+                    border-radius: 6px;
+                    background: rgba(255,255,255,0.05);
+                    border: 1px solid rgba(255,255,255,0.1);
+                    cursor: pointer;
+                    transition: all 0.2s;
+                " onclick="moveLocationToAttached('${location}')" onmouseenter="this.style.background='rgba(255,255,255,0.1)'" onmouseleave="this.style.background='rgba(255,255,255,0.05)'">
+                    <span style="font-size: 14px;">📍</span>
+                    <span style="flex: 1; font-size: 13px; color: rgba(255,255,255,0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${location}</span>
+                    <span style="font-size: 11px; color: rgba(255,255,255,0.5);">←</span>
+                </div>
+            `).join('');
+        }
+        
+        // Tanlangan filiallarni ko'rsatish (yuqoridagi display uchun)
+        updateSelectedLocationsDisplay(attachedLocations);
+        
+        // "Barchasini belgilash" checkbox event listener'larni qo'shish
+        setupSelectAllLocationsCheckboxes();
+    } catch (error) {
+        errorLog('Filiallarni yuklashda xatolik:', error);
+        showToast('Filiallarni yuklashda xatolik yuz berdi. Qayta urinib ko\'ring.', true);
+        attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--red-color);">Xatolik yuz berdi</div>';
+        unattachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--red-color);">Xatolik yuz berdi</div>';
+    }
+}
+
+// Filiallar uchun "Barchasini belgilash" funksiyasi
+function setupSelectAllLocationsCheckboxes() {
+    // Biriktirilgan filiallar uchun
+    const selectAllAttached = document.getElementById('select-all-attached-locations');
+    if (selectAllAttached) {
+        // Eski event listener'ni olib tashlash
+        const newSelectAllAttached = selectAllAttached.cloneNode(true);
+        selectAllAttached.parentNode.replaceChild(newSelectAllAttached, selectAllAttached);
+        const attachedCheckbox = document.getElementById('select-all-attached-locations');
+        
+        attachedCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const attachedList = document.getElementById('locations-attached-list');
+            if (!attachedList) return;
+            
+            const items = Array.from(attachedList.querySelectorAll('.location-item'));
+            if (!isChecked && items.length > 0) {
+                // Barchasini biriktirilmagan blokka o'tkazish (teskari tartibda, chunki har bir o'tkazish DOM'ni o'zgartiradi)
+                const locations = items.map(item => item.dataset.location).filter(loc => loc).reverse();
+                locations.forEach(location => {
+                    moveLocationToUnattached(location);
+                });
+            }
+        });
+    }
+    
+    // Biriktirilmagan filiallar uchun
+    const selectAllUnattached = document.getElementById('select-all-unattached-locations');
+    if (selectAllUnattached) {
+        // Eski event listener'ni olib tashlash
+        const newSelectAllUnattached = selectAllUnattached.cloneNode(true);
+        selectAllUnattached.parentNode.replaceChild(newSelectAllUnattached, selectAllUnattached);
+        const unattachedCheckbox = document.getElementById('select-all-unattached-locations');
+        
+        unattachedCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const unattachedList = document.getElementById('locations-unattached-list');
+            if (!unattachedList) return;
+            
+            if (isChecked) {
+                // Barchasini biriktirilgan blokka o'tkazish (teskari tartibda, chunki har bir o'tkazish DOM'ni o'zgartiradi)
+                const items = Array.from(unattachedList.querySelectorAll('.location-item'));
+                const locations = items.map(item => item.dataset.location).filter(loc => loc).reverse();
+                locations.forEach(location => {
+                    moveLocationToAttached(location);
+                });
+            }
+        });
+    }
+}
+
+// Filialni biriktirilgan blokdan biriktirilmagan blokka o'tkazish
+window.moveLocationToUnattached = function(location) {
+    const attachedList = document.getElementById('locations-attached-list');
+    const unattachedList = document.getElementById('locations-unattached-list');
+    if (!attachedList || !unattachedList) return;
+    
+    // Elementni olib tashlash
+    const item = attachedList.querySelector(`[data-location="${location}"]`);
+    if (!item) return;
+    
+    item.remove();
+    
+    // Ikkinchi blokka qo'shish
+    const newItem = document.createElement('div');
+    newItem.className = 'location-item';
+    newItem.dataset.location = location;
+    newItem.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        cursor: pointer;
+        transition: all 0.2s;
+    `;
+    newItem.innerHTML = `
+        <span style="font-size: 14px;">📍</span>
+        <span style="flex: 1; font-size: 13px; color: rgba(255,255,255,0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${location}</span>
+        <span style="font-size: 11px; color: rgba(255,255,255,0.5);">←</span>
+    `;
+    newItem.onclick = () => moveLocationToAttached(location);
+    newItem.onmouseenter = function() { this.style.background = 'rgba(255,255,255,0.1)'; };
+    newItem.onmouseleave = function() { this.style.background = 'rgba(255,255,255,0.05)'; };
+    
+    unattachedList.appendChild(newItem);
+    
+    // Agar birinchi blok bo'sh bo'lsa, xabar ko'rsatish
+    if (attachedList.children.length === 0) {
+        attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px;">Filiallar tanlanmagan</div>';
+    }
+    
+    // Tanlangan filiallarni yangilash
+    const selected = Array.from(attachedList.querySelectorAll('.location-item'))
+        .map(item => item.dataset.location);
+    updateSelectedLocationsDisplay(selected);
+};
+
+// Filialni biriktirilmagan blokdan biriktirilgan blokka o'tkazish
+window.moveLocationToAttached = function(location) {
+    const attachedList = document.getElementById('locations-attached-list');
+    const unattachedList = document.getElementById('locations-unattached-list');
+    if (!attachedList || !unattachedList) return;
+    
+    // Elementni olib tashlash
+    const item = unattachedList.querySelector(`[data-location="${location}"]`);
+    if (!item) return;
+    
+    item.remove();
+    
+    // Birinchi blokka qo'shish
+    // Agar "Filiallar tanlanmagan" xabari bo'lsa, uni olib tashlash
+    if (attachedList.querySelector('.empty-selection') || attachedList.textContent.includes('tanlanmagan')) {
+        attachedList.innerHTML = '';
+    }
+    
+    const newItem = document.createElement('div');
+    newItem.className = 'location-item';
+    newItem.dataset.location = location;
+    newItem.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 6px;
+        background: rgba(79, 172, 254, 0.15);
+        border: 1px solid rgba(79, 172, 254, 0.3);
+        cursor: pointer;
+        transition: all 0.2s;
+    `;
+    newItem.innerHTML = `
+        <span style="font-size: 14px;">📍</span>
+        <span style="flex: 1; font-size: 13px; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${location}</span>
+        <span style="font-size: 11px; color: rgba(79, 172, 254, 0.7);">→</span>
+    `;
+    newItem.onclick = () => moveLocationToUnattached(location);
+    newItem.onmouseenter = function() { this.style.background = 'rgba(79, 172, 254, 0.25)'; };
+    newItem.onmouseleave = function() { this.style.background = 'rgba(79, 172, 254, 0.15)'; };
+    
+    attachedList.appendChild(newItem);
+    
+    // Agar ikkinchi blok bo'sh bo'lsa, xabar ko'rsatish
+    if (unattachedList.children.length === 0) {
+        unattachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px;">Barcha filiallar biriktirilgan</div>';
+    }
+    
+    // Tanlangan filiallarni yangilash
+    const selected = Array.from(attachedList.querySelectorAll('.location-item'))
+        .map(item => item.dataset.location);
+    updateSelectedLocationsDisplay(selected);
+};
+
+async function loadBrandsForUser(userId = null) {
+    const attachedList = document.getElementById('brands-attached-list');
+    const unattachedList = document.getElementById('brands-unattached-list');
+        
         // Approval modal uchun (approval-brands-list)
-        // Approval uchun barcha brendlar kerak (admin uchun)
+    if (!attachedList || !unattachedList) {
         const approvalContainer = document.getElementById('approval-brands-list');
         if (approvalContainer) {
+            try {
             // Approval uchun barcha brendlarni olish (admin uchun)
             const res = await safeFetch('/api/brands');
-            if (!res.ok) throw new Error('Brendlarni yuklashda xatolik');
+                if (!res || !res.ok) {
+                    throw new Error('Brendlarni yuklashda xatolik');
+                }
             const allBrands = await res.json();
             
             if (allBrands.length === 0) {
@@ -177,16 +471,331 @@ async function loadBrandsForUser(userId = null) {
                     </label>
                 `;
             }).join('');
+            } catch (error) {
+                errorLog('Approval uchun brendlarni yuklashda xatolik:', error);
+                approvalContainer.innerHTML = '<p style="color: var(--red-color); text-align: center;">Brendlarni yuklashda xatolik</p>';
+            }
+        }
+        return;
+    }
+    
+    try {
+        // Hozirgi tanlangan brendlarni olish
+        let selectedBrandIds = [];
+        if (userId) {
+            const userBrandsRes = await safeFetch(`/api/brands/user/${userId}`);
+            if (userBrandsRes && userBrandsRes.ok) {
+                const data = await userBrandsRes.json();
+                const userBrands = data.brands || [];
+                selectedBrandIds = userBrands.map(b => b.id);
+            }
+        } else {
+            // Attached list'dan tanlanganlarni olish
+            selectedBrandIds = Array.from(attachedList.querySelectorAll('.brand-item'))
+                .map(item => parseInt(item.dataset.brandId));
         }
         
-        // user-brands-list ni doim yashirib qo'yish (faqat modal orqali tanlash)
-        const userBrandsList = document.getElementById('user-brands-list');
-        ModalHelper.hide(userBrandsList);
+        // Hozirgi tanlangan filiallarni olish (agar filial tanlangan bo'lsa, faqat shu filialdagi brendlarni ko'rsatish)
+        const attachedLocationsList = document.getElementById('locations-attached-list');
+        const selectedLocations = attachedLocationsList ?
+            Array.from(attachedLocationsList.querySelectorAll('.location-item'))
+                .map(item => item.dataset.location) : [];
+        
+        // Brendlarni yuklash
+        let brands = [];
+        if (selectedLocations.length > 0 && selectedBrandIds.length === 0) {
+            // Filial tanlangan, brend tanlanmagan - faqat tanlangan filiallardagi brendlarni olish
+            const allBrandsMap = new Map();
+            for (const location of selectedLocations) {
+                try {
+                    const res = await safeFetch(`/api/brands/by-location/${encodeURIComponent(location)}`);
+                    if (res && res.ok) {
+                        const locationBrands = await res.json();
+                        locationBrands.forEach(brand => {
+                            if (!allBrandsMap.has(brand.id)) {
+                                allBrandsMap.set(brand.id, brand);
+                            }
+                        });
+                    }
+                } catch (err) {
+                    debugLog(`Filial "${location}" uchun brendlar yuklanmadi:`, err);
+                }
+            }
+            brands = Array.from(allBrandsMap.values());
+        } else {
+            // Barcha brendlarni olish
+            const res = await safeFetch('/api/brands');
+            if (!res || !res.ok) {
+                throw new Error('Brendlarni yuklashda xatolik');
+            }
+            brands = await res.json();
+        }
+        
+        if (brands.length === 0) {
+            attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px;">Brendlar topilmadi</div>';
+            unattachedList.innerHTML = '';
+            return;
+        }
+        
+        // Brendlarni 2 guruhga ajratish
+        const attachedBrands = brands.filter(b => selectedBrandIds.includes(b.id));
+        const unattachedBrands = brands.filter(b => !selectedBrandIds.includes(b.id));
+        
+        // Grid column sonini aniqlash (10 tadan oshsa 3, kam bo'lsa 2)
+        const totalBrands = brands.length;
+        const gridColumns = totalBrands > 10 ? 3 : 2;
+        
+        // Grid style'ni o'rnatish
+        attachedList.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+        unattachedList.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+        
+        // Birinchi blok: Biriktirilgan brendlar
+        if (attachedBrands.length === 0) {
+            attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px; grid-column: 1 / -1;">Brendlar tanlanmagan</div>';
+        } else {
+            attachedList.innerHTML = attachedBrands.map(brand => {
+                const brandEmoji = brand.emoji || '🏢';
+                const brandColor = brand.color || '#4facfe';
+                return `
+                    <div class="brand-item" data-brand-id="${brand.id}" style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        padding: 10px;
+                        border-radius: 6px;
+                        background: rgba(79, 172, 254, 0.15);
+                        border: 1px solid rgba(79, 172, 254, 0.3);
+                        cursor: pointer;
+                        transition: all 0.2s;
+                    " onclick="moveBrandToUnattached(${brand.id})" onmouseenter="this.style.background='rgba(79, 172, 254, 0.25)'" onmouseleave="this.style.background='rgba(79, 172, 254, 0.15)'">
+                        <span style="font-size: 16px;">${brandEmoji}</span>
+                        <span style="flex: 1; font-size: 13px; color: ${brandColor}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${brand.name}</span>
+                        <span style="font-size: 11px; color: rgba(79, 172, 254, 0.7);">→</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Ikkinchi blok: Biriktirilmagan brendlar
+        if (unattachedBrands.length === 0) {
+            unattachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px; grid-column: 1 / -1;">Barcha brendlar biriktirilgan</div>';
+        } else {
+            unattachedList.innerHTML = unattachedBrands.map(brand => {
+                const brandEmoji = brand.emoji || '🏢';
+                const brandColor = brand.color || '#4facfe';
+                return `
+                    <div class="brand-item" data-brand-id="${brand.id}" style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        padding: 10px;
+                        border-radius: 6px;
+                        background: rgba(255,255,255,0.05);
+                        border: 1px solid rgba(255,255,255,0.1);
+                        cursor: pointer;
+                        transition: all 0.2s;
+                    " onclick="moveBrandToAttached(${brand.id})" onmouseenter="this.style.background='rgba(255,255,255,0.1)'" onmouseleave="this.style.background='rgba(255,255,255,0.05)'">
+                        <span style="font-size: 16px;">${brandEmoji}</span>
+                        <span style="flex: 1; font-size: 13px; color: ${brandColor}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${brand.name}</span>
+                        <span style="font-size: 11px; color: rgba(255,255,255,0.5);">←</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Tanlangan brendlarni ko'rsatish (yuqoridagi display uchun)
+        const selectedBrands = attachedBrands.map(brand => ({
+            id: brand.id,
+            name: brand.name,
+            emoji: brand.emoji || '🏢'
+        }));
+        updateSelectedBrandsDisplay(selectedBrands);
+        
+        // "Barchasini belgilash" checkbox event listener'larni qo'shish
+        setupSelectAllBrandsCheckboxes();
     } catch (error) {
-        // console.error('Brendlarni yuklash xatosi:', error);
-        showToast('Brendlarni yuklashda xatolik', 'error');
+        errorLog('Brendlarni yuklashda xatolik:', error);
+        showToast('Brendlarni yuklashda xatolik yuz berdi. Qayta urinib ko\'ring.', true);
+        attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--red-color);">Xatolik yuz berdi</div>';
+        unattachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--red-color);">Xatolik yuz berdi</div>';
     }
 }
+
+// Brendlar uchun "Barchasini belgilash" funksiyasi
+function setupSelectAllBrandsCheckboxes() {
+    // Biriktirilgan brendlar uchun
+    const selectAllAttached = document.getElementById('select-all-attached-brands');
+    if (selectAllAttached) {
+        // Eski event listener'ni olib tashlash
+        const newSelectAllAttached = selectAllAttached.cloneNode(true);
+        selectAllAttached.parentNode.replaceChild(newSelectAllAttached, selectAllAttached);
+        const attachedCheckbox = document.getElementById('select-all-attached-brands');
+        
+        attachedCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const attachedList = document.getElementById('brands-attached-list');
+            if (!attachedList) return;
+            
+            if (!isChecked) {
+                // Barchasini biriktirilmagan blokka o'tkazish (teskari tartibda, chunki har bir o'tkazish DOM'ni o'zgartiradi)
+                const items = Array.from(attachedList.querySelectorAll('.brand-item'));
+                const brandIds = items.map(item => parseInt(item.dataset.brandId)).filter(id => !isNaN(id)).reverse();
+                brandIds.forEach(brandId => {
+                    moveBrandToUnattached(brandId);
+                });
+            }
+        });
+    }
+    
+    // Biriktirilmagan brendlar uchun
+    const selectAllUnattached = document.getElementById('select-all-unattached-brands');
+    if (selectAllUnattached) {
+        // Eski event listener'ni olib tashlash
+        const newSelectAllUnattached = selectAllUnattached.cloneNode(true);
+        selectAllUnattached.parentNode.replaceChild(newSelectAllUnattached, selectAllUnattached);
+        const unattachedCheckbox = document.getElementById('select-all-unattached-brands');
+        
+        unattachedCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const unattachedList = document.getElementById('brands-unattached-list');
+            if (!unattachedList) return;
+            
+            if (isChecked) {
+                // Barchasini biriktirilgan blokka o'tkazish (teskari tartibda, chunki har bir o'tkazish DOM'ni o'zgartiradi)
+                const items = Array.from(unattachedList.querySelectorAll('.brand-item'));
+                const brandIds = items.map(item => parseInt(item.dataset.brandId)).filter(id => !isNaN(id)).reverse();
+                brandIds.forEach(brandId => {
+                    moveBrandToAttached(brandId);
+                });
+            }
+        });
+    }
+}
+
+// Brendni biriktirilgan blokdan biriktirilmagan blokka o'tkazish
+window.moveBrandToUnattached = function(brandId) {
+    const attachedList = document.getElementById('brands-attached-list');
+    const unattachedList = document.getElementById('brands-unattached-list');
+    if (!attachedList || !unattachedList) return;
+    
+    // Elementni olib tashlash
+    const item = attachedList.querySelector(`[data-brand-id="${brandId}"]`);
+    if (!item) return;
+    
+    const brandData = {
+        id: brandId,
+        name: item.querySelector('span:nth-child(2)')?.textContent || '',
+        emoji: item.querySelector('span:first-child')?.textContent || '🏢',
+        color: item.querySelector('span:nth-child(2)')?.style.color || '#4facfe'
+    };
+    
+    item.remove();
+    
+    // Ikkinchi blokka qo'shish
+    const newItem = document.createElement('div');
+    newItem.className = 'brand-item';
+    newItem.dataset.brandId = brandId;
+    newItem.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        cursor: pointer;
+        transition: all 0.2s;
+    `;
+    newItem.innerHTML = `
+        <span style="font-size: 16px;">${brandData.emoji}</span>
+        <span style="flex: 1; font-size: 13px; color: ${brandData.color}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${brandData.name}</span>
+        <span style="font-size: 11px; color: rgba(255,255,255,0.5);">←</span>
+    `;
+    newItem.onclick = () => moveBrandToAttached(brandId);
+    newItem.onmouseenter = function() { this.style.background = 'rgba(255,255,255,0.1)'; };
+    newItem.onmouseleave = function() { this.style.background = 'rgba(255,255,255,0.05)'; };
+    
+    unattachedList.appendChild(newItem);
+    
+    // Agar birinchi blok bo'sh bo'lsa, xabar ko'rsatish
+    if (attachedList.children.length === 0) {
+        attachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px;">Brendlar tanlanmagan</div>';
+    }
+    
+    // Tanlangan brendlarni yangilash
+    const selected = Array.from(attachedList.querySelectorAll('.brand-item'))
+        .map(item => ({
+            id: parseInt(item.dataset.brandId),
+            name: item.querySelector('span:nth-child(2)')?.textContent || '',
+            emoji: item.querySelector('span:first-child')?.textContent || '🏢'
+        }));
+    updateSelectedBrandsDisplay(selected);
+};
+
+// Brendni biriktirilmagan blokdan biriktirilgan blokka o'tkazish
+window.moveBrandToAttached = function(brandId) {
+    const attachedList = document.getElementById('brands-attached-list');
+    const unattachedList = document.getElementById('brands-unattached-list');
+    if (!attachedList || !unattachedList) return;
+    
+    // Elementni olib tashlash
+    const item = unattachedList.querySelector(`[data-brand-id="${brandId}"]`);
+    if (!item) return;
+    
+    const brandData = {
+        id: brandId,
+        name: item.querySelector('span:nth-child(2)')?.textContent || '',
+        emoji: item.querySelector('span:first-child')?.textContent || '🏢',
+        color: item.querySelector('span:nth-child(2)')?.style.color || '#4facfe'
+    };
+    
+    item.remove();
+    
+    // Birinchi blokka qo'shish
+    // Agar "Brendlar tanlanmagan" xabari bo'lsa, uni olib tashlash
+    if (attachedList.textContent.includes('tanlanmagan')) {
+        attachedList.innerHTML = '';
+    }
+    
+    const newItem = document.createElement('div');
+    newItem.className = 'brand-item';
+    newItem.dataset.brandId = brandId;
+    newItem.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 6px;
+        background: rgba(79, 172, 254, 0.15);
+        border: 1px solid rgba(79, 172, 254, 0.3);
+        cursor: pointer;
+        transition: all 0.2s;
+    `;
+    newItem.innerHTML = `
+        <span style="font-size: 16px;">${brandData.emoji}</span>
+        <span style="flex: 1; font-size: 13px; color: ${brandData.color}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${brandData.name}</span>
+        <span style="font-size: 11px; color: rgba(79, 172, 254, 0.7);">→</span>
+    `;
+    newItem.onclick = () => moveBrandToUnattached(brandId);
+    newItem.onmouseenter = function() { this.style.background = 'rgba(79, 172, 254, 0.25)'; };
+    newItem.onmouseleave = function() { this.style.background = 'rgba(79, 172, 254, 0.15)'; };
+    
+    attachedList.appendChild(newItem);
+    
+    // Agar ikkinchi blok bo'sh bo'lsa, xabar ko'rsatish
+    if (unattachedList.children.length === 0) {
+        unattachedList.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5); font-size: 13px;">Barcha brendlar biriktirilgan</div>';
+    }
+    
+    // Tanlangan brendlarni yangilash
+    const selected = Array.from(attachedList.querySelectorAll('.brand-item'))
+        .map(item => ({
+            id: parseInt(item.dataset.brandId),
+            name: item.querySelector('span:nth-child(2)')?.textContent || '',
+            emoji: item.querySelector('span:first-child')?.textContent || '🏢'
+        }));
+    updateSelectedBrandsDisplay(selected);
+};
 
 // Get filters hash for cache
 function getFiltersHash() {
@@ -840,7 +1449,7 @@ function setupUserCardEventListeners() {
                 window.showUserItemsModal(userId, title, items, type);
             }
         } catch (error) {
-            console.error('Error parsing items:', error);
+            errorLog('Error parsing items:', error);
         }
     };
     
@@ -877,7 +1486,7 @@ async function handleSessionTerminate(e) {
     
     const sessionId = button.dataset.sid;
     if (!sessionId) {
-        console.error('❌ [TERMINATE] Sessiya ID topilmadi');
+        errorLog('Sessiya ID topilmadi');
         return;
     }
     
@@ -934,7 +1543,7 @@ async function handleSessionTerminate(e) {
                     try {
                         await openSessionsModal(userId, username);
                     } catch (error) {
-                        console.error('❌ [TERMINATE] Modal yangilashda xatolik:', error);
+                        errorLog('Modal yangilashda xatolik:', error);
                         isOpeningSessionsModal = false;
                     }
                 }, 300);
@@ -997,7 +1606,7 @@ async function handleSessionTerminate(e) {
                 try {
                     await openSessionsModal(userId, username);
                 } catch (error) {
-                    console.error('❌ [TERMINATE] Modal yangilashda xatolik:', error);
+                    errorLog('Modal yangilashda xatolik:', error);
                     isOpeningSessionsModal = false;
                 }
             }, 300);
@@ -1030,7 +1639,7 @@ async function handleSessionTerminate(e) {
             }
         }
     } catch (error) {
-        console.error('❌ [TERMINATE] Xatolik:', error);
+        errorLog('Sessiya o\'chirishda xatolik:', error);
         showToast(error.message || 'Sessiyani tugatishda xatolik', 'error');
         button.disabled = false;
         button.innerHTML = originalText;
@@ -1227,6 +1836,7 @@ function renderModernUserCard(user) {
                 ${renderUserBrandsLocations(user)}
             </div>
 
+            <div class="user-card-right-column">
             <div class="user-card-meta">
                 ${user.email ? `
                 <div class="user-card-meta-item">
@@ -1258,50 +1868,15 @@ function renderModernUserCard(user) {
             </div>
 
             <div class="user-card-actions">
-                <button class="user-card-action-btn edit-user-btn" data-id="${user.id}" title="Tahrirlash" data-permission="users:edit">
-                    <i data-feather="edit-2"></i>
-                    Tahrirlash
-                </button>
-                <button class="user-card-action-btn manage-sessions-btn" data-id="${user.id}" data-username="${user.username}" title="Sessiyalar" data-permission="users:manage_sessions">
-                    <i data-feather="monitor"></i>
-                    Sessiyalar
-                </button>
-                ${state.currentUser.id !== user.id ? `
-                <button class="user-card-action-btn danger ${user.status === 'active' ? 'deactivate-user-btn' : 'activate-user-btn'}" 
-                        data-id="${user.id}" 
-                        title="${user.status === 'active' ? 'Bloklash' : 'Aktivlashtirish'}" 
-                        data-permission="users:change_status">
-                    <i data-feather="${user.status === 'active' ? 'eye-off' : 'eye'}"></i>
-                    ${user.status === 'active' ? 'Bloklash' : 'Aktivlashtirish'}
-                </button>
-                ` : ''}
-                ${!user.telegram_chat_id || !user.is_telegram_connected ? `
-                <button class="user-card-action-btn telegram-link-btn" 
+                    <button class="user-card-action-btn manage-user-btn" 
                         data-id="${user.id}" 
                         data-username="${user.username}"
-                        title="Telegram obunasi linkini yaratish">
-                    <i data-feather="send"></i>
-                    TG Link
+                            title="Boshqarish"
+                            data-permission="users:edit">
+                        <i data-feather="settings"></i>
+                        Boshqarish
                 </button>
-                ` : ''}
-                ${(state.currentUser.role === 'superadmin' || state.currentUser.role === 'super_admin') && state.currentUser.id !== user.id && user.telegram_chat_id ? `
-                <button class="user-card-action-btn warning clear-telegram-btn" 
-                        data-id="${user.id}" 
-                        data-username="${user.username}"
-                        title="Telegram bog'lanishni tozalash">
-                    <i data-feather="link-2"></i>
-                    TG tozalash
-                </button>
-                ` : ''}
-                ${(state.currentUser.role === 'superadmin' || state.currentUser.role === 'super_admin') && state.currentUser.id !== user.id && user.role !== 'superadmin' && user.role !== 'super_admin' ? `
-                <button class="user-card-action-btn danger delete-user-btn" 
-                        data-id="${user.id}" 
-                        data-username="${user.username}"
-                        title="Foydalanuvchini o'chirish">
-                    <i data-feather="trash-2"></i>
-                    O'chirish
-                </button>
-                ` : ''}
+                </div>
             </div>
         </div>
     `;
@@ -1478,8 +2053,25 @@ export function toggleLocationVisibilityForUserForm() {
     if (DOM.userLocationsGroup) DOM.userLocationsGroup.style.display = locationsDisplay;
     if (DOM.userBrandsGroup) DOM.userBrandsGroup.style.display = brandsDisplay;
     
+    // Dual container'larni ko'rsatish/yashirish
+    const locationsDualContainer = document.getElementById('locations-dual-container');
+    const brandsDualContainer = document.getElementById('brands-dual-container');
+    
+    // Hozirgi tahrirlanayotgan foydalanuvchi ID'sini olish
+    const editingUserId = currentEditingUserId || (DOM.editUserIdInput?.value || null);
+    
+    if (locationsDualContainer) {
+        locationsDualContainer.style.display = locationsDisplay === 'block' ? 'grid' : 'none';
+        if (locationsDisplay === 'block') {
+            loadLocationsForUser(editingUserId);
+        }
+    }
+    
+    if (brandsDualContainer) {
+        brandsDualContainer.style.display = brandsDisplay === 'block' ? 'grid' : 'none';
     if (brandsDisplay === 'block') {
-        loadBrandsForUser();
+            loadBrandsForUser(editingUserId);
+        }
     }
 }
 
@@ -1643,7 +2235,7 @@ async function loadLocationsForApproval() {
     try {
         const settingsRes = await safeFetch('/api/settings');
         if (!settingsRes.ok) {
-            console.error('❌ [WEB] Settings API xatolik. Status:', settingsRes.status);
+            errorLog('Settings API xatolik. Status:', settingsRes.status);
             throw new Error('Sozlamalarni yuklashda xatolik');
         }
         const settings = await settingsRes.json();
@@ -1723,8 +2315,7 @@ async function loadLocationsForApproval() {
             }
         }
     } catch (error) {
-        console.error('❌ [WEB] Filiallarni yuklashda xatolik:', error);
-        console.error('❌ [WEB] Error stack:', error.stack);
+        errorLog('Filiallarni yuklashda xatolik:', error);
         if (DOM.approvalLocationsCheckboxList) {
             DOM.approvalLocationsCheckboxList.innerHTML = `
                 <div style="text-align: center; padding: 40px 20px; color: #ff6b6b;">
@@ -1878,21 +2469,19 @@ async function loadBrandsForApproval() {
         
         if (!res.ok) {
             const errorText = await res.text();
-            console.error('❌ [WEB] Brendlar API xatolik. Status:', res.status, 'Response:', errorText);
+            errorLog('Brendlar API xatolik. Status:', res.status);
             throw new Error(`Brendlarni yuklashda xatolik: ${res.status}`);
         }
         
         const allBrands = await res.json();
         
         if (!Array.isArray(allBrands)) {
-            console.error('❌ [WEB] Brendlar array emas! Type:', typeof allBrands, 'Value:', allBrands);
+            errorLog('Brendlar array emas! Type:', typeof allBrands);
             throw new Error('Brendlar array formatida emas');
         }
         
         if (allBrands.length === 0) {
-            console.warn('⚠️ [WEB] Brendlar ro\'yxati bo\'sh');
-        } else {
-            console.log('🏷️ [WEB] Brendlar ro\'yxati:', allBrands.map(b => `${b.id}: ${b.name}`).join(', '));
+            debugLog('Brendlar ro\'yxati bo\'sh');
         }
         
         const approvalBrandsList = document.getElementById('approval-brands-list');
@@ -1929,8 +2518,7 @@ async function loadBrandsForApproval() {
             }
         }
     } catch (error) {
-        console.error('❌ [WEB] Brendlarni yuklashda xatolik:', error);
-        console.error('❌ [WEB] Error stack:', error.stack);
+        errorLog('Brendlarni yuklashda xatolik:', error);
         const approvalBrandsList = document.getElementById('approval-brands-list');
         if (approvalBrandsList) {
             approvalBrandsList.innerHTML = `<p style="color: #ff6b6b; padding: 10px;">⚠️ Xatolik: ${error.message}</p>`;
@@ -1938,7 +2526,28 @@ async function loadBrandsForApproval() {
     }
 }
 
-export function openUserModalForAdd() {
+export async function openUserModalForAdd() {
+    // Modal instance olish yoki yaratish
+    if (!userModalInstance) {
+        userModalInstance = getModal('user-form-modal', {
+            onOpen: async (data, instance) => {
+                await executeOpenUserModalForAdd(instance);
+            },
+            onClose: (instance) => {
+                currentEditingUserId = null;
+                // Form'ni tozalash
+                if (DOM.userForm) {
+                    DOM.userForm.reset();
+                }
+            }
+        });
+    }
+    
+    // Modal ochish
+    await openModal('user-form-modal', {});
+}
+
+async function executeOpenUserModalForAdd(modalInstance) {
     DOM.userForm?.reset();
     if (DOM.editUserIdInput) DOM.editUserIdInput.value = '';
     if (DOM.userModalTitle) DOM.userModalTitle.textContent = 'Yangi Foydalanuvchi Qo\'shish';
@@ -1985,47 +2594,97 @@ export function openUserModalForAdd() {
     }
     
     toggleLocationVisibilityForUserForm();
-    ModalHelper.show(DOM.userFormModal);
+    
+    // Feather icons
+    if (window.feather) {
+        window.feather.replace();
+    }
 }
 
-// Modal ochilganligini tekshirish uchun flag
-let isUserModalOpen = false;
+// User modal instance - har bir foydalanuvchi uchun alohida
+let userModalInstance = null;
 let currentEditingUserId = null;
-let modalOpenTimeout = null;
+let isOpeningUserModal = false;
+let userModalTimeout = null;
 
 export async function openUserModalForEdit(userId) {
-    // Agar modal allaqachon ochilgan bo'lsa va bir xil foydalanuvchi tahrirlanmoqda bo'lsa, qayta ochmaslik
-    if (isUserModalOpen && currentEditingUserId === userId && DOM.userFormModal && !DOM.userFormModal.classList.contains('hidden')) {
+    // Agar bir xil foydalanuvchi tahrirlanmoqda bo'lsa, qayta ochmaslik
+    if (currentEditingUserId === userId && userModalInstance && userModalInstance.isOpen) {
+        log.debug('User modal allaqachon ochilgan:', userId);
         return;
     }
     
-    // Agar modal ochilmoqda bo'lsa, keyingi chaqiruvni bekor qilish
-    if (modalOpenTimeout) {
-        clearTimeout(modalOpenTimeout);
-        modalOpenTimeout = null;
+    // Agar modal ochilmoqda bo'lsa, qayta ochmaslik
+    if (isOpeningUserModal) {
+        log.debug('User modal ochilmoqda, qayta ochilmaydi');
+        return;
     }
     
     // Debounce - qisqa vaqt ichida bir necha marta chaqirilganda, faqat oxirgisi ishlaydi
-    modalOpenTimeout = setTimeout(async () => {
-        modalOpenTimeout = null;
-        await executeOpenUserModalForEdit(userId);
-    }, 100);
-}
-
-async function executeOpenUserModalForEdit(userId) {
-    // Agar modal allaqachon ochilgan bo'lsa, qayta ochmaslik
-    if (isUserModalOpen && DOM.userFormModal && !DOM.userFormModal.classList.contains('hidden')) {
-        return;
+    if (userModalTimeout) {
+        clearTimeout(userModalTimeout);
     }
     
+    userModalTimeout = setTimeout(async () => {
+        userModalTimeout = null;
+        isOpeningUserModal = true;
+        
+        try {
+            // Modal instance olish yoki yaratish
+            if (!userModalInstance) {
+                userModalInstance = getModal('user-form-modal', {
+                    onOpen: async (data, instance) => {
+                        await executeOpenUserModalForEdit(data.userId, instance);
+                    },
+                    onClose: async (instance) => {
+                        currentEditingUserId = null;
+                        isOpeningUserModal = false;
+                        
+                        // Form'ni tozalash
+                        if (DOM.userForm) {
+                            DOM.userForm.reset();
+                        }
+                        
+                        // Checkbox container'larni yashirish
+                        const locationsContainer = document.getElementById('locations-checkbox-container');
+                        const brandsContainer = document.getElementById('brands-checkbox-container');
+                        if (locationsContainer) locationsContainer.style.display = 'none';
+                        if (brandsContainer) brandsContainer.style.display = 'none';
+                        
+                        // Tanlangan filial va brendlarni tozalash
+                        updateSelectedLocationsDisplay([]);
+                        updateSelectedBrandsDisplay([]);
+                        
+                        // "Barchasini belgilash" checkbox'larni tozalash
+                        const selectAllLocations = document.getElementById('select-all-locations-checkbox');
+                        const selectAllBrands = document.getElementById('select-all-brands-checkbox');
+                        if (selectAllLocations) selectAllLocations.checked = false;
+                        if (selectAllBrands) selectAllBrands.checked = false;
+                    }
+                });
+            }
+            
+            // Modal ochish
+            await openModal('user-form-modal', { userId });
+            isOpeningUserModal = false;
+        } catch (error) {
+            log.error('User modal ochishda xatolik:', error);
+            isOpeningUserModal = false;
+        }
+    }, 150); // 150ms debounce
+}
+
+async function executeOpenUserModalForEdit(userId, modalInstance) {
     log.debug('openUserModalForEdit chaqirildi - User ID:', userId);
     const user = state.users.find(u => u.id == userId);
     if (!user || !DOM.userForm) {
         log.warn('Foydalanuvchi topilmadi yoki form mavjud emas');
+        if (modalInstance) {
+            await modalInstance.close();
+        }
         return;
     }
     
-    isUserModalOpen = true;
     currentEditingUserId = userId;
     
     log.debug('Foydalanuvchi ma\'lumotlari:', {
@@ -2049,7 +2708,7 @@ async function executeOpenUserModalForEdit(userId) {
     const isEditingSelf = parseInt(userId) === parseInt(state.currentUser?.id);
     const isSuperadminEditingSelf = isCurrentUserSuperadmin && isEditingSuperadmin && isEditingSelf;
     
-    console.log(`🔐 [USERS] Rol tekshiruvi:`, {
+    debugLog('Rol tekshiruvi:', {
         isCurrentUserSuperadmin,
         isEditingSuperadmin,
         isEditingSelf,
@@ -2068,24 +2727,24 @@ async function executeOpenUserModalForEdit(userId) {
         
         if (isEditingSuperadmin) {
             // Superadminni tahrirlashda - faqat joriy rolini ko'rsatish, o'zgartirish mumkin emas
-            console.log(`🚫 [USERS] Superadminni tahrirlash - rol o'zgartirish mumkin emas`);
+            debugLog('Superadminni tahrirlash - rol o\'zgartirish mumkin emas');
             filteredRoles = state.roles.filter(r => r.role_name === user.role);
         } else if (isCurrentUserSuperadmin) {
             // Superadmin tomonidan yaratilgan barcha rollarga o'zgartirish imkoniyati
             // Superadmin va super_admin dan tashqari barcha rollarni ko'rsatish
-            console.log(`✅ [USERS] Superadmin tomonidan - barcha rollarga o'zgartirish imkoniyati`);
+            debugLog('Superadmin tomonidan - barcha rollarga o\'zgartirish imkoniyati');
             filteredRoles = state.roles.filter(r => 
                 r.role_name !== 'superadmin' && r.role_name !== 'super_admin'
             );
         } else {
             // Boshqa foydalanuvchilar uchun - admin va superadmin olib tashlash
-            console.log(`🔒 [USERS] Oddiy foydalanuvchi - admin va superadmin olib tashlangan`);
+            debugLog('Oddiy foydalanuvchi - admin va superadmin olib tashlangan');
             filteredRoles = state.roles.filter(r => 
                 r.role_name !== 'admin' && r.role_name !== 'superadmin' && r.role_name !== 'super_admin'
             );
         }
         
-        console.log(`📋 [USERS] Ko'rsatiladigan rollar:`, filteredRoles.map(r => r.role_name));
+        debugLog('Ko\'rsatiladigan rollar:', filteredRoles.map(r => r.role_name));
         
         DOM.userRoleSelect.innerHTML = filteredRoles
             .map(r => 
@@ -2095,7 +2754,7 @@ async function executeOpenUserModalForEdit(userId) {
         // Agar superadminni tahrirlashda bo'lsa, rol select'ni disabled qilish
         if (isEditingSuperadmin) {
             DOM.userRoleSelect.disabled = true;
-            console.log(`🔒 [USERS] Rol select disabled qilindi (superadmin)`);
+            debugLog('Rol select disabled qilindi (superadmin)');
         } else {
             DOM.userRoleSelect.disabled = false;
         }
@@ -2151,45 +2810,27 @@ async function executeOpenUserModalForEdit(userId) {
                 }
             }
         } catch (error) {
-            console.warn('User settings yuklanmadi:', error);
+            errorLog('User settings yuklanmadi:', error);
             // Default qiymatlar
             if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
             if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
         }
         
-        // Filiallarni tanlash
-        if (user.locations && Array.isArray(user.locations)) {
-            document.querySelectorAll('#locations-checkbox-list input').forEach(cb => {
-                cb.checked = user.locations.includes(cb.value);
-            });
-        }
-        
         // Rol tanlanganda sozlamalar bo'limini ko'rsatish
         if (DOM.userRoleSelect) {
-            // Eski event listener'larni olib tashlash
-            const newSelect = DOM.userRoleSelect.cloneNode(true);
-            DOM.userRoleSelect.parentNode.replaceChild(newSelect, DOM.userRoleSelect);
+            // Eski event listener'larni olib tashlash (cloneNode orqali)
+            const oldSelect = DOM.userRoleSelect;
+            const newSelect = oldSelect.cloneNode(true);
+            oldSelect.parentNode.replaceChild(newSelect, oldSelect);
             DOM.userRoleSelect = newSelect;
             
+            // Yangi event listener qo'shish
             DOM.userRoleSelect.addEventListener('change', toggleLocationVisibilityForUserForm);
         }
         
         toggleLocationVisibilityForUserForm();
         
-        // Tanlangan filiallarni ko'rsatish
-        updateSelectedLocationsDisplay(user.locations || []);
-        
-        // Tanlangan brendlarni ko'rsatish
-        if (DOM.userBrandsGroup && DOM.userBrandsGroup.style.display !== 'none') {
-            await loadBrandsForUser(userId);
-            // Brendlarni yuklagandan keyin tanlanganlarni ko'rsatish
-            const userBrandsRes = await safeFetch(`/api/brands/user/${userId}`);
-            if (userBrandsRes && userBrandsRes.ok) {
-                const data = await userBrandsRes.json();
-                const userBrands = data.brands || [];
-                updateSelectedBrandsDisplay(userBrands);
-            }
-        }
+        // Filial va brendlar toggleLocationVisibilityForUserForm orqali yuklanadi
     }
     
     // Event listener'larni qo'shish - modal ochilgandan keyin
@@ -2215,29 +2856,6 @@ async function executeOpenUserModalForEdit(userId) {
     // Feather icons
     if (window.feather) {
         window.feather.replace();
-    }
-    
-    ModalHelper.show(DOM.userFormModal);
-    
-    // Modal yopilganda flag'ni yangilash
-    const closeModal = () => {
-        isUserModalOpen = false;
-        currentEditingUserId = null;
-    };
-    
-    // Modal yopilganda event listener qo'shish (faqat bir marta)
-    if (!DOM.userFormModal.dataset.closeListenerAdded) {
-        DOM.userFormModal.addEventListener('click', (e) => {
-            // Agar modal tashqarisiga (background'ga) bosilgan bo'lsa, modal yopiladi
-            if (e.target === DOM.userFormModal) {
-                closeModal();
-            }
-            // Agar close-modal-btn'ga bosilgan bo'lsa, modal yopiladi
-            if (e.target.closest('.close-modal-btn')) {
-                closeModal();
-            }
-        });
-        DOM.userFormModal.dataset.closeListenerAdded = 'true';
     }
 }
 
@@ -2335,113 +2953,31 @@ window.removeBrand = function(brandId) {
     });
 };
 
-// Filiallar va brendlar selector'larini sozlash
+// Filiallar va brendlar selector'larini sozlash (inline checkbox'lar uchun)
 function setupLocationBrandSelectors() {
     log.debug('setupLocationBrandSelectors chaqirildi');
-    
-    const selectLocationsBtn = document.getElementById('select-locations-btn');
-    const selectBrandsBtn = document.getElementById('select-brands-btn');
-    
-    log.debug('Button elementlari:', {
-        selectLocationsBtn: !!selectLocationsBtn,
-        selectBrandsBtn: !!selectBrandsBtn,
-        selectLocationsBtnId: selectLocationsBtn?.id,
-        selectBrandsBtnId: selectBrandsBtn?.id
-    });
-    
-    if (selectLocationsBtn) {
-        log.debug('Filiallar button topildi, event listener qo\'shilmoqda...');
-        
-        // Eski event listener'larni olib tashlash - addEventListener ishlatish
-        const oldBtn = selectLocationsBtn;
-        const newBtn = oldBtn.cloneNode(true);
-        oldBtn.parentNode.replaceChild(newBtn, oldBtn);
-        
-        // Handler funksiyasini tashqarida e'lon qilish
-        const handleLocationsClick = function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            log.debug('Filiallar button bosildi');
-            if (window.openLocationsSelectModal) {
-                log.debug('Global openLocationsSelectModal funksiyasi mavjud');
-                window.openLocationsSelectModal();
-            } else {
-                console.log('⚠️ [SETUP] Global funksiya yo\'q, lokal funksiyani chaqiryapman');
-                openLocationsSelectModal();
-            }
-        };
-        
-        // Yangi event listener qo'shish
-        newBtn.addEventListener('click', handleLocationsClick);
-        
-        // Button'ga handler reference'ni saqlash (keyinroq olib tashlash uchun)
-        newBtn._locationsHandler = handleLocationsClick;
-        
-        log.debug('Filiallar button event listener qo\'shildi');
-    } else {
-        log.error('Filiallar button topilmadi!');
-    }
-    
-    if (selectBrandsBtn) {
-        console.log('✅ [SETUP] Brendlar button topildi, event listener qo\'shilmoqda...');
-        
-        // Eski event listener'larni olib tashlash - addEventListener ishlatish
-        const oldBtn = selectBrandsBtn;
-        const newBtn = oldBtn.cloneNode(true);
-        oldBtn.parentNode.replaceChild(newBtn, oldBtn);
-        
-        // Handler funksiyasini tashqarida e'lon qilish
-        const handleBrandsClick = function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('🖱️ [SETUP] Brendlar button bosildi');
-            if (window.openBrandsSelectModal) {
-                console.log('✅ [SETUP] Global openBrandsSelectModal funksiyasi mavjud');
-                window.openBrandsSelectModal();
-            } else {
-                console.log('⚠️ [SETUP] Global funksiya yo\'q, lokal funksiyani chaqiryapman');
-                openBrandsSelectModal();
-            }
-        };
-        
-        // Yangi event listener qo'shish
-        newBtn.addEventListener('click', handleBrandsClick);
-        
-        // Button'ga handler reference'ni saqlash (keyinroq olib tashlash uchun)
-        newBtn._brandsHandler = handleBrandsClick;
-        
-        console.log('✅ [SETUP] Brendlar button event listener qo\'shildi');
-    } else {
-        console.warn('⚠️ [SETUP] Brendlar button topilmadi (bu normal bo\'lishi mumkin)');
-    }
+    // Endi qidiruv input'lari yo'q, faqat "Barchasini belgilash" checkbox'lari bor
+    // Ular loadLocationsForUser va loadBrandsForUser funksiyalarida sozlanadi
 }
 
 // Filiallar tanlash modal'ini ochish
 async function openLocationsSelectModal() {
-    console.log('🚪 [LOCATIONS_MODAL] openLocationsSelectModal chaqirildi');
+    debugLog('openLocationsSelectModal chaqirildi');
     
     // Funksiyani global qilish (xatolikdan keyin qayta yuklash uchun)
     if (!window.openLocationsSelectModal) {
         window.openLocationsSelectModal = openLocationsSelectModal;
-        console.log('✅ [LOCATIONS_MODAL] Funksiya global qilindi');
+        debugLog('Funksiya global qilindi');
     }
     
     const modal = document.getElementById('locations-select-modal');
     const list = document.getElementById('locations-modal-list');
     const searchInput = document.getElementById('locations-search-input');
     
-    console.log('🔍 [LOCATIONS_MODAL] Modal elementlari:', {
-        modal: !!modal,
-        list: !!list,
-        searchInput: !!searchInput,
-        modalId: modal?.id,
-        listId: list?.id
-    });
+    debugLog('Modal elementlari tekshirilmoqda');
     
     if (!modal || !list) {
-        console.error('❌ [LOCATIONS_MODAL] Modal yoki list elementlari topilmadi!');
-        console.error('❌ [LOCATIONS_MODAL] Modal:', modal);
-        console.error('❌ [LOCATIONS_MODAL] List:', list);
+        errorLog('Modal yoki list elementlari topilmadi!');
         return;
     }
     
@@ -2488,7 +3024,7 @@ async function openLocationsSelectModal() {
                 }
             }
             locations = Array.from(allLocationsSet);
-            console.log(`✅ [USERS] ${locations.length} ta filial topildi (tanlangan brendlarda)`);
+            debugLog(`${locations.length} ta filial topildi (tanlangan brendlarda)`);
         } else {
             // Barcha filiallarni olish
             const settingsRes = await safeFetch('/api/settings');
@@ -2595,12 +3131,7 @@ async function openLocationsSelectModal() {
             selectAllCheckbox.addEventListener('change', selectAllLocations);
         }
         
-        console.log('✅ [LOCATIONS_MODAL] Modal ochilmoqda...');
-        console.log('🔍 [LOCATIONS_MODAL] Modal holati (ochilishdan oldin):', {
-            hasHidden: modal.classList.contains('hidden'),
-            display: window.getComputedStyle(modal).display,
-            visibility: window.getComputedStyle(modal).visibility
-        });
+        debugLog('Modal ochilmoqda...');
         
         modal.classList.remove('hidden');
         
@@ -2609,15 +3140,9 @@ async function openLocationsSelectModal() {
             modal.style.display = 'flex';
         }
         
-        console.log('✅ [LOCATIONS_MODAL] Modal ochildi');
-        console.log('🔍 [LOCATIONS_MODAL] Modal holati (ochilishdan keyin):', {
-            hasHidden: modal.classList.contains('hidden'),
-            display: window.getComputedStyle(modal).display,
-            visibility: window.getComputedStyle(modal).visibility,
-            opacity: window.getComputedStyle(modal).opacity
-        });
+        debugLog('Modal ochildi');
     } catch (error) {
-        console.error('❌ [LOCATIONS_MODAL] Xatolik:', error);
+        errorLog('Modal ochishda xatolik:', error);
         showToast(error.message, 'error');
     }
 }
@@ -2689,7 +3214,7 @@ async function openBrandsSelectModal() {
                         hasError = true;
                     }
                 } catch (err) {
-                    console.warn(`⚠️ [USERS] Filial "${location}" uchun brendlar yuklanmadi:`, err);
+                    debugLog(`Filial "${location}" uchun brendlar yuklanmadi:`, err);
                     hasError = true;
                 }
             }
@@ -3033,32 +3558,44 @@ export async function handleUserFormSubmit(e) {
         currentUserRole: state.currentUser?.role
     });
     
-    // Tanlangan filiallarni olish - selected-locations-display dan
-    const selectedLocationsDisplay = document.getElementById('selected-locations-display');
-    const selectedLocations = [];
-    if (selectedLocationsDisplay) {
-        selectedLocationsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
-            const locationName = tag.querySelector('.tag-text')?.textContent;
-            if (locationName) {
-                selectedLocations.push(locationName);
-            }
+    // Tanlangan filiallarni olish - biriktirilgan blokdan
+    const attachedLocationsList = document.getElementById('locations-attached-list');
+    let selectedLocations = [];
+    
+    if (attachedLocationsList) {
+        const locationItems = attachedLocationsList.querySelectorAll('.location-item');
+        selectedLocations = Array.from(locationItems)
+            .map(item => item.dataset.location)
+            .filter(loc => loc && loc.trim() !== ''); // Bo'sh yoki null qiymatlarni olib tashlash
+        
+        console.log('🔍 [FORM] Tanlangan filiallar:', { 
+            attachedListExists: !!attachedLocationsList,
+            itemsCount: locationItems.length,
+            selectedLocations,
+            selectedLocationsCount: selectedLocations.length
         });
+    } else {
+        console.warn('🔍 [FORM] locations-attached-list topilmadi!');
     }
     
-    // Tanlangan brendlarni olish - selected-brands-display dan
-    const selectedBrandsDisplay = document.getElementById('selected-brands-display');
-    const selectedBrandIds = [];
-    if (selectedBrandsDisplay) {
-        selectedBrandsDisplay.querySelectorAll('.selected-item-tag').forEach(tag => {
-            const removeBtn = tag.querySelector('.remove-btn');
-            if (removeBtn) {
-                const onclickStr = removeBtn.getAttribute('onclick') || '';
-                const match = onclickStr.match(/removeBrand\((\d+)\)/);
-                if (match) {
-                    selectedBrandIds.push(parseInt(match[1]));
-                }
-            }
+    // Tanlangan brendlarni olish - biriktirilgan blokdan
+    const attachedBrandsList = document.getElementById('brands-attached-list');
+    let selectedBrandIds = [];
+    
+    if (attachedBrandsList) {
+        const brandItems = attachedBrandsList.querySelectorAll('.brand-item');
+        selectedBrandIds = Array.from(brandItems)
+            .map(item => parseInt(item.dataset.brandId))
+            .filter(id => !isNaN(id)); // NaN qiymatlarni olib tashlash
+        
+        console.log('🔍 [FORM] Tanlangan brendlar:', { 
+            attachedListExists: !!attachedBrandsList,
+            itemsCount: brandItems.length,
+            selectedBrandIds,
+            selectedBrandIdsCount: selectedBrandIds.length
         });
+    } else {
+        console.warn('🔍 [FORM] brands-attached-list topilmadi!');
     }
     
     // Superadmin o'zini tahrirlayotgan bo'lsa, faqat login, to'liq ism, parol o'zgartirish
@@ -3118,8 +3655,7 @@ export async function handleUserFormSubmit(e) {
     
     // Superadmin rolini tekshirish
     if (data.role && (data.role === 'superadmin' || data.role === 'super_admin')) {
-        console.warn(`⚠️ [USERS] Superadmin rolini tanlashga urinish!`);
-        console.warn(`   - Requested role: ${data.role}`);
+        errorLog('Superadmin rolini tanlashga urinish! Requested role:', data.role);
         console.warn(`   - Current user role: ${state.currentUser?.role}`);
     }
     
@@ -3141,7 +3677,7 @@ export async function handleUserFormSubmit(e) {
     const url = isEditing ? `/api/users/${userId}` : '/api/users';
     const method = isEditing ? 'PUT' : 'POST';
     
-    console.log(`📤 [USERS] API'ga so'rov yuborilmoqda:`, {
+    debugLog('API\'ga so\'rov yuborilmoqda:', {
         url,
         method,
         role: data.role
@@ -3159,9 +3695,9 @@ export async function handleUserFormSubmit(e) {
             try {
                 const errorData = await res.json();
                 errorMessage = errorData.message || errorMessage;
-                console.error(`❌ [USERS] API xatolik:`, errorData);
+                errorLog('API xatolik:', errorData);
             } catch (parseError) {
-                console.error(`❌ [USERS] Xatolik ma'lumotlarini parse qilishda xatolik:`, parseError);
+                errorLog('Xatolik ma\'lumotlarini parse qilishda xatolik:', parseError);
                 // Agar JSON parse qilishda xatolik bo'lsa, status kodga qarab xabar berish
                 if (res.status === 403) {
                     errorMessage = 'Bu amalni bajarish uchun ruxsatingiz yo\'q.';
@@ -3174,7 +3710,7 @@ export async function handleUserFormSubmit(e) {
             throw new Error(errorMessage);
         }
         
-        console.log(`✅ [USERS] API muvaffaqiyatli javob qaytardi`);
+        infoLog('API muvaffaqiyatli javob qaytardi');
         
         const result = await res.json();
         
@@ -3207,12 +3743,13 @@ export async function handleUserFormSubmit(e) {
         // Foydalanuvchilar ro'yxatini yangilash
         await refreshUsersList();
         
-        // Modal'ni yopish
-        ModalHelper.hide(DOM.userFormModal);
-        isUserModalOpen = false;
+        // Modal'ni yopish (yangi modal tizimi)
+        if (userModalInstance) {
+            await userModalInstance.close();
+        }
         currentEditingUserId = null;
     } catch (error) {
-        console.error('❌ [USERS] Foydalanuvchi saqlashda xatolik:', error);
+        errorLog('Foydalanuvchi saqlashda xatolik:', error);
         const errorMessage = error.message || 'Foydalanuvchi saqlashda xatolik yuz berdi';
         showToast(errorMessage, true);
     }
@@ -3220,6 +3757,251 @@ export async function handleUserFormSubmit(e) {
 
 // Debounce flag - ikki marta chaqirilishni oldini olish
 let isHandlingUserAction = false;
+
+// User Management Modal
+let userManagementModalInstance = null;
+let currentManagedUserId = null;
+let currentManagedUsername = null;
+let isOpeningUserManagementModal = false;
+let userManagementModalTimeout = null;
+
+// Boshqarish modalini ochish (debounce bilan)
+async function openUserManagementModal(userId, username) {
+    // Agar modal allaqachon ochilgan bo'lsa va bir xil foydalanuvchi uchun bo'lsa, qayta ochmaslik
+    if (userManagementModalInstance && userManagementModalInstance.isOpen && currentManagedUserId == userId) {
+        log.debug('Modal allaqachon ochilgan:', userId);
+        return;
+    }
+    
+    // Agar modal ochilmoqda bo'lsa, qayta ochmaslik
+    if (isOpeningUserManagementModal) {
+        log.debug('Modal ochilmoqda, qayta ochilmaydi');
+        return;
+    }
+    
+    // Debounce - qisqa vaqt ichida bir necha marta chaqirilganda, faqat oxirgisi ishlaydi
+    if (userManagementModalTimeout) {
+        clearTimeout(userManagementModalTimeout);
+    }
+    
+    userManagementModalTimeout = setTimeout(async () => {
+        userManagementModalTimeout = null;
+        isOpeningUserManagementModal = true;
+        
+        try {
+            const user = state.users.find(u => u.id == userId);
+            if (!user) {
+                log.warn('Foydalanuvchi topilmadi:', userId);
+                isOpeningUserManagementModal = false;
+                return;
+            }
+            
+            currentManagedUserId = userId;
+            currentManagedUsername = username;
+            
+            // Modal instance yaratish
+            if (!userManagementModalInstance) {
+                userManagementModalInstance = getModal('user-management-modal', {
+                    onOpen: async (data, instance) => {
+                        await setupUserManagementMenu(data.userId, data.username, instance);
+                    },
+                    onClose: (instance) => {
+                        currentManagedUserId = null;
+                        currentManagedUsername = null;
+                        isOpeningUserManagementModal = false;
+                    }
+                });
+            }
+            
+            // Modal ochish
+            await openModal('user-management-modal', { userId, username });
+            isOpeningUserManagementModal = false;
+        } catch (error) {
+            log.error('Modal ochishda xatolik:', error);
+            isOpeningUserManagementModal = false;
+        }
+    }, 150); // 150ms debounce
+}
+
+// Menu sozlash
+async function setupUserManagementMenu(userId, username, modalInstance) {
+    const user = state.users.find(u => u.id == userId);
+    if (!user) {
+        log.warn('Foydalanuvchi topilmadi:', userId);
+        return;
+    }
+    
+    // Modal title
+    if (DOM.userManagementModalTitle) {
+        DOM.userManagementModalTitle.textContent = `${username} - Boshqarish`;
+    }
+    
+    // Menu button'larni sozlash
+    const menuContainer = document.querySelector('#user-management-modal .user-management-menu');
+    if (!menuContainer) {
+        log.error('Menu container topilmadi');
+        return;
+    }
+    
+    // Eski listener'larni tozalash
+    const newContainer = menuContainer.cloneNode(true);
+    menuContainer.parentNode.replaceChild(newContainer, menuContainer);
+    
+    // Har bir menu item uchun listener qo'shish
+    newContainer.querySelectorAll('.menu-item-btn').forEach(btn => {
+        const action = btn.dataset.action;
+        
+        // Permission va visibility tekshirish
+        if (action === 'edit' && !hasPermission(state.currentUser, 'users:edit')) {
+            btn.style.display = 'none';
+            return;
+        }
+        
+        if (action === 'sessions' && !hasPermission(state.currentUser, 'users:manage_sessions')) {
+            btn.style.display = 'none';
+            return;
+        }
+        
+        if (action === 'status' && state.currentUser.id == userId) {
+            btn.style.display = 'none';
+            return;
+        }
+        
+        if (action === 'telegram-link' && (user.telegram_chat_id && user.is_telegram_connected)) {
+            btn.style.display = 'none';
+            return;
+        }
+        
+        if (action === 'clear-telegram' && 
+            (!(state.currentUser.role === 'superadmin' || state.currentUser.role === 'super_admin') || 
+             state.currentUser.id == userId || !user.telegram_chat_id)) {
+            btn.style.display = 'none';
+            return;
+        }
+        
+        if (action === 'delete' && 
+            (!(state.currentUser.role === 'superadmin' || state.currentUser.role === 'super_admin') || 
+             state.currentUser.id == userId || user.role === 'superadmin' || user.role === 'super_admin')) {
+            btn.style.display = 'none';
+            return;
+        }
+        
+        // Status button text
+        if (action === 'status') {
+            const statusIcon = btn.querySelector('i');
+            const statusText = btn.querySelector('span');
+            if (statusIcon && statusText) {
+                if (user.status === 'active') {
+                    statusIcon.setAttribute('data-feather', 'eye-off');
+                    statusText.textContent = 'Bloklash';
+                } else {
+                    statusIcon.setAttribute('data-feather', 'eye');
+                    statusText.textContent = 'Aktivlashtirish';
+                }
+            }
+        }
+        
+        // Click handler - bir marta qo'shish
+        const clickHandler = async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Button'ni disable qilish (ikki marta bosilishni oldini olish)
+            btn.disabled = true;
+            
+            try {
+                // Modal'ni yopish
+                if (modalInstance && modalInstance.isOpen) {
+                    await modalInstance.close();
+                }
+                
+                // Kichik kechikish (modal yopilish animatsiyasi uchun)
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
+                // Amalni bajarish
+                await executeUserAction(action, userId, username);
+            } catch (error) {
+                log.error('Menu item click handler xatolik:', error);
+            } finally {
+                // Button'ni qayta enable qilish
+                btn.disabled = false;
+            }
+        };
+        
+        btn.addEventListener('click', clickHandler);
+    });
+    
+    // Feather icons
+    if (window.feather) {
+        window.feather.replace();
+    }
+}
+
+// Amalni bajarish
+async function executeUserAction(action, userId, username) {
+    switch (action) {
+        case 'edit':
+            await openUserModalForEdit(userId);
+            break;
+        case 'sessions':
+            await openSessionsModal(userId, username);
+            break;
+        case 'status':
+            await handleUserStatusToggle(userId, username);
+            break;
+        case 'telegram-link':
+            await handleGenerateTelegramLink(userId, username);
+            break;
+        case 'clear-telegram':
+            await handleClearTelegram(userId, username);
+            break;
+        case 'delete':
+            await handleDeleteUser(userId, username);
+            break;
+    }
+}
+
+// Status toggle funksiyasi
+async function handleUserStatusToggle(userId, username) {
+    const user = state.users.find(u => u.id == userId);
+    if (!user) return;
+    
+    const status = user.status === 'active' ? 'blocked' : 'active';
+    const confirmed = await showConfirmDialog({
+        title: status === 'active' ? '✅ Faollashtirish' : '🚫 Bloklash',
+        message: `Rostdan ham bu foydalanuvchini ${status === 'active' ? 'aktivlashtirmoqchimisiz' : 'bloklamoqchimisiz'}?`,
+        confirmText: status === 'active' ? 'Faollashtirish' : 'Bloklash',
+        cancelText: 'Bekor qilish',
+        type: status === 'active' ? 'success' : 'danger',
+        icon: status === 'active' ? 'user-check' : 'user-x'
+    });
+    
+    if (confirmed) {
+        try {
+            const res = await safeFetch(`/api/users/${userId}/status`, { 
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+            });
+            if (!res || !res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.message || 'Status o\'zgartirishda xatolik');
+            }
+            
+            const result = await res.json();
+            showToast(result.message, false);
+            
+            // Ma'lumotlarni yangilash
+            const usersRes = await fetchUsers();
+            if (usersRes) {
+                state.users = usersRes;
+                renderModernUsers();
+            }
+        } catch (error) {
+            showToast(error.message, true);
+        }
+    }
+}
 
 export async function handleUserActions(e) {
     // Agar allaqachon bajarilmoqda bo'lsa, qayta bajarilmaslik (DARHOL tekshirish)
@@ -3246,9 +4028,15 @@ export async function handleUserActions(e) {
         return;
     }
     
-    if (button.classList.contains('edit-user-btn')) {
+    // Yangi boshqarish knopkasi
+    if (button.classList.contains('manage-user-btn')) {
+        const username = button.dataset.username || '';
+        await openUserManagementModal(userId, username);
+        isHandlingUserAction = false;
+    } else if (button.classList.contains('edit-user-btn')) {
         // Agar modal allaqachon ochilgan bo'lsa, qayta ochmaslik
-        if (isUserModalOpen && currentEditingUserId === userId && DOM.userFormModal && !DOM.userFormModal.classList.contains('hidden')) {
+        // Modal instance orqali tekshirish (yangi modal tizimi)
+        if (userModalInstance && userModalInstance.isOpen && currentEditingUserId === userId) {
             console.log(`⚠️ [USERS] handleUserActions: Modal allaqachon ochilgan (User ID: ${userId}), qayta ochilmaydi`);
             isHandlingUserAction = false;
             return;
@@ -3641,74 +4429,56 @@ async function handleDeleteUser(userId, username) {
     }
 }
 
-// Modal ochilish flag'i - ikki marta ochilishni oldini olish
-let isOpeningSessionsModal = false;
+// Sessions modal instance - har bir foydalanuvchi uchun alohida
+let sessionsModalInstance = null;
 
 async function openSessionsModal(userId, username) {
-    console.log('🚪 [MODAL] openSessionsModal chaqirildi');
-    console.log('🚪 [MODAL] User ID:', userId, 'Username:', username);
-    console.log('🚪 [MODAL] isOpeningSessionsModal:', isOpeningSessionsModal);
+    log.debug('openSessionsModal chaqirildi - User ID:', userId, 'Username:', username);
     
     if (!DOM.sessionsModal || !DOM.sessionsModalTitle || !DOM.sessionsListContainer) {
-        console.error('❌ [MODAL] Sessions modal elementlari topilmadi');
-        isHandlingUserAction = false;
-        isOpeningSessionsModal = false;
-        return;
-    }
-    
-    const isModalHidden = DOM.sessionsModal.classList.contains('hidden');
-    console.log('🚪 [MODAL] Modal holati:', isModalHidden ? 'yopiq' : 'ochiq');
-    
-    // Agar modal allaqachon ochilgan bo'lsa va yangilanish kerak bo'lsa, yangilash
-    if (!isModalHidden) {
-        if (isOpeningSessionsModal) {
-            console.log('⚠️ [MODAL] Modal allaqachon ochilmoqda, qayta ochilmaydi');
-            isHandlingUserAction = false;
-            return;
-        }
-        // Modal ochiq, lekin yangilash kerak - flag'ni o'rnatish va davom etish
-        console.log('🔄 [MODAL] Modal ochiq, yangilanmoqda...');
-    }
-    
-    // Agar modal yopiq bo'lsa va ochilmoqda bo'lsa, qayta ochmaslik
-    if (isModalHidden && isOpeningSessionsModal) {
-        console.log('⚠️ [MODAL] Modal ochilmoqda, qayta ochilmaydi');
+        log.error('Sessions modal elementlari topilmadi');
         isHandlingUserAction = false;
         return;
     }
     
-    // Flag'ni o'rnatish
-    isOpeningSessionsModal = true;
-    console.log('✅ [MODAL] isOpeningSessionsModal = true o\'rnatildi');
+    // Modal instance olish yoki yaratish
+    if (!sessionsModalInstance) {
+        sessionsModalInstance = getModal('sessions-modal', {
+            onOpen: async (data, instance) => {
+                await loadSessionsData(data.userId, data.username, instance);
+            },
+            onClose: (instance) => {
+                // Cleanup
+                if (DOM.sessionsListContainer) {
+                    DOM.sessionsListContainer.innerHTML = '';
+                }
+            }
+        });
+    }
     
-    // Modal header va subtitle yangilash
+    // Modal ochish
+    await openModal('sessions-modal', { userId, username });
+}
+
+async function loadSessionsData(userId, username, modalInstance) {
+    // Modal header yangilash
+    if (DOM.sessionsModalTitle) {
     DOM.sessionsModalTitle.textContent = `${username}ning Sessiyalari`;
+    }
     const subtitle = DOM.sessionsModal.querySelector('#sessions-modal-subtitle');
     if (subtitle) {
         subtitle.textContent = 'Aktiv sessiyalar ro\'yxati';
     }
     
     // Loading state
+    if (DOM.sessionsListContainer) {
     DOM.sessionsListContainer.innerHTML = `
         <div class="sessions-loading">
             <div class="loading-spinner"></div>
             <p>Sessiyalar yuklanmoqda...</p>
         </div>
     `;
-    
-    // Modal yopish handler'larini sozlash
-    setupSessionsModalCloseHandlers();
-    
-    // Modal'ni ochish - animatsiya bilan
-    DOM.sessionsModal.classList.remove('hidden');
-    DOM.sessionsModal.style.display = 'flex';
-    setTimeout(() => {
-        DOM.sessionsModal.classList.add('show');
-    }, 10);
-    
-    // User ID va username ni saqlash (keyinroq yangilash uchun)
-    DOM.sessionsModal.dataset.userId = userId;
-    DOM.sessionsModal.dataset.username = username;
+    }
     
     // Feather icons yangilash
     if (window.feather) {
@@ -3718,7 +4488,7 @@ async function openSessionsModal(userId, username) {
     try {
         const res = await safeFetch(`/api/users/${userId}/sessions`);
         if (!res || !res.ok) {
-            const errorData = await res.json();
+            const errorData = await res.json().catch(() => ({}));
             throw new Error(errorData.message || 'Sessiyalarni yuklab bo\'lmadi');
         }
         const sessions = await res.json();
@@ -3728,9 +4498,9 @@ async function openSessionsModal(userId, username) {
             subtitle.textContent = `${sessions.length} ta aktiv sessiya topildi`;
         }
         
-        // Sessiyalarni render qilish - zamonaviy dizayn
+        // Sessiyalarni render qilish
+        if (DOM.sessionsListContainer) {
         DOM.sessionsListContainer.innerHTML = sessions.length > 0 ? sessions.map((s, index) => {
-            // parseUserAgent object qaytaradi, string'ga o'tkazish
             const deviceInfoObj = parseUserAgent(s.user_agent);
             const deviceInfo = deviceInfoObj && typeof deviceInfoObj === 'object' 
                 ? `${deviceInfoObj.browser || 'Noma\'lum'} ${deviceInfoObj.browserVersion || ''} ${deviceInfoObj.os || ''}`.trim() || 'Noma\'lum qurilma'
@@ -3786,18 +4556,16 @@ async function openSessionsModal(userId, username) {
                 <p>Bu foydalanuvchining hozirgi vaqtda aktiv sessiyalari yo'q.</p>
             </div>
         `;
+        }
         
         // Feather icons yangilash
         if (window.feather) {
             window.feather.replace();
         }
         
-        // Event listener qo'shish - terminate button uchun
-        // Event delegation orqali (allaqachon setupUserCardEventListeners da qo'shilgan)
-        // Qo'shimcha listener qo'shish shart emas
-        
     } catch (error) {
-        console.error('Sessions modal xatolik:', error);
+        log.error('Sessions modal xatolik:', error);
+        if (DOM.sessionsListContainer) {
         DOM.sessionsListContainer.innerHTML = `
             <div class="empty-state-modern error">
                 <div class="empty-state-icon">
@@ -3811,65 +4579,13 @@ async function openSessionsModal(userId, username) {
                 </button>
             </div>
         `;
+        }
         if (window.feather) {
             window.feather.replace();
         }
-    }
-    
-    // Flag'ni qaytarish
-    console.log('✅ [MODAL] Modal ochildi, flag\'lar qaytarilmoqda...');
-    isOpeningSessionsModal = false;
+    } finally {
     isHandlingUserAction = false;
-    console.log('✅ [MODAL] Flag\'lar qaytarildi. isOpeningSessionsModal:', isOpeningSessionsModal, 'isHandlingUserAction:', isHandlingUserAction);
-}
-
-// Modal yopish funksiyasi
-function closeSessionsModal() {
-    if (!DOM.sessionsModal) return;
-    
-    DOM.sessionsModal.classList.remove('show');
-    setTimeout(() => {
-        DOM.sessionsModal.classList.add('hidden');
-        DOM.sessionsModal.style.display = 'none';
-    }, 300);
-}
-
-// Sessions modal yopish handler'larini sozlash
-function setupSessionsModalCloseHandlers() {
-    if (!DOM.sessionsModal) return;
-    
-    // Eski listener'larni olib tashlash
-    const oldCloseHandler = DOM.sessionsModal._closeHandler;
-    if (oldCloseHandler) {
-        DOM.sessionsModal.removeEventListener('click', oldCloseHandler);
     }
-    
-    // Yangi close handler
-    const closeHandler = (e) => {
-        // Close button'ga bosilganda
-        if (e.target.closest('.close-modal-btn') || e.target.closest('.close-sessions-modal-btn')) {
-            e.preventDefault();
-            e.stopPropagation();
-            closeSessionsModal();
-            return;
-        }
-        // Background'ga bosilganda
-        if (e.target === DOM.sessionsModal) {
-            closeSessionsModal();
-        }
-    };
-    
-    DOM.sessionsModal.addEventListener('click', closeHandler);
-    DOM.sessionsModal._closeHandler = closeHandler;
-    
-    // ESC tugmasi bilan yopish
-    const escHandler = (e) => {
-        if (e.key === 'Escape' && !DOM.sessionsModal.classList.contains('hidden')) {
-            closeSessionsModal();
-            document.removeEventListener('keydown', escHandler);
-        }
-    };
-    document.addEventListener('keydown', escHandler);
 }
 
 // Time ago helper funksiyasi
@@ -5572,7 +6288,8 @@ function getRequestStatusBadge(request) {
 }
 
 // Update requests statistics
-function updateRequestsStatistics() {
+async function updateRequestsStatistics() {
+    try {
     // Use state.pendingUsers if available, otherwise filter state.users
     let pendingUsers = [];
     if (state.pendingUsers && state.pendingUsers.length > 0) {
@@ -5602,9 +6319,22 @@ function updateRequestsStatistics() {
         return created >= today;
     }).length;
     
-    // Mock data for approved/rejected (real data would come from history)
-    const approvedToday = 0; // TODO: Get from history table
-    const rejectedToday = 0; // TODO: Get from history table
+        // Real data from API - bugungi tasdiqlangan va rad etilgan foydalanuvchilar
+        let approvedToday = 0;
+        let rejectedToday = 0;
+        
+        try {
+            const res = await safeFetch('/api/users/statistics/today');
+            if (res && res.ok) {
+                const stats = await res.json();
+                approvedToday = stats.approved || 0;
+                rejectedToday = stats.rejected || 0;
+            }
+        } catch (error) {
+            errorLog('Statistikani yuklashda xatolik:', error);
+            // Xatolik bo'lsa ham, 0 qiymatlar bilan davom etadi
+        }
+        
     const totalToday = todayRequests + approvedToday + rejectedToday;
     const approvalRate = totalToday > 0 ? Math.round((approvedToday / totalToday) * 100) : 0;
     const rejectionRate = totalToday > 0 ? Math.round((rejectedToday / totalToday) * 100) : 0;
@@ -5639,6 +6369,10 @@ function updateRequestsStatistics() {
     const bulkApproveBtn = document.getElementById('bulk-approve-all-btn');
     if (bulkApproveBtn) {
         bulkApproveBtn.style.display = pendingUsers.length > 0 ? 'flex' : 'none';
+        }
+    } catch (error) {
+        errorLog('Statistikani yangilashda xatolik:', error);
+        // Xatolik bo'lsa ham, foydalanuvchiga ko'rsatmaymiz (ichki xatolik)
     }
 }
 

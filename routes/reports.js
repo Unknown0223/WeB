@@ -53,23 +53,27 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
             }
         } else if (user.permissions.includes('reports:view_assigned')) {
             // Biriktirilgan filiallar hisobotlarini ko'rish
-            // reports:view_assigned uchun o'zi yaratgan hisobotlarni ham ko'rsatish kerak
-            // Va biriktirilgan filiallar hisobotlarini ham ko'rsatish kerak
             const visibleLocations = await getVisibleLocations(user);
             const visibleBrands = await getVisibleBrands(user);
             
-            // O'zi yaratgan hisobotlar yoki biriktirilgan filiallar hisobotlari
+            // MUAMMO TUZATILDI: To'g'ri filtr qo'llash
             query.where(function() {
                 // O'zi yaratgan hisobotlar
                 this.where('r.created_by', user.id);
                 
                 // Yoki biriktirilgan filiallar hisobotlari
                 if (visibleLocations.length > 0) {
-                    this.orWhereIn('r.location', visibleLocations);
-                }
-                
-                // Yoki biriktirilgan brendlar hisobotlari
-                if (visibleBrands.length > 0) {
+                    this.orWhere(function() {
+                        // Filiallar bo'yicha filtr
+                        this.whereIn('r.location', visibleLocations);
+                        
+                        // Agar brendlar ham belgilangan bo'lsa, ularni ham qo'shish (AND mantiqida)
+                        if (visibleBrands.length > 0) {
+                            this.whereIn('r.brand_id', visibleBrands);
+                        }
+                    });
+                } else if (visibleBrands.length > 0) {
+                    // Agar faqat brendlar belgilangan bo'lsa
                     this.orWhereIn('r.brand_id', visibleBrands);
                 }
             });
@@ -83,8 +87,7 @@ router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:vie
                 const visibleLocations = await getVisibleLocations(user);
                 const visibleBrands = await getVisibleBrands(user);
                 
-                // Agar rol shartlari belgilangan bo'lsa, ularni qo'llash
-                // Lekin agar hech qanday shart belgilanmagan bo'lsa, o'zi yaratgan barcha hisobotlarni ko'rsatamiz
+                // MUAMMO TUZATILDI: Agar rol shartlari belgilangan bo'lsa, ularni qo'llash
                 if (visibleLocations.length > 0) {
                     query.whereIn('r.location', visibleLocations);
                 }
@@ -420,15 +423,51 @@ router.put('/:id', isAuthenticated, async (req, res) => {
     }
 });
 
-router.delete('/:id', isAuthenticated, hasPermission('reports:delete'), async (req, res) => {
+router.delete('/:id', isAuthenticated, async (req, res) => {
     const reportId = req.params.id;
     const user = req.session.user;
 
     try {
-        const report = await db('reports').where({ id: reportId }).select('id', 'report_date', 'location').first();
+        const report = await db('reports')
+            .where({ id: reportId })
+            .select('id', 'report_date', 'location', 'created_by', 'brand_id')
+            .first();
 
         if (!report) {
             return res.status(404).json({ message: "O'chirish uchun hisobot topilmadi." });
+        }
+
+        // 3 ta permission bo'yicha tekshirish (edit kabi)
+        const canDeleteAll = user.permissions.includes('reports:delete_all');
+        const canDeleteAssigned = user.permissions.includes('reports:delete_assigned') && 
+            user.locations && Array.isArray(user.locations) && 
+            user.locations.includes(report.location);
+        const canDeleteOwn = user.permissions.includes('reports:delete_own') && 
+            report.created_by === user.id;
+        
+        // Eski permission'ni ham qo'llab-quvvatlash (backward compatibility)
+        const hasOldDeletePermission = user.permissions.includes('reports:delete');
+
+        if (!canDeleteAll && !canDeleteAssigned && !canDeleteOwn && !hasOldDeletePermission) {
+            return res.status(403).json({ 
+                message: "Bu hisobotni o'chirish uchun sizda ruxsat yo'q." 
+            });
+        }
+
+        // Agar faqat delete_own permission bo'lsa va hisobot o'ziga tegishli emas bo'lsa
+        if (!canDeleteAll && !canDeleteAssigned && !hasOldDeletePermission && 
+            canDeleteOwn && report.created_by !== user.id) {
+            return res.status(403).json({ 
+                message: "Siz faqat o'z hisobotlaringizni o'chira olasiz." 
+            });
+        }
+
+        // Agar faqat delete_assigned permission bo'lsa va filial biriktirilmagan bo'lsa
+        if (!canDeleteAll && !canDeleteOwn && !hasOldDeletePermission && 
+            canDeleteAssigned && (!user.locations || !user.locations.includes(report.location))) {
+            return res.status(403).json({ 
+                message: "Siz faqat biriktirilgan filial hisobotlarini o'chira olasiz." 
+            });
         }
         
         const changes = await db('reports').where({ id: reportId }).del();
@@ -437,7 +476,33 @@ router.delete('/:id', isAuthenticated, hasPermission('reports:delete'), async (r
             return res.status(404).json({ message: "Hisobotni o'chirib bo'lmadi." });
         }
 
-        await logAction(user.id, 'delete_report', 'report', reportId, { date: report.report_date, location: report.location, ip: req.session.ip_address, userAgent: req.session.user_agent });
+        // Brend nomini olish
+        let brandName = null;
+        if (report.brand_id) {
+            const brand = await db('brands').where({ id: report.brand_id }).first();
+            brandName = brand ? brand.name : null;
+        }
+
+        await logAction(user.id, 'delete_report', 'report', reportId, { 
+            date: report.report_date, 
+            location: report.location, 
+            brand_id: report.brand_id,
+            ip: req.session.ip_address, 
+            userAgent: req.session.user_agent 
+        });
+
+        // Telegram'ga o'chirish xabari yuborish
+        sendToTelegram({ 
+            type: 'delete', 
+            report_id: reportId, 
+            location: report.location, 
+            date: report.report_date,
+            brand_name: brandName,
+            brand_id: report.brand_id,
+            deleted_by: user.username,
+            deleted_by_id: user.id,
+            deleted_by_fullname: user.fullname || user.username
+        });
 
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
@@ -445,6 +510,7 @@ router.delete('/:id', isAuthenticated, hasPermission('reports:delete'), async (r
                 reportId: reportId,
                 date: report.report_date,
                 location: report.location,
+                brand_id: report.brand_id,
                 deleted_by: user.id,
                 deleted_by_username: user.username
             });

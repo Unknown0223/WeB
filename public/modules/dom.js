@@ -63,6 +63,9 @@ export const DOM = {
     sessionsModal: null,
     sessionsModalTitle: null,
     sessionsListContainer: null,
+    // User Management
+    userManagementModal: null,
+    userManagementModalTitle: null,
     // Rollar
     rolesManagementContainer: null,
     rolesList: null,
@@ -74,6 +77,7 @@ export const DOM = {
     settingsPage: null,
     saveTableSettingsBtn: null,
     saveTelegramBtn: null,
+    telegramEnabledToggle: null,
     botTokenInput: null,
     botUsernameInput: null,
     groupIdInput: null,
@@ -230,6 +234,10 @@ function initDOM() {
     DOM.sessionsModal = document.getElementById('sessions-modal');
     DOM.sessionsModalTitle = document.getElementById('sessions-modal-title');
     DOM.sessionsListContainer = document.getElementById('sessions-list-container');
+    
+    // User Management
+    DOM.userManagementModal = document.getElementById('user-management-modal');
+    DOM.userManagementModalTitle = document.getElementById('user-management-modal-title');
 
     // Roles
     DOM.rolesManagementContainer = document.getElementById('roles-management-container');
@@ -243,6 +251,7 @@ function initDOM() {
     DOM.settingsPage = document.getElementById('settings');
     DOM.saveTableSettingsBtn = document.getElementById('save-table-settings-btn');
     DOM.saveTelegramBtn = document.getElementById('save-telegram-btn');
+    DOM.telegramEnabledToggle = document.getElementById('telegram-enabled-toggle');
     DOM.botTokenInput = document.getElementById('bot-token');
     DOM.botUsernameInput = document.getElementById('bot-username');
     DOM.groupIdInput = document.getElementById('group-id');

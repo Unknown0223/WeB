@@ -10,7 +10,11 @@ let securityRefreshInterval = null;
 
 // Initialize Enhanced Security Module
 export function initEnhancedSecurity() {
-    // console.log('🔒 Initializing Enhanced Security Module...');
+    // Eski interval'ni tozalash (agar mavjud bo'lsa)
+    if (securityRefreshInterval) {
+        clearInterval(securityRefreshInterval);
+        securityRefreshInterval = null;
+    }
     
     setupSecurityTabs();
     setupSecurityButtons();
@@ -24,6 +28,14 @@ export function initEnhancedSecurity() {
     securityRefreshInterval = setInterval(() => {
         refreshSecurityData();
     }, 30000);
+}
+
+// Cleanup funksiyasi - sahifa yopilganda yoki modul o'zgarganda
+export function cleanupEnhancedSecurity() {
+    if (securityRefreshInterval) {
+        clearInterval(securityRefreshInterval);
+        securityRefreshInterval = null;
+    }
 }
 
 export async function fetchAndRenderMySessions() {

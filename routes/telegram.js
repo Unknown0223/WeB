@@ -143,7 +143,7 @@ router.post('/verify-secret-word', async (req, res) => {
 
         if (match) {
             const token = uuidv4();
-            const expires_at = new Date(Date.now() + 5 * 60 * 1000); // 5 daqiqa
+            const expires_at = new Date(Date.now() + 10 * 60 * 1000); // 10 daqiqa
             
             await db('magic_links').insert({
                 token: token,

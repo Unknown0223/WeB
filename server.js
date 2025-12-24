@@ -286,8 +286,56 @@ global.broadcastWebSocket = (type, payload) => {
     try {
         await initializeDB();
         
+        // Orphaned yozuvlarni tozalash (server ishga tushganda)
+        try {
+            const existingUserIds = new Set();
+            const users = await db('users').select('id');
+            users.forEach(user => existingUserIds.add(user.id));
+            
+            const tablesToClean = [
+                { table: 'user_permissions', fkColumn: 'user_id' },
+                { table: 'user_locations', fkColumn: 'user_id' },
+                { table: 'user_brands', fkColumn: 'user_id' },
+                { table: 'reports', fkColumn: 'created_by' },
+                { table: 'report_history', fkColumn: 'changed_by' },
+                { table: 'audit_logs', fkColumn: 'user_id' },
+                { table: 'password_change_requests', fkColumn: 'user_id' },
+                { table: 'pivot_templates', fkColumn: 'created_by' },
+                { table: 'magic_links', fkColumn: 'user_id' },
+                { table: 'notifications', fkColumn: 'user_id' }
+            ];
+            
+            let totalDeleted = 0;
+            for (const { table, fkColumn } of tablesToClean) {
+                try {
+                    const hasTable = await db.schema.hasTable(table);
+                    if (hasTable) {
+                        const deleted = await db(table)
+                            .whereNotNull(fkColumn)
+                            .whereNotIn(fkColumn, Array.from(existingUserIds))
+                            .del();
+                        if (deleted > 0) {
+                            totalDeleted += deleted;
+                            log.info(`✅ [CLEANUP] ${table}: ${deleted} ta orphaned yozuv o'chirildi`);
+                        }
+                    }
+                } catch (err) {
+                    // Jadval mavjud emas yoki xatolik - e'tiborsiz qoldirish
+                }
+            }
+            
+            if (totalDeleted > 0) {
+                log.info(`✅ [CLEANUP] Jami ${totalDeleted} ta orphaned yozuv tozalandi`);
+            } else {
+                log.debug('✅ [CLEANUP] Orphaned yozuvlar topilmadi');
+            }
+        } catch (cleanupError) {
+            log.warn('⚠️ [CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
+        }
+        
         const { getSetting } = require('./utils/settingsCache.js');
         const botToken = await getSetting('telegram_bot_token', null);
+        const telegramEnabled = await getSetting('telegram_enabled', 'false');
 
         // Serverni ishga tushirish
         server.listen(PORT, '0.0.0.0', () => {
@@ -296,10 +344,10 @@ global.broadcastWebSocket = (type, payload) => {
                 process.send('ready');
             }
 
-            // Bot token mavjud bo'lsa, webhookni o'rnatish (async, lekin server bloklanmaydi)
+            // Bot token mavjud bo'lsa VA telegram aktiv bo'lsa, webhookni o'rnatish (async, lekin server bloklanmaydi)
             // Bot initialization'ni alohida async funksiya sifatida ishga tushirish
             // Shunda server darhol javob bera oladi va healthcheck muvaffaqiyatli bo'ladi
-            if (botToken) {
+            if (botToken && (telegramEnabled === 'true' || telegramEnabled === true)) {
                 (async () => {
                 // Deploy uchun webhook rejimida ishga tushirish
                 const appBaseUrl = process.env.APP_BASE_URL;
