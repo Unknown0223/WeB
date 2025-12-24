@@ -10099,6 +10099,47 @@ input.form-control.comparison-input {
 }
 
 /* ===================================================== */
+/* === 📋 DAY DETAILS MODAL STYLES === */
+/* ===================================================== */
+
+#day-details-modal .modal-content {
+    max-width: 1000px;
+    width: 90%;
+    max-height: 90vh;
+    padding: 30px;
+    overflow-y: auto;
+    background: linear-gradient(135deg, #1a1c23 0%, #242731 100%);
+    border: 2px solid rgba(79, 172, 254, 0.3);
+}
+
+#day-details-modal .modal-content::-webkit-scrollbar {
+    width: 10px;
+}
+
+#day-details-modal .modal-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 5px;
+}
+
+#day-details-modal .modal-content::-webkit-scrollbar-thumb {
+    background: rgba(79, 172, 254, 0.5);
+    border-radius: 5px;
+}
+
+#day-details-modal .modal-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(79, 172, 254, 0.7);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    #day-details-modal .modal-content {
+        width: 95%;
+        max-width: 95%;
+        padding: 20px;
+    }
+}
+
+/* ===================================================== */
 /* === 🎨 ZAMONAVIY LOGO ANIMATSIYALARI === */
 /* ===================================================== */
 

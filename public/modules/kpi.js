@@ -921,61 +921,270 @@ async function showDayDetails(dayInfo) {
         statusIcon = '⚠';
     }
     
+    // Report ma'lumotlarini yuklash (agar reportId bo'lsa)
+    let reportDetails = null;
+    let reportData = null;
+    let reportSettings = null;
+    if (dayInfo.reportId) {
+        try {
+            const response = await fetch(`/api/reports?startDate=${dayInfo.date}&endDate=${dayInfo.date}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.reports && data.reports[dayInfo.reportId]) {
+                    reportDetails = data.reports[dayInfo.reportId];
+                    reportData = reportDetails.data || {};
+                    reportSettings = reportDetails.settings || {};
+                }
+            }
+        } catch (error) {
+            console.error('Report ma\'lumotlarini yuklashda xatolik:', error);
+        }
+    }
+    
+    // Kechikish vaqtini hisoblash
+    let lateTime = null;
+    if (dayInfo.status === 'late' && reportDetails && reportDetails.created_at) {
+        const deadline = new Date(dayInfo.date);
+        deadline.setDate(deadline.getDate() + 1);
+        deadline.setHours(9, 0, 0, 0);
+        const createdAt = new Date(reportDetails.created_at);
+        const diffMs = createdAt - deadline;
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+        lateTime = `${diffHours} soat ${diffMinutes} daqiqa`;
+    }
+    
+    // Report ma'lumotlarini brendlar bo'yicha guruhlab, umumiy summalarni hisoblash
+    let reportTableHtml = '';
+    if (reportData && Object.keys(reportData).length > 0) {
+        // Brendlar ro'yxatini yuklash
+        let brandsMap = {};
+        try {
+            const brandsResponse = await fetch('/api/brands');
+            if (brandsResponse.ok) {
+                const brandsData = await brandsResponse.json();
+                if (Array.isArray(brandsData)) {
+                    brandsData.forEach(brand => {
+                        brandsMap[brand.id] = brand.name;
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Brendlar ro\'yxatini yuklashda xatolik:', error);
+        }
+        
+        // Brendlar bo'yicha umumiy summalarni hisoblash
+        const brandTotals = {};
+        let locationTotal = 0; // Filial bo'yicha umumiy summa
+        
+        // Formatlash funksiyasi (vergul o'rniga bo'sh joy, 3 talik)
+        const formatNumber = (num) => {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        };
+        
+        // Barcha ma'lumotlarni ko'rib chiqish
+        Object.entries(reportData).forEach(([key, value]) => {
+            if (typeof value === 'object' && value !== null) {
+                // Agar value obyekt bo'lsa, ichidagi barcha qiymatlarni yig'ish
+                Object.entries(value).forEach(([subKey, subValue]) => {
+                    // Brend raqamini aniqlash (masalan: "10_Naqd" -> "10")
+                    const brandMatch = key.match(/^(\d+)_/);
+                    if (brandMatch) {
+                        const brandId = brandMatch[1];
+                        if (!brandTotals[brandId]) {
+                            brandTotals[brandId] = 0;
+                        }
+                        const numValue = typeof subValue === 'number' ? subValue : (parseFloat(subValue) || 0);
+                        brandTotals[brandId] += numValue;
+                        locationTotal += numValue;
+                    } else {
+                        // Agar brend raqami bo'lmasa, barcha qiymatlarni yig'ish
+                        const numValue = typeof subValue === 'number' ? subValue : (parseFloat(subValue) || 0);
+                        locationTotal += numValue;
+                    }
+                });
+            } else {
+                // Agar value raqam bo'lsa, to'g'ridan-to'g'ri qo'shish
+                const numValue = typeof value === 'number' ? value : (parseFloat(value) || 0);
+                if (numValue > 0) {
+                    const brandMatch = key.match(/^(\d+)_/);
+                    if (brandMatch) {
+                        const brandId = brandMatch[1];
+                        if (!brandTotals[brandId]) {
+                            brandTotals[brandId] = 0;
+                        }
+                        brandTotals[brandId] += numValue;
+                        locationTotal += numValue;
+                    } else {
+                        locationTotal += numValue;
+                    }
+                }
+            }
+        });
+        
+        // Brendlar ro'yxatini tartiblash (raqamlar bo'yicha)
+        const sortedBrands = Object.keys(brandTotals).sort((a, b) => {
+            return parseInt(a) - parseInt(b);
+        });
+        
+        // Jadval HTML yaratish
+        if (sortedBrands.length > 0) {
+            const currencyText = reportDetails?.currency ? (reportDetails.currency === 'UZS' ? 'so\'m' : reportDetails.currency) : 'so\'m';
+            
+            reportTableHtml = `
+                <div style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; border: 1px solid rgba(79, 172, 254, 0.2); overflow-x: auto;">
+                    <h4 style="margin: 0 0 15px 0; color: #4facfe; font-size: 16px; display: flex; align-items: center; gap: 8px; font-weight: 700;">
+                        <span>📊</span> Brendlar bo'yicha umumiy summalar
+                    </h4>
+                    <table style="width: 100%; border-collapse: collapse; color: rgba(255,255,255,0.9); font-size: 14px;">
+                        <thead>
+                            <tr style="background: rgba(79, 172, 254, 0.2); border-bottom: 2px solid rgba(79, 172, 254, 0.4);">
+                                <th style="padding: 10px; text-align: left; font-weight: 600; color: #4facfe; border-right: 1px solid rgba(255,255,255,0.1); font-size: 13px;">Brend</th>
+                                <th style="padding: 10px; text-align: right; font-weight: 600; color: #4facfe; font-size: 13px;">Summa</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sortedBrands.map((brandId, index) => {
+                                const total = brandTotals[brandId];
+                                const brandName = brandsMap[brandId] || `Brend ${brandId}`;
+                                return `
+                                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" 
+                                        onmouseover="this.style.background='rgba(79, 172, 254, 0.1)'" 
+                                        onmouseout="this.style.background=''">
+                                        <td style="padding: 10px; border-right: 1px solid rgba(255,255,255,0.1); font-weight: 500; color: rgba(255,255,255,0.9); font-size: 13px;">
+                                            ${brandName}
+                                        </td>
+                                        <td style="padding: 10px; text-align: right; font-weight: 600; color: #4facfe; font-size: 13px;">
+                                            ${formatNumber(total)} ${currencyText}
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                            <tr style="border-top: 2px solid rgba(79, 172, 254, 0.4); background: rgba(250, 173, 20, 0.1);">
+                                <td style="padding: 10px; border-right: 1px solid rgba(255,255,255,0.1); font-weight: 700; color: #faad14; font-size: 13px;">
+                                    📍 ${reportDetails?.location || 'Filial'} jami
+                                </td>
+                                <td style="padding: 10px; text-align: right; font-weight: 700; color: #faad14; font-size: 13px;">
+                                    ${formatNumber(locationTotal)} ${currencyText}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+    }
+    
     content.innerHTML = `
         <!-- Status kartasi -->
-        <div style="background: ${statusBg}; padding: 20px; border-radius: 12px; color: white; text-align: center;">
-            <div style="font-size: 48px; margin-bottom: 10px;">${statusIcon}</div>
-            <div style="font-size: 18px; font-weight: 600;">${statusText}</div>
+        <div style="background: ${statusBg}; padding: 25px; border-radius: 16px; color: white; text-align: center; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.3);">
+            <div style="font-size: 64px; margin-bottom: 15px;">${statusIcon}</div>
+            <div style="font-size: 22px; font-weight: 700; margin-bottom: 8px;">${statusText}</div>
+            ${lateTime ? `<div style="font-size: 14px; opacity: 0.9; margin-top: 8px;">⏱️ Kechikish: ${lateTime}</div>` : ''}
         </div>
         
-        <!-- Ma'lumotlar -->
-        <div style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                <span style="color: rgba(255,255,255,0.7);">Hisobot ID:</span>
-                <span style="font-weight: 600; color: #4facfe;">#${dayInfo.reportId || 'N/A'}</span>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                <span style="color: rgba(255,255,255,0.7);">Sana:</span>
-                <span style="font-weight: 600;">${dayInfo.date}</span>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                <span style="color: rgba(255,255,255,0.7);">Kun:</span>
-                <span style="font-weight: 600;">${dayInfo.day}</span>
-            </div>
-            
-            ${dayInfo.isEdited ? `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                    <span style="color: rgba(255,255,255,0.7);">Tahrirlangan:</span>
-                    <span style="font-weight: 600; color: #faad14;">Ha</span>
-                </div>
-                
-                ${dayInfo.editorUsername ? `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <span style="color: rgba(255,255,255,0.7);">Tahrirlagan:</span>
-                        <span style="font-weight: 600; color: #1890ff;">${dayInfo.editorUsername}</span>
-                    </div>
-                ` : ''}
-                
-                ${dayInfo.editedAt ? `
+        <!-- Asosiy layout: Chap tomonda ma'lumotlar, o'ng tomonda jadval -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <!-- Chap tomonda: Asosiy ma'lumotlar ustma-ustun -->
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                <!-- Hisobot ID -->
+                <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(79, 172, 254, 0.2);">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="color: rgba(255,255,255,0.7);">Tahrir vaqti:</span>
-                        <span style="font-weight: 600; font-size: 13px;">${new Date(dayInfo.editedAt).toLocaleString('uz-UZ')}</span>
+                        <span style="color: rgba(255,255,255,0.7); font-size: 14px;">Hisobot ID:</span>
+                        <span style="font-weight: 700; color: #4facfe; font-size: 18px;">#${dayInfo.reportId || 'N/A'}</span>
                     </div>
-                ` : ''}
-            ` : `
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="color: rgba(255,255,255,0.7);">Tahrirlangan:</span>
-                    <span style="font-weight: 600; color: #52c41a;">Yo'q</span>
                 </div>
-            `}
+                
+                <!-- Sana -->
+                <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: rgba(255,255,255,0.7); font-size: 14px;">📅 Sana:</span>
+                        <span style="font-weight: 600; font-size: 15px;">${dayInfo.date}</span>
+                    </div>
+                </div>
+                
+                <!-- Kun -->
+                <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: rgba(255,255,255,0.7); font-size: 14px;">🔢 Kun:</span>
+                        <span style="font-weight: 600; font-size: 15px;">${dayInfo.day}</span>
+                    </div>
+                </div>
+                
+                <!-- Tahrirlangan -->
+                <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${dayInfo.isEdited && dayInfo.editorUsername ? '12px' : '0'}; ${dayInfo.isEdited && dayInfo.editorUsername ? 'padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1);' : ''}">
+                        <span style="color: rgba(255,255,255,0.7); font-size: 14px;">✏️ Tahrirlangan:</span>
+                        <span style="font-weight: 600; color: ${dayInfo.isEdited ? '#faad14' : '#52c41a'}; font-size: 15px;">
+                            ${dayInfo.isEdited ? 'Ha' : 'Yo\'q'}
+                        </span>
+                    </div>
+                    ${dayInfo.isEdited && dayInfo.editorUsername ? `
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="color: rgba(255,255,255,0.7); font-size: 14px;">👤 Tahrirlagan:</span>
+                            <span style="font-weight: 600; color: #1890ff; font-size: 15px;">${dayInfo.editorUsername}</span>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                ${reportDetails ? `
+                    ${reportDetails.created_by_username ? `
+                        <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: rgba(255,255,255,0.7); font-size: 14px;">👨‍💼 Yaratuvchi:</span>
+                                <span style="font-weight: 600; color: #52c41a; font-size: 15px;">${reportDetails.created_by_username}</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${reportDetails.location ? `
+                        <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: rgba(255,255,255,0.7); font-size: 14px;">📍 Filial:</span>
+                                <span style="font-weight: 600; color: #722ed1; font-size: 15px;">${reportDetails.location}</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${reportDetails.brand_name ? `
+                        <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: rgba(255,255,255,0.7); font-size: 14px;">🏷️ Brend:</span>
+                                <span style="font-weight: 600; color: #fa8c16; font-size: 15px;">${reportDetails.brand_name}</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${reportDetails.created_at ? `
+                        <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: rgba(255,255,255,0.7); font-size: 14px;">🕐 Yaratilgan:</span>
+                                <span style="font-weight: 600; color: #13c2c2; font-size: 13px;">${new Date(reportDetails.created_at).toLocaleString('uz-UZ')}</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${dayInfo.isEdited && dayInfo.editedAt ? `
+                        <div style="background: rgba(255,255,255,0.05); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="color: rgba(255,255,255,0.7); font-size: 14px;">🔄 Tahrir vaqti:</span>
+                                <span style="font-weight: 600; color: #faad14; font-size: 13px;">${new Date(dayInfo.editedAt).toLocaleString('uz-UZ')}</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                ` : ''}
+            </div>
+            
+            <!-- O'ng tomonda: Brendlar jadvali (ixchamlashtirilgan) -->
+            <div>
+                ${reportTableHtml ? reportTableHtml.replace('padding: 25px', 'padding: 20px').replace('font-size: 18px', 'font-size: 16px').replace('padding: 12px', 'padding: 10px') : ''}
+            </div>
         </div>
         
         <!-- O'zgarishlar tarixi (agar tahrirlangan bo'lsa) -->
         ${dayInfo.isEdited && dayInfo.reportId ? `
-            <div id="edit-history-section" style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; max-height: 400px;">
-                <h4 style="margin: 0 0 15px 0; color: #4facfe; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+            <div id="edit-history-section" style="background: rgba(255,255,255,0.05); padding: 25px; border-radius: 12px; display: flex; flex-direction: column; max-height: 500px; border: 1px solid rgba(79, 172, 254, 0.2);">
+                <h4 style="margin: 0 0 20px 0; color: #4facfe; font-size: 18px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; font-weight: 700;">
                     <span>📝</span> O'zgarishlar tarixi
                 </h4>
                 <div id="edit-history-content" style="
@@ -984,7 +1193,7 @@ async function showDayDetails(dayInfo) {
                     padding: 20px;
                     overflow-y: auto;
                     overflow-x: hidden;
-                    max-height: 350px;
+                    max-height: 400px;
                     flex: 1;
                 ">
                     Yuklanmoqda...
@@ -996,13 +1205,15 @@ async function showDayDetails(dayInfo) {
     // Modalni ochish
     modal.classList.remove('hidden');
     
+    // Feather iconlarni yangilash
+    setTimeout(() => {
+        if (typeof feather !== 'undefined') feather.replace();
+    }, 100);
+    
     // Agar tahrirlangan bo'lsa, tahrir tarixini yuklash
     if (dayInfo.isEdited && dayInfo.reportId) {
         loadEditHistory(dayInfo.reportId);
     }
-    setTimeout(() => {
-        if (typeof feather !== 'undefined') feather.replace();
-    }, 100);
     
     // Yopish
     closeBtn.onclick = () => modal.classList.add('hidden');
