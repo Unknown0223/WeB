@@ -377,12 +377,19 @@ router.post('/import-full-db', async (req, res) => {
                             if (options.foreignKeys) {
                                 let canImport = true;
                                 for (const fk of options.foreignKeys) {
+                                    const fkValue = record[fk.reference];
+                                    
+                                    // Null qiymatlar uchun tekshiruvni o'tkazib yuborish (null - ixtiyoriy foreign key)
+                                    if (fkValue === null || fkValue === undefined) {
+                                        continue; // Null qiymatlar uchun tekshiruvni o'tkazib yuborish
+                                    }
+                                    
                                     const relatedRecord = await trx(fk.table)
-                                        .where(fk.column, record[fk.reference])
+                                        .where(fk.column, fkValue)
                                         .first();
                                     
                                     if (!relatedRecord) {
-                                        log.error(`Foreign key tekshiruvi: ${fk.table}.${fk.column} = ${record[fk.reference]} topilmadi`);
+                                        log.error(`Foreign key tekshiruvi: ${fk.table}.${fk.column} = ${fkValue} topilmadi`);
                                         canImport = false;
                                         break;
                                     }
@@ -785,6 +792,76 @@ router.post('/import-full-db', async (req, res) => {
     } catch (error) {
         log.error('❌ Import xatolik:', error);
         res.status(500).json({ message: 'Import qilishda xatolik: ' + error.message });
+    }
+});
+
+// POST /api/admin/cleanup-orphaned-records - Orphaned foreign key yozuvlarni tozalash
+router.post('/cleanup-orphaned-records', async (req, res) => {
+    try {
+        const cleanupResults = {};
+        
+        // Mavjud user ID'larni olish
+        const existingUserIds = new Set();
+        const users = await db('users').select('id');
+        users.forEach(user => existingUserIds.add(user.id));
+        
+        // Jadval mavjudligini tekshirish va orphaned yozuvlarni tozalash
+        const tablesToClean = [
+            { table: 'user_permissions', fkColumn: 'user_id' },
+            { table: 'user_locations', fkColumn: 'user_id' },
+            { table: 'user_brands', fkColumn: 'user_id' },
+            { table: 'reports', fkColumn: 'created_by' },
+            { table: 'report_history', fkColumn: 'changed_by' },
+            { table: 'audit_logs', fkColumn: 'user_id' },
+            { table: 'password_change_requests', fkColumn: 'user_id' },
+            { table: 'pivot_templates', fkColumn: 'created_by' },
+            { table: 'magic_links', fkColumn: 'user_id' },
+            { table: 'notifications', fkColumn: 'user_id' }
+        ];
+        
+        for (const { table, fkColumn } of tablesToClean) {
+            try {
+                // Jadval mavjudligini tekshirish
+                const hasTable = await db.schema.hasTable(table);
+                if (!hasTable) {
+                    cleanupResults[table] = { deleted: 0, skipped: true, reason: 'Jadval mavjud emas' };
+                    continue;
+                }
+                
+                // Orphaned yozuvlarni topish va o'chirish
+                const orphanedRecords = await db(table)
+                    .whereNotNull(fkColumn)
+                    .whereNotIn(fkColumn, Array.from(existingUserIds));
+                
+                if (orphanedRecords.length > 0) {
+                    const deleted = await db(table)
+                        .whereNotNull(fkColumn)
+                        .whereNotIn(fkColumn, Array.from(existingUserIds))
+                        .del();
+                    
+                    cleanupResults[table] = { deleted, skipped: false };
+                    log.info(`✅ [CLEANUP] ${table}: ${deleted} ta orphaned yozuv o'chirildi`);
+                } else {
+                    cleanupResults[table] = { deleted: 0, skipped: false };
+                }
+            } catch (err) {
+                log.error(`❌ [CLEANUP] ${table} tozalashda xatolik:`, err.message);
+                cleanupResults[table] = { deleted: 0, skipped: true, error: err.message };
+            }
+        }
+        
+        const totalDeleted = Object.values(cleanupResults)
+            .reduce((sum, result) => sum + (result.deleted || 0), 0);
+        
+        res.json({
+            message: 'Orphaned yozuvlar muvaffaqiyatli tozalandi',
+            results: cleanupResults,
+            total_deleted: totalDeleted
+        });
+        
+    } catch (error) {
+        log.error('❌ Orphaned yozuvlarni tozalashda xatolik:', error);
+        res.status(500).json({ message: 'Tozalashda xatolik: ' + error.message });
     }
 });
 
