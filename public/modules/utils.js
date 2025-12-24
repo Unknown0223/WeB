@@ -482,3 +482,43 @@ export function createLogger(moduleName = '') {
 
 // Global logger (default)
 export const logger = createLogger();
+
+/**
+ * Xatolik xabarlarini foydalanuvchiga tushunarli qilish
+ * @param {Error|Object|string} error - Xatolik obyekti yoki xabar
+ * @returns {string} Foydalanuvchiga tushunarli xatolik xabari
+ */
+export function getUserFriendlyErrorMessage(error) {
+    if (!error) return 'Noma\'lum xatolik yuz berdi';
+    
+    const errorMessage = error.message || String(error);
+    
+    // Texnik xatoliklarni foydalanuvchiga tushunarli qilish
+    const friendlyMessages = {
+        'NetworkError': 'Internet aloqasi yo\'q. Internet aloqasini tekshiring.',
+        'Failed to fetch': 'Server bilan bog\'lanishda xatolik. Qayta urinib ko\'ring.',
+        '401': 'Sizning sessiyangiz tugagan. Qaytadan kirishingiz kerak.',
+        '403': 'Bu amalni bajarish uchun ruxsatingiz yo\'q.',
+        '404': 'Ma\'lumot topilmadi.',
+        '500': 'Server xatoligi yuz berdi. Iltimos, keyinroq urinib ko\'ring.',
+        'timeout': 'So\'rov vaqti tugadi. Qayta urinib ko\'ring.',
+        'Network request failed': 'Internet aloqasi yo\'q. Internet aloqasini tekshiring.',
+        'AbortError': 'So\'rov bekor qilindi.',
+    };
+    
+    // Status kod tekshirish
+    if (error.status) {
+        const statusMessage = friendlyMessages[String(error.status)];
+        if (statusMessage) return statusMessage;
+    }
+    
+    // Xatolik nomi tekshirish
+    for (const [key, message] of Object.entries(friendlyMessages)) {
+        if (errorMessage.includes(key)) {
+            return message;
+        }
+    }
+    
+    // Agar hech narsa topilmasa, asl xabarni qaytarish (lekin qisqartirilgan)
+    return errorMessage.length > 100 ? errorMessage.substring(0, 100) + '...' : errorMessage;
+}

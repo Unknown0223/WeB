@@ -339,32 +339,75 @@ router.post('/login', async (req, res) => {
             rolePermissions,
             additionalPerms,
             restrictedPerms,
-            sessionsCount
+            existingSessions
         ] = await Promise.all([
             userRepository.getLocationsByUserId(user.id),
             userRepository.getPermissionsByRole(user.role),
             db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
             db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key'),
-            // Device limit tekshiruvini optimallashtirish - faqat super admin emas bo'lsa
+            // Sessiya limit tekshiruvi uchun mavjud sessiyalarni olish (super admin uchun kerak emas)
             user.role !== 'super_admin' 
-                ? db('sessions').where('sess', 'like', `%"id":${user.id}%`).count('* as count').first()
-                : Promise.resolve({ count: 0 })
+                ? db('sessions').select('sid', 'sess')
+                : Promise.resolve([])
         ]);
 
-        // Super admin uchun device limit tekshiruvi o'tkazib yuboriladi
+        // SESSIYA LIMIT TEKSHIRUVI
+        // Qoida: "Qurilma + Brauzer" kombinatsiyasi asosida
+        // 1. Bir xil qurilma + bir xil brauzer = 1 ta sessiya (eski o'chiriladi, limitga ta'sir qilmaydi)
+        // 2. Bir xil qurilma + turli brauzerlar = har bir brauzer uchun alohida sessiya (limit tekshiriladi)
+        // 3. Turli qurilmalar = har bir qurilma uchun alohida sessiya (limit tekshiriladi)
+        
         if (user.role !== 'super_admin') {
-            const activeSessionsCount = sessionsCount ? parseInt(sessionsCount.count) : 0;
+            // Foydalanuvchining barcha aktiv sessiyalarini olish
+            const userSessions = existingSessions
+                .map(s => {
+                    try {
+                        const sessData = JSON.parse(s.sess);
+                        if (sessData.user && sessData.user.id == user.id) {
+                            return {
+                                sid: s.sid,
+                                user_agent: sessData.user_agent || ''
+                            };
+                        }
+                    } catch (e) {
+                        return null;
+                    }
+                    return null;
+                })
+                .filter(Boolean);
+
+            // Unique device/browser'larni aniqlash (user_agent asosida)
+            const uniqueDevices = new Map();
+            userSessions.forEach(session => {
+                const deviceKey = session.user_agent || 'unknown';
+                // Bir xil qurilma+brauzer bo'lsa, eski sessiyani o'chirish
+                if (uniqueDevices.has(deviceKey)) {
+                    db('sessions').where({ sid: uniqueDevices.get(deviceKey).sid }).del().catch(() => {});
+                }
+                uniqueDevices.set(deviceKey, session);
+            });
+
+            // Joriy kirish qurilmasini tekshirish
+            const currentDeviceKey = userAgent || 'unknown';
+            const isExistingDevice = uniqueDevices.has(currentDeviceKey);
             
-            if (activeSessionsCount >= user.device_limit) {
+            // Bir xil qurilma+brauzer bilan kirilayotgan bo'lsa, eski sessiyani o'chirish
+            if (isExistingDevice) {
+                const existingSession = uniqueDevices.get(currentDeviceKey);
+                await db('sessions').where({ sid: existingSession.sid }).del();
+                uniqueDevices.delete(currentDeviceKey);
+            }
+
+            // Limit tekshiruvi: faqat yangi qurilma/brauzer kombinatsiyasi uchun
+            const uniqueDevicesCount = uniqueDevices.size;
+            if (uniqueDevicesCount >= user.device_limit && !isExistingDevice) {
                 if (!user.telegram_chat_id) {
-                    // Background'da log yozish (await qilmaslik)
                     logAction(user.id, 'login_fail', 'user', user.id, { username, reason: 'Device limit reached, no Telegram', ip: ipAddress, userAgent }).catch(() => {});
                     return res.status(403).json({ 
                         message: `Qurilmalar limiti (${user.device_limit}) to'lgan. Yangi qurilmadan kirish uchun Telegram botga ulanmagansiz. Iltimos, adminga murojaat qiling.` 
                     });
                 }
                 
-                // Telegram xabarni background'da yuborish
                 sendToTelegram({
                     type: 'secret_word_request',
                     chat_id: user.telegram_chat_id,
@@ -374,7 +417,6 @@ router.post('/login', async (req, res) => {
                     device: userAgent
                 }).catch(() => {});
                 
-                // Background'da log yozish
                 logAction(user.id, '2fa_sent', 'user', user.id, { username, reason: 'Device limit reached', ip: ipAddress, userAgent }).catch(() => {});
 
                 return res.status(429).json({
@@ -448,13 +490,17 @@ router.post('/login', async (req, res) => {
         const hasTelegramChatId = !!user.telegram_chat_id;
         const isActiveUser = user.status === 'active';
 
-        // Bot obunasi tekshiruvi faqat active foydalanuvchilar uchun
+        // Telegram aktiv holatini tekshirish
+        const telegramEnabledSetting = await db('settings').where({ key: 'telegram_enabled' }).first();
+        const telegramEnabled = telegramEnabledSetting && (telegramEnabledSetting.value === 'true' || telegramEnabledSetting.value === true);
+
+        // Bot obunasi tekshiruvi faqat telegram aktiv bo'lsa va active foydalanuvchilar uchun
         // Agar foydalanuvchi active bo'lsa va bot obunasi yo'q bo'lsa, bu shuni anglatadiki:
         // - Foydalanuvchi tizimda ishlagan
         // - Bot obunasini bekor qilgan
         // - Tizimdan chiqib ketgan
         // - Keyin qayta kirishga harakat qilgan
-        if (!isSuperAdmin && isActiveUser && (!isTelegramConnected || !hasTelegramChatId)) {
+        if (telegramEnabled && !isSuperAdmin && isActiveUser && (!isTelegramConnected || !hasTelegramChatId)) {
             // Bot obunasi yo'q - bot bog'lash sahifasiga redirect
             // Sessiya yaratiladi, lekin bot bog'languncha dashboard ochilmaydi
             req.session.user = {
@@ -540,18 +586,50 @@ router.get('/verify-session/:token', async (req, res) => {
             return res.status(400).send("<h1>Havola yaroqsiz yoki muddati o'tgan</h1><p>Iltimos, tizimga qayta kirishga urinib ko'ring.</p>");
         }
 
-        const sessions = await db('sessions').select('sid', 'sess');
-        const userSessionIds = sessions
-            .filter(s => {
-                try { return JSON.parse(s.sess)?.user?.id === link.user_id; } catch { return false; }
-            })
-            .map(s => s.sid);
-
-        if (userSessionIds.length > 0) {
-            await db('sessions').whereIn('sid', userSessionIds).del();
+        const user = await userRepository.findById(link.user_id);
+        if (!user) {
+            log.error(`[VERIFY_SESSION] Foydalanuvchi topilmadi - User ID: ${link.user_id}`);
+            return res.status(404).send("<h1>Foydalanuvchi topilmadi</h1>");
         }
 
-        const user = await userRepository.findById(link.user_id);
+        // Sessiya limit logikasi: bir xil qurilma+brauzer bo'lsa, eski sessiyani o'chirish
+        const sessions = await db('sessions').select('sid', 'sess');
+        const userSessions = sessions
+            .map(s => {
+                try { 
+                    const sessData = JSON.parse(s.sess);
+                    if (sessData.user && sessData.user.id === link.user_id) {
+                        return {
+                            sid: s.sid,
+                            user_agent: sessData.user_agent || ''
+                        };
+                    }
+                } catch { 
+                    return null; 
+                }
+                return null;
+            })
+            .filter(Boolean);
+
+        // Unique device/browser'larni aniqlash
+        const uniqueDevices = new Map();
+        userSessions.forEach(session => {
+            const deviceKey = session.user_agent || 'unknown';
+            if (uniqueDevices.has(deviceKey)) {
+                db('sessions').where({ sid: uniqueDevices.get(deviceKey).sid }).del().catch(() => {});
+            }
+            uniqueDevices.set(deviceKey, session);
+        });
+
+        // Joriy qurilma+brauzer bilan kirilayotgan bo'lsa, eski sessiyani o'chirish
+        const currentDeviceKey = userAgent || 'unknown';
+        const existingSession = uniqueDevices.get(currentDeviceKey);
+        
+        if (existingSession) {
+            await db('sessions').where({ sid: existingSession.sid }).del();
+        }
+
+
         const [locations, rolePermissions] = await Promise.all([
             userRepository.getLocationsByUserId(user.id),
             userRepository.getPermissionsByRole(user.role)
@@ -577,43 +655,78 @@ router.get('/verify-session/:token', async (req, res) => {
         req.session.regenerate(async (err) => {
             if (err) {
                 log.error(`[VERIFY_SESSION] Sessiya yaratish xatoligi - User ID: ${link.user_id}`, err);
-                return res.status(500).send("<h1>Ichki xatolik</h1><p>Sessiyani yaratib bo'lmadi.</p>");
+                // Token'ni o'chirish (xatolik bo'lsa ham)
+                try {
+                    await db('magic_links').where({ token: token }).del();
+                } catch (tokenError) {
+                    log.error(`[VERIFY_SESSION] Token o'chirishda xatolik:`, tokenError);
+                }
+                return res.status(500).send("<h1>Ichki xatolik</h1><p>Sessiyani yaratib bo'lmadi. Iltimos, qayta urinib ko'ring.</p>");
             }
 
-            req.session.user = {
-                id: user.id,
-                username: user.username,
-                role: user.role,
-                locations: locations,
-                permissions: finalPermissions
-            };
-            req.session.ip_address = ipAddress;
-            req.session.user_agent = userAgent;
-            req.session.last_activity = Date.now();
-            
-            await logAction(user.id, '2fa_success', 'magic_link', user.id, { ip: ipAddress, userAgent });
-            await logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent, method: 'magic_link' });
+            try {
+                req.session.user = {
+                    id: user.id,
+                    username: user.username,
+                    role: user.role,
+                    locations: locations,
+                    permissions: finalPermissions
+                };
+                req.session.ip_address = ipAddress;
+                req.session.user_agent = userAgent;
+                req.session.last_activity = Date.now();
+                
+                // Sessiya saqlash
+                await new Promise((resolve, reject) => {
+                    req.session.save((saveErr) => {
+                        if (saveErr) {
+                            log.error(`[VERIFY_SESSION] Sessiya saqlashda xatolik - User ID: ${user.id}`, saveErr);
+                            reject(saveErr);
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+                
+                await logAction(user.id, '2fa_success', 'magic_link', user.id, { ip: ipAddress, userAgent });
+                await logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent, method: 'magic_link' });
 
-            // Bot login xabarini o'chirish (agar mavjud bo'lsa)
-            if (user.telegram_chat_id && user.bot_login_message_id) {
-                const { getBot } = require('../utils/bot.js');
-                const bot = getBot();
-                if (bot) {
-                    try {
-                        await bot.deleteMessage(user.telegram_chat_id, user.bot_login_message_id);
-                        await db('users').where({ id: user.id }).update({ bot_login_message_id: null });
-                    } catch (error) {
-                        log.error(`[VERIFY_SESSION] Bot xabarini o'chirishda xatolik - User ID: ${user.id}`, error.message);
+                // Bot login xabarini o'chirish (agar mavjud bo'lsa)
+                if (user.telegram_chat_id && user.bot_login_message_id) {
+                    const { getBot } = require('../utils/bot.js');
+                    const bot = getBot();
+                    if (bot) {
+                        try {
+                            await bot.deleteMessage(user.telegram_chat_id, user.bot_login_message_id);
+                            await db('users').where({ id: user.id }).update({ bot_login_message_id: null });
+                        } catch (error) {
+                            log.error(`[VERIFY_SESSION] Bot xabarini o'chirishda xatolik - User ID: ${user.id}`, error.message);
+                        }
                     }
                 }
-            }
 
-            // Token'ni o'chirish
-            await db('magic_links').where({ token: token }).del();
-            
-            // Redirect'ni to'g'ri qilish
-            const baseUrl = process.env.APP_BASE_URL || req.protocol + '://' + req.get('host');
-            res.redirect(baseUrl + '/');
+                // Token'ni o'chirish (muvaffaqiyatli bo'lsa)
+                try {
+                    await db('magic_links').where({ token: token }).del();
+                    log.debug(`[VERIFY_SESSION] Token muvaffaqiyatli o'chirildi - User ID: ${user.id}`);
+                } catch (tokenError) {
+                    log.error(`[VERIFY_SESSION] Token o'chirishda xatolik - User ID: ${user.id}`, tokenError);
+                    // Token o'chirilmadi, lekin sessiya yaratildi - davom etamiz
+                }
+                
+                // Redirect'ni to'g'ri qilish
+                const baseUrl = process.env.APP_BASE_URL || req.protocol + '://' + req.get('host');
+                res.redirect(baseUrl + '/');
+            } catch (sessionError) {
+                log.error(`[VERIFY_SESSION] Sessiya sozlashda xatolik - User ID: ${user.id}`, sessionError);
+                // Token'ni o'chirish
+                try {
+                    await db('magic_links').where({ token: token }).del();
+                } catch (tokenError) {
+                    log.error(`[VERIFY_SESSION] Token o'chirishda xatolik:`, tokenError);
+                }
+                res.status(500).send("<h1>Ichki xatolik</h1><p>Sessiyani sozlab bo'lmadi. Iltimos, qayta urinib ko'ring.</p>");
+            }
         });
 
     } catch (error) {
@@ -836,7 +949,7 @@ router.post('/bot-connect/generate-token', async (req, res) => {
         // Token yaratish
         const { v4: uuidv4 } = require('uuid');
         const token = `bot_connect_${uuidv4()}`;
-        const expires_at = new Date(Date.now() + 10 * 60 * 1000); // 10 daqiqa
+        const expires_at = new Date(Date.now() + 10 * 60 * 1000); // 10 daqiqa (optimizatsiya: 5 dan 10 ga oshirildi)
 
         // Eski tokenlarni o'chirish
         await db('magic_links')
@@ -956,10 +1069,14 @@ router.get('/bot-connect/status', async (req, res) => {
         const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
         const hasTelegramChatId = !!user.telegram_chat_id;
 
+        // Telegram aktiv holatini tekshirish
+        const telegramEnabledSetting = await db('settings').where({ key: 'telegram_enabled' }).first();
+        const telegramEnabled = telegramEnabledSetting && (telegramEnabledSetting.value === 'true' || telegramEnabledSetting.value === true);
+
         res.json({
             isSuperAdmin: isSuperAdmin,
             isTelegramConnected: isTelegramConnected && hasTelegramChatId,
-            requiresBotConnection: !isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId),
+            requiresBotConnection: telegramEnabled && !isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId),
             username: user.username // Sessiyadagi username'ni qaytarish
         });
 

@@ -3,7 +3,7 @@
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Boshqaruv Paneli</title>
     
     <!-- Preconnect for faster CDN loading -->
@@ -260,7 +260,7 @@
 
     <!-- Mobile Menu Toggle Button -->
     <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Menyuni ochish">
-        <i data-feather="menu"></i>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-menu"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
     </button>
     
     <!-- Sidebar Overlay (mobil uchun) -->
@@ -520,24 +520,24 @@
                     <h1 class="page-title">Xodimlar Ish Samaradorligi (KPI)</h1>
                     <div class="modern-month-selector">
                         <button class="month-nav-btn" id="prev-month-btn" title="O'tish orqaga">
-                            <i data-feather="chevron-left"></i>
+                            <i data-feather="chevron-left" aria-label="O'tish orqaga" title="O'tish orqaga"></i>
                         </button>
                         <div class="month-display" id="month-display-btn">
-                            <span id="current-month-text">Noyabr 2025</span>
-                            <i data-feather="calendar" style="width: 18px; height: 18px; margin-left: 8px;"></i>
+                            <span id="current-month-text" aria-label="Oy" title="Oy">Noyabr 2025</span>
+                            <i data-feather="calendar" style="width: 18px; height: 18px; margin-left: 8px;" aria-label="Kalendar" title="Kalendar"></i>
                         </div>
                         <button class="month-nav-btn" id="next-month-btn" title="O'tish oldinga">
-                            <i data-feather="chevron-right"></i>
+                            <i data-feather="chevron-right" aria-label="O'tish oldinga" title="O'tish oldinga"></i>
                         </button>
                     </div>
                     <div class="month-dropdown hidden" id="month-dropdown">
                         <div class="month-dropdown-header">
                             <button class="year-nav-btn" id="prev-year-btn" title="Yilni orqaga">
-                                <i data-feather="chevron-left"></i>
+                                <i data-feather="chevron-left" aria-label="Yilni orqaga" title="Yilni orqaga"></i>
                             </button>
-                            <span class="current-year" id="dropdown-year">2025</span>
+                            <span class="current-year" id="dropdown-year" aria-label="Yil" title="Yil">2025</span>
                             <button class="year-nav-btn" id="next-year-btn" title="Yilni oldinga">
-                                <i data-feather="chevron-right"></i>
+                                <i data-feather="chevron-right" aria-label="Yilni oldinga" title="Yilni oldinga"></i>
                             </button>
                         </div>
                         <div class="months-grid" id="months-grid"></div>
@@ -549,29 +549,29 @@
 
                 <!-- Jadval -->
                 <div class="card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-                        <h3 class="card-title" style="margin: 0;">Xodimlar Reytingi</h3>
-                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            <input type="text" id="kpi-search" class="form-control" placeholder="Qidirish..." style="min-width: 200px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;" aria-label="Xodimlar Reytingi" title="Xodimlar Reytingi">
+                        <h3 class="card-title" style="margin: 0;" aria-label="Xodimlar Reytingi" title="Xodimlar Reytingi">Xodimlar Reytingi</h3>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;" aria-label="Qidirish" title="Qidirish">
+                            <input type="text" id="kpi-search" class="form-control" placeholder="Qidirish..." style="min-width: 200px;" aria-label="Qidirish" title="Qidirish">
                         </div>
                     </div>
                     <div class="table-responsive">
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>#</th>
-                                    <th>Xodim</th>
-                                    <th>Filiallar</th>
-                                    <th>KPI Ball</th>
-                                    <th>Topshirilgan</th>
-                                    <th>O'z vaqtida</th>
-                                    <th>Kechikkan</th>
-                                    <th>Tahrirlangan</th>
+                                    <th>#</th aria-label="Raqam" title="Raqam">
+                                    <th>Xodim</th aria-label="Xodim" title="Xodim">
+                                    <th>Filiallar</th aria-label="Filiallar" title="Filiallar">
+                                    <th>KPI Ball</th aria-label="KPI Ball" title="KPI Ball">
+                                    <th>Topshirilgan</th aria-label="Topshirilgan" title="Topshirilgan">
+                                    <th>O'z vaqtida</th aria-label="O'z vaqtida" title="O'z vaqtida">
+                                    <th>Kechikkan</th aria-label="Kechikkan" title="Kechikkan">
+                                    <th>Tahrirlangan</th aria-label="Tahrirlangan" title="Tahrirlangan">
                                 </tr>
                             </thead>
                             <tbody id="kpi-table-body">
                                 <tr>
-                                    <td colspan="8">Yuklanmoqda...</td>
+                                    <td colspan="8" aria-label="Yuklanmoqda..." title="Yuklanmoqda...">Yuklanmoqda...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -582,15 +582,15 @@
             <!-- Kalendar Modal -->
             <div id="kpi-calendar-modal" class="modal hidden z-index-1000">
                 <div class="modal-content max-w-900 max-w-90">
-                    <button class="close-modal-btn" id="close-calendar-modal" title="Bekor qilish">
+                    <button class="close-modal-btn" id="close-calendar-modal" title="Bekor qilish" aria-label="Bekor qilish" title="Bekor qilish">
                         <span class="sr-only">Bekor qilish</span>
                         <i data-feather="x"></i>
                     </button>
                     <div class="modal-header-flex">
-                        <div class="calendar-avatar" id="calendar-avatar"></div>
+                        <div class="calendar-avatar" id="calendar-avatar" aria-label="Avatar" title="Avatar"></div>
                         <div>
                             <h3 class="modal-title m-0 font-22" id="calendar-employee-name"></h3>
-                            <p class="m-5 opacity-07 font-14" id="calendar-month-label"></p>
+                            <p class="m-5 opacity-07 font-14" id="calendar-month-label" aria-label="Oy" title="Oy"></p>
                         </div>
                     </div>
                     
@@ -649,7 +649,7 @@
                             <i data-feather="users" style="width: 24px; height: 24px;"></i>
                             <span>Hisoblash uchun rollarni tanlang</span>
                         </h3>
-                        <button class="btn-close close-modal-btn" data-target="kpi-role-select-modal"></button>
+                        <button class="btn-close close-modal-btn" data-target="kpi-role-select-modal" title="Bekor qilish"></button>
                     </div>
                     <div class="modal-body">
                         <p style="color: rgba(255,255,255,0.7); font-size: 14px; margin-bottom: 20px;">
@@ -1285,7 +1285,7 @@
                             <i data-feather="filter"></i>
                             <span>Filterlar</span>
                         </div>
-                        <button id="toggle-users-filters-btn" class="btn-icon" type="button" aria-expanded="true" onclick="window.toggleUsersFilters && window.toggleUsersFilters()">
+                        <button id="toggle-users-filters-btn" class="btn-icon" type="button" aria-expanded="true" onclick="window.toggleUsersFilters && window.toggleUsersFilters()" title="Filterlar boshqarish">
                             <i data-feather="chevron-up"></i>
                         </button>
                     </div>
@@ -1564,10 +1564,12 @@
                                     Barcha Faol Sessiyalar
                                 </h3>
                                 <div class="filter-controls">
-                                    <select id="session-user-filter" class="filter-select">
+                                    <label for="session-user-filter" class="visually-hidden">Foydalanuvchi bo'yicha filter</label>
+                                    <select id="session-user-filter" class="filter-select" title="Foydalanuvchi bo'yicha filter">
                                         <option value="">Barcha foydalanuvchilar</option>
                                     </select>
-                                    <select id="session-device-filter" class="filter-select">
+                                    <label for="session-device-filter" class="visually-hidden">Qurilma bo'yicha filter</label>
+                                    <select id="session-device-filter" class="filter-select" title="Qurilma bo'yicha filter">
                                         <option value="">Barcha qurilmalar</option>
                                         <option value="desktop">Desktop</option>
                                         <option value="mobile">Mobile</option>
@@ -1682,11 +1684,11 @@
                                 </h3>
                                 <div class="setting-item">
                                     <label>Sessiya Timeout (daqiqa)</label>
-                                    <input type="number" id="session-timeout" class="setting-input" value="60" min="5" max="1440">
+                                    <input type="number" id="session-timeout" class="setting-input" value="60" min="5" max="1440" aria-label="Sessiya Timeout (daqiqa)" title="Sessiya Timeout (daqiqa)">
                                 </div>
                                 <div class="setting-item">
                                     <label>Maksimal Sessiyalar Soni</label>
-                                    <input type="number" id="max-sessions" class="setting-input" value="5" min="1" max="20">
+                                    <input type="number" id="max-sessions" class="setting-input" value="5" min="1" max="20" aria-label="Maksimal Sessiyalar Soni" title="Maksimal Sessiyalar Soni">
                                 </div>
                                 <div class="setting-item">
                                     <label class="checkbox-label">
@@ -1715,11 +1717,11 @@
                                 </div>
                                 <div class="setting-item">
                                     <label>Muvaffaqiyatsiz urinishlar chegarasi</label>
-                                    <input type="number" id="failed-login-limit" class="setting-input" value="5" min="3" max="10">
+                                    <input type="number" id="failed-login-limit" class="setting-input" value="5" min="3" max="10" aria-label="Muvaffaqiyatsiz urinishlar chegarasi" title="Muvaffaqiyatsiz urinishlar chegarasi">
                                 </div>
                                 <div class="setting-item">
                                     <label>Bloklash vaqti (daqiqa)</label>
-                                    <input type="number" id="block-duration" class="setting-input" value="30" min="5" max="1440">
+                                    <input type="number" id="block-duration" class="setting-input" value="30" min="5" max="1440" aria-label="Bloklash vaqti (daqiqa)" title="Bloklash vaqti (daqiqa)">
                                 </div>
                             </div>
 
@@ -1904,7 +1906,7 @@
                                             </h4>
                                             <span class="permissions-stats" id="available-stats">0 ta</span>
                                         </div>
-                                        <select id="available-filter" class="filter-select">
+                                        <select id="available-filter" class="filter-select" aria-label="Mavjud ruxsatlar filtri" title="Mavjud ruxsatlar filtri">
                                             <option value="">Barcha bo'limlar</option>
                                         </select>
                                     </div>
@@ -1942,7 +1944,7 @@
                                             </h4>
                                             <span class="permissions-stats" id="assigned-stats">0 ta</span>
                                         </div>
-                                        <select id="assigned-filter" class="filter-select">
+                                        <select id="assigned-filter" class="filter-select" aria-label="Tayinlangan ruxsatlar filtri" title="Tayinlangan ruxsatlar filtri">
                                             <option value="">Barcha bo'limlar</option>
                                         </select>
                                     </div>
@@ -2018,7 +2020,7 @@
                             <i data-feather="filter"></i>
                             <h3>Filtrlar</h3>
                         </div>
-                        <button id="audit-filter-toggle-btn" class="btn-icon-minimal">
+                        <button id="audit-filter-toggle-btn" class="btn-icon-minimal" aria-label="Filtrlarni ko'rsatish/yashirish" title="Filtrlarni ko'rsatish/yashirish">
                             <i data-feather="chevron-down"></i>
                         </button>
                     </div>
@@ -2337,8 +2339,8 @@
                                 <div class="form-group">
                                     <label>🎨 Logotip rangi</label>
                                     <div class="color-picker-wrapper">
-                                        <input type="color" id="logo-color-picker" class="color-input" value="#4CAF50">
-                                        <input type="text" id="logo-color-hex" class="form-control" placeholder="#4CAF50" style="width: 100px;">
+                                        <input type="color" id="logo-color-picker" class="color-input" value="#4CAF50" aria-label="Logotip rangi" title="Logotip rangi">
+                                        <input type="text" id="logo-color-hex" class="form-control" placeholder="#4CAF50" style="width: 100px;" aria-label="Logotip rangi hex kod" title="Logotip rangi hex kod">
                                     </div>
                                     <small style="color: var(--text-secondary); margin-top: 5px; display: block;">Rang kodini kiriting yoki tanlang</small>
                                 </div>
@@ -2437,8 +2439,8 @@
                             <div class="color-item">
                                 <label>� Asosiy rang</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="primary-color" class="color-input" value="#007bff">
-                                    <input type="text" class="form-control" value="#007bff" readonly>
+                                    <input type="color" id="primary-color" class="color-input" value="#007bff" aria-label="Asosiy rang" title="Asosiy rang">
+                                    <input type="text" class="form-control" value="#007bff" readonly aria-label="Asosiy rang" title="Asosiy rang">
                                 </div>
                                 <p class="color-desc">Tugmalar va havolalar</p>
                             </div>
@@ -2446,8 +2448,8 @@
                             <div class="color-item">
                                 <label>� Muvaffaqiyat</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="success-color" class="color-input" value="#28a745">
-                                    <input type="text" class="form-control" value="#28a745" readonly>
+                                    <input type="color" id="success-color" class="color-input" value="#28a745" aria-label="Muvaffaqiyat rangi" title="Muvaffaqiyat rangi">
+                                    <input type="text" class="form-control" value="#28a745" readonly aria-label="Muvaffaqiyat rangi" title="Muvaffaqiyat rangi">
                                 </div>
                                 <p class="color-desc">Yaratildi, saqlandi</p>
                             </div>
@@ -2455,8 +2457,8 @@
                             <div class="color-item">
                                 <label>� Xatolik</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="danger-color" class="color-input" value="#dc3545">
-                                    <input type="text" class="form-control" value="#dc3545" readonly>
+                                    <input type="color" id="danger-color" class="color-input" value="#dc3545" aria-label="Xatolik rangi" title="Xatolik rangi">
+                                    <input type="text" class="form-control" value="#dc3545" readonly aria-label="Xatolik rangi" title="Xatolik rangi">
                                 </div>
                                 <p class="color-desc">Xato, o'chirish</p>
                             </div>
@@ -2464,8 +2466,8 @@
                             <div class="color-item">
                                 <label>� Ogohlantirish</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="warning-color" class="color-input" value="#ffc107">
-                                    <input type="text" class="form-control" value="#ffc107" readonly>
+                                    <input type="color" id="warning-color" class="color-input" value="#ffc107" aria-label="Ogohlantirish rangi" title="Ogohlantirish rangi">
+                                    <input type="text" class="form-control" value="#ffc107" readonly aria-label="Ogohlantirish rangi" title="Ogohlantirish rangi">
                                 </div>
                                 <p class="color-desc">Diqqat, kechikish</p>
                             </div>
@@ -2473,8 +2475,8 @@
                             <div class="color-item">
                                 <label>⬜ Sahifa foni</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="bg-color" class="color-input" value="#1a1d29">
-                                    <input type="text" class="form-control" value="#1a1d29" readonly>
+                                    <input type="color" id="bg-color" class="color-input" value="#1a1d29" aria-label="Sahifa foni rangi" title="Sahifa foni rangi">
+                                    <input type="text" class="form-control" value="#1a1d29" readonly aria-label="Sahifa foni rangi" title="Sahifa foni rangi">
                                 </div>
                                 <p class="color-desc">Asosiy fon rangi</p>
                             </div>
@@ -2482,8 +2484,8 @@
                             <div class="color-item">
                                 <label>⬛ Yon panel foni</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="sidebar-bg-color" class="color-input" value="#13151f">
-                                    <input type="text" class="form-control" value="#13151f" readonly>
+                                    <input type="color" id="sidebar-bg-color" class="color-input" value="#13151f" aria-label="Yon panel foni rangi" title="Yon panel foni rangi">
+                                    <input type="text" class="form-control" value="#13151f" readonly aria-label="Yon panel foni rangi" title="Yon panel foni rangi">
                                 </div>
                                 <p class="color-desc">Sidebar rangi</p>
                             </div>
@@ -2491,8 +2493,8 @@
                             <div class="color-item">
                                 <label>📝 Asosiy matn</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="text-primary-color" class="color-input" value="#ffffff">
-                                    <input type="text" class="form-control" value="#ffffff" readonly>
+                                    <input type="color" id="text-primary-color" class="color-input" value="#ffffff" aria-label="Asosiy matn rangi" title="Asosiy matn rangi">
+                                    <input type="text" class="form-control" value="#ffffff" readonly aria-label="Asosiy matn rangi" title="Asosiy matn rangi">
                                 </div>
                                 <p class="color-desc">Sarlavhalar, asosiy</p>
                             </div>
@@ -2500,8 +2502,8 @@
                             <div class="color-item">
                                 <label>📄 Yordamchi matn</label>
                                 <div class="color-picker-wrapper">
-                                    <input type="color" id="text-secondary-color" class="color-input" value="#a0a3bd">
-                                    <input type="text" class="form-control" value="#a0a3bd" readonly>
+                                    <input type="color" id="text-secondary-color" class="color-input" value="#a0a3bd" aria-label="Yordamchi matn rangi" title="Yordamchi matn rangi">
+                                    <input type="text" class="form-control" value="#a0a3bd" readonly aria-label="Yordamchi matn rangi" title="Yordamchi matn rangi">
                                 </div>
                                 <p class="color-desc">Tavsif, yordam</p>
                             </div>
@@ -2510,7 +2512,7 @@
                         <div class="colors-preview-section">
                             <h3 class="section-title">👁️ Ko'rib chiqish</h3>
                             <div class="preview-buttons">
-                                <button class="btn btn-primary">Asosiy tugma</button>
+                                <button class="btn btn-primary" aria-label="Asosiy tugma" title="Asosiy tugma">Asosiy tugma</button>
                                 <button class="btn btn-success">Muvaffaqiyat</button>
                                 <button class="btn btn-danger">Xatolik</button>
                                 <button class="btn btn-warning" style="color: #000;">Ogohlantirish</button>
@@ -2953,6 +2955,18 @@
                                 </div>
                             </div>
                             <div class="form-group">
+                                <label style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                    <span>Telegram Botni Aktivlashtirish</span>
+                                    <label class="switch" style="margin: 0;">
+                                        <input type="checkbox" id="telegram-enabled-toggle" aria-label="Telegram Botni Aktivlashtirish" title="Telegram Botni Aktivlashtirish">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                                <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 5px;">
+                                    Neaktiv holatda bot ishlashi to'xtatiladi va bot obunasi shartdan shart emasga o'tadi
+                                </p>
+                            </div>
+                            <div class="form-group">
                                 <label for="bot-token">Bot Token</label>
                                 <div class="secure-input-wrapper">
                                     <input type="password" id="bot-token" class="form-control" placeholder="Token yashirilgan" autocomplete="off">
@@ -3141,7 +3155,7 @@
                         </svg>
                         <span>Foydalanuvchi</span>
                     </h3>
-                    <button class="btn-close close-modal-btn" data-target="user-form-modal"></button>
+                    <button class="btn-close close-modal-btn" data-target="user-form-modal" aria-label="Modalni yopish" title="Modalni yopish"></button>
                 </div>
                 <div class="modal-body" style="flex: 1; overflow-y: auto; min-height: 0;">
                     <form id="user-form">
@@ -3201,34 +3215,68 @@
                     <input type="number" id="user-device-limit" class="form-control" value="1" min="1">
                 </div>
                 <div class="form-group" id="user-locations-group">
-                    <label>Biriktirilgan filiallar:</label>
-                    <div id="selected-locations-display" class="selected-items-display">
-                        <div class="empty-selection">Filiallar tanlanmagan</div>
+                    <label>Filiallar:</label>
+                    <div class="locations-dual-container" id="locations-dual-container" style="display: none; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+                        <!-- Birinchi blok: Biriktirilgan filiallar -->
+                        <div class="locations-attached-block" style="border: 1px solid rgba(79, 172, 254, 0.3); border-radius: 8px; padding: 12px; background: rgba(79, 172, 254, 0.05); max-height: 300px; overflow-y: auto;">
+                            <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(79, 172, 254, 0.2); display: flex; align-items: center; justify-content: space-between;">
+                                <label style="font-size: 14px; font-weight: 600; color: rgba(79, 172, 254, 1);">Biriktirilgan filiallar</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: rgba(79, 172, 254, 0.8);">
+                                    <input type="checkbox" id="select-all-attached-locations" style="width: 16px; height: 16px; cursor: pointer;">
+                                    <span>Barchasini belgilash</span>
+                                </label>
+                            </div>
+                            <div id="locations-attached-list" class="locations-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                                <!-- Biriktirilgan filiallar bu yerda ko'rsatiladi -->
+                            </div>
+                        </div>
+                        <!-- Ikkinchi blok: Biriktirilmagan filiallar -->
+                        <div class="locations-unattached-block" style="border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; background: rgba(0,0,0,0.2); max-height: 300px; overflow-y: auto;">
+                            <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: space-between;">
+                                <label style="font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.7);">Biriktirilmagan filiallar</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: rgba(255,255,255,0.6);">
+                                    <input type="checkbox" id="select-all-unattached-locations" style="width: 16px; height: 16px; cursor: pointer;">
+                                    <span>Barchasini belgilash</span>
+                                </label>
+                            </div>
+                            <div id="locations-unattached-list" class="locations-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                                <!-- Biriktirilmagan filiallar bu yerda ko'rsatiladi -->
+                            </div>
+                        </div>
                     </div>
-                    <button type="button" class="btn btn-outline-primary btn-select-items" id="select-locations-btn" style="margin-top: 10px; width: 100%;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 8px;">
-                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
-                        </svg>
-                        Filiallarni tanlash
-                    </button>
-                    <div class="checkbox-grid hidden" id="locations-checkbox-list" style="display: none !important;"></div>
                 </div>
                 <div class="form-group" id="user-brands-group" style="display: none;">
-                    <label>Biriktirilgan brendlar:</label>
+                    <label>Brendlar:</label>
                     <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 10px;">
                         Menejer faqat o'ziga biriktirilgan brendlar ma'lumotlarini ko'radi
                     </p>
-                    <div id="selected-brands-display" class="selected-items-display">
-                        <div class="empty-selection">Brendlar tanlanmagan</div>
-                    </div>
-                    <button type="button" class="btn btn-outline-primary btn-select-items" id="select-brands-btn" style="margin-top: 10px; width: 100%;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 8px;">
-                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
-                        </svg>
-                        Brendlarni tanlash
-                    </button>
-                    <div id="user-brands-list" class="hidden" style="display: none !important; max-height: 200px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; background: rgba(0,0,0,0.2);">
-                        <!-- Brendlar checkbox ro'yxati - faqat modal orqali tanlash -->
+                    <div class="brands-dual-container" id="brands-dual-container" style="display: none; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+                        <!-- Birinchi blok: Biriktirilgan brendlar -->
+                        <div class="brands-attached-block" style="border: 1px solid rgba(79, 172, 254, 0.3); border-radius: 8px; padding: 12px; background: rgba(79, 172, 254, 0.05); max-height: 300px; overflow-y: auto;">
+                            <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(79, 172, 254, 0.2); display: flex; align-items: center; justify-content: space-between;">
+                                <label style="font-size: 14px; font-weight: 600; color: rgba(79, 172, 254, 1);">Biriktirilgan brendlar</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: rgba(79, 172, 254, 0.8);">
+                                    <input type="checkbox" id="select-all-attached-brands" style="width: 16px; height: 16px; cursor: pointer;">
+                                    <span>Barchasini belgilash</span>
+                                </label>
+                            </div>
+                            <div id="brands-attached-list" class="brands-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                                <!-- Biriktirilgan brendlar bu yerda ko'rsatiladi -->
+                            </div>
+                        </div>
+                        <!-- Ikkinchi blok: Biriktirilmagan brendlar -->
+                        <div class="brands-unattached-block" style="border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; background: rgba(0,0,0,0.2); max-height: 300px; overflow-y: auto;">
+                            <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: space-between;">
+                                <label style="font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.7);">Biriktirilmagan brendlar</label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: rgba(255,255,255,0.6);">
+                                    <input type="checkbox" id="select-all-unattached-brands" style="width: 16px; height: 16px; cursor: pointer;">
+                                    <span>Barchasini belgilash</span>
+                                </label>
+                            </div>
+                            <div id="brands-unattached-list" class="brands-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                                <!-- Biriktirilmagan brendlar bu yerda ko'rsatiladi -->
+                            </div>
+                        </div>
                     </div>
                 </div>
                     </form>
@@ -3256,7 +3304,7 @@
                         </svg>
                         Foydalanuvchi So'rovini Tasdiqlash
                     </h3>
-                    <button class="btn-close close-modal-btn" data-target="approval-modal"></button>
+                    <button class="btn-close close-modal-btn" data-target="approval-modal" aria-label="Modalni yopish" title="Modalni yopish"></button>
                 </div>
                 <div class="modal-body">
                     <p style="margin-bottom: 20px;">Foydalanuvchi <strong id="approval-username"></strong> uchun rol va filiallarni belgilang.</p>
@@ -3382,7 +3430,7 @@
                         </svg>
                         <span>Ma'lumotlar</span>
                     </h3>
-                    <button class="btn-close close-modal-btn" data-target="credentials-modal"></button>
+                    <button class="btn-close close-modal-btn" data-target="credentials-modal" aria-label="Modalni yopish" title="Modalni yopish"></button>
                 </div>
                 <div class="modal-body">
                     <form id="credentials-form">
@@ -3390,8 +3438,8 @@
                         <div class="form-group">
                             <label for="credentials-input" id="credentials-input-label"></label>
                             <div class="secure-input-wrapper">
-                                <input type="password" id="credentials-input" class="form-control" required minlength="6" autocomplete="new-password">
-                                <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
+                                <input type="password" id="credentials-input" class="form-control" required minlength="6" autocomplete="new-password" aria-label="Parol" title="Parol">
+                                <button type="button" class="btn-icon toggle-visibility-btn" title="Ko'rsatish/Yashirish" aria-label="Ko'rsatish/Yashirish"><i data-feather="eye"></i></button>
                             </div>
                         </div>
                     </form>
@@ -3409,63 +3457,6 @@
         </div>
     </div>
 
-    <!-- Filiallar tanlash modal -->
-    <div id="locations-select-modal" class="modal hidden">
-        <div class="modal-dialog modal-dialog-centered" style="max-width: 600px;">
-            <div class="modal-content" style="display: flex; flex-direction: column; max-height: 90vh;">
-                <div class="modal-header" style="flex-shrink: 0;">
-                    <h3 class="modal-title">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
-                        </svg>
-                        <span>Filiallarni tanlash</span>
-                    </h3>
-                    <button class="btn-close close-modal-btn" data-target="locations-select-modal"></button>
-                </div>
-                <div class="modal-body" style="flex: 1; overflow-y: auto; min-height: 0;">
-                    <div style="margin-bottom: 15px;">
-                        <input type="text" id="locations-search-input" class="form-control" placeholder="Qidirish...">
-                    </div>
-                    <div id="locations-modal-list" style="overflow-y: visible;">
-                        <!-- Filiallar ro'yxati -->
-                    </div>
-                </div>
-                <div class="modal-footer" style="flex-shrink: 0; border-top: 1px solid rgba(255,255,255,0.1);">
-                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="locations-select-modal">Bekor qilish</button>
-                    <button type="button" class="btn btn-primary" id="save-locations-btn">Saqlash</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Brendlar tanlash modal -->
-    <div id="brands-select-modal" class="modal hidden">
-        <div class="modal-dialog modal-dialog-centered" style="max-width: 600px;">
-            <div class="modal-content" style="display: flex; flex-direction: column; max-height: 90vh;">
-                <div class="modal-header" style="flex-shrink: 0;">
-                    <h3 class="modal-title">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v13.5a.5.5 0 0 1-.777.416L8 13.101l-5.223 2.815A.5.5 0 0 1 2 15.5V2z"/>
-                        </svg>
-                        <span>Brendlarni tanlash</span>
-                    </h3>
-                    <button class="btn-close close-modal-btn" data-target="brands-select-modal"></button>
-                </div>
-                <div class="modal-body" style="flex: 1; overflow-y: auto; min-height: 0;">
-                    <div style="margin-bottom: 15px;">
-                        <input type="text" id="brands-search-input" class="form-control" placeholder="Qidirish...">
-                    </div>
-                    <div id="brands-modal-list" style="overflow-y: visible;">
-                        <!-- Brendlar ro'yxati -->
-                    </div>
-                </div>
-                <div class="modal-footer" style="flex-shrink: 0; border-top: 1px solid rgba(255,255,255,0.1);">
-                    <button type="button" class="btn btn-secondary close-modal-btn" data-target="brands-select-modal">Bekor qilish</button>
-                    <button type="button" class="btn btn-primary" id="save-brands-btn">Saqlash</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Comparison Brend Tanlash Modal (faqat bitta tanlash) -->
     <div id="comparison-brand-select-modal" class="modal hidden">
@@ -3502,7 +3493,7 @@
                     <i data-feather="send"></i>
                     Telegram Obunasi Linki
                 </h3>
-                <button class="close-modal-btn" data-target="telegram-link-modal" style="background: rgba(255, 255, 255, 0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" 
+                <button class="close-modal-btn" data-target="telegram-link-modal" aria-label="Modalni yopish" title="Modalni yopish" style="background: rgba(255, 255, 255, 0.2); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" 
                         onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
                         onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">
                     <i data-feather="x" style="width: 18px; height: 18px;"></i>
@@ -3513,7 +3504,7 @@
                     Quyidagi havolani nusxalab, foydalanuvchiga yuboring. Foydalanuvchi bu havola orqali Telegram botga ulanadi.
                 </p>
                 <div style="background: rgba(0, 0, 0, 0.3); border-radius: 10px; padding: 15px; margin-bottom: 10px;">
-                    <input type="text" id="telegram-link-input" readonly style="width: 100%; background: transparent; border: none; color: #4facfe; font-size: 14px; font-family: monospace; outline: none; word-break: break-all;" />
+                    <input type="text" id="telegram-link-input" readonly aria-label="Telegram obunasi linki" title="Telegram obunasi linki" style="width: 100%; background: transparent; border: none; color: #4facfe; font-size: 14px; font-family: monospace; outline: none; word-break: break-all;" />
                     <div id="telegram-link-display" style="color: #4facfe; font-size: 14px; font-family: monospace; word-break: break-all; margin-top: 10px; display: none;"></div>
                 </div>
                 <div id="telegram-link-expires" style="color: rgba(255, 255, 255, 0.6); font-size: 12px; margin-bottom: 15px;">
@@ -3537,15 +3528,15 @@
                         </svg>
                         Telegram Botga Ulash
                     </h3>
-                    <button class="btn-close close-modal-btn" data-target="telegram-connect-modal"></button>
+                    <button class="btn-close close-modal-btn" data-target="telegram-connect-modal" aria-label="Modalni yopish" title="Modalni yopish"></button>
                 </div>
                 <div class="modal-body">
                     <p style="margin-bottom: 20px; color: var(--text-secondary);">
                         Quyidagi bir martalik havolani nusxalab, foydalanuvchiga yuboring. Foydalanuvchi bu havolani bosib, botda "/start" buyrug'ini yuborishi kerak.
                     </p>
                     <div class="form-group secure-input-wrapper">
-                        <input type="text" id="telegram-connect-link" class="form-control" readonly>
-                        <button type="button" id="copy-telegram-link-btn" class="btn-icon" title="Nusxalash"><i data-feather="copy"></i></button>
+                        <input type="text" id="telegram-connect-link" class="form-control" readonly aria-label="Telegram ulanish linki" title="Telegram ulanish linki">
+                        <button type="button" id="copy-telegram-link-btn" class="btn-icon" title="Nusxalash" aria-label="Nusxalash"><i data-feather="copy"></i></button>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -3588,10 +3579,49 @@
         </div>
     </div>
     
+    <!-- User Management Modal -->
+    <div id="user-management-modal" class="modal hidden">
+        <div class="modal-content modal-medium">
+            <div class="modal-header">
+                <h2 id="user-management-modal-title">Foydalanuvchi Boshqaruvi</h2>
+                <button class="close-modal-btn" data-target="user-management-modal" aria-label="Modalni yopish" title="Modalni yopish">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="user-management-menu">
+                    <button class="menu-item-btn" data-action="edit">
+                        <i data-feather="edit-2"></i>
+                        <span>Tahrirlash</span>
+                    </button>
+                    <button class="menu-item-btn" data-action="sessions">
+                        <i data-feather="monitor"></i>
+                        <span>Sessiyalar</span>
+                    </button>
+                    <button class="menu-item-btn" data-action="status">
+                        <i data-feather="eye-off"></i>
+                        <span>Bloklash/Aktivlashtirish</span>
+                    </button>
+                    <button class="menu-item-btn" data-action="telegram-link">
+                        <i data-feather="send"></i>
+                        <span>TG Link</span>
+                    </button>
+                    <button class="menu-item-btn warning" data-action="clear-telegram">
+                        <i data-feather="link-2"></i>
+                        <span>TG tozalash</span>
+                    </button>
+                    <button class="menu-item-btn danger" data-action="delete">
+                        <i data-feather="trash-2"></i>
+                        <span>O'chirish</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div id="audit-details-modal" class="modal hidden">
         <div class="modal-content">
-            <button class="close-modal-btn" data-target="audit-details-modal"><i data-feather="x"></i></button>
+            <button class="close-modal-btn" data-target="audit-details-modal" aria-label="Modalni yopish" title="Modalni yopish"><i data-feather="x"></i></button>
             <h3 class="modal-title">Amal Tafsilotlari</h3>
             <div id="audit-details-body" class="modal-body"></div>
         </div>
@@ -3599,7 +3629,7 @@
 
     <div id="report-detail-modal" class="modal hidden">
         <div class="modal-content report-detail-modal-content">
-            <button class="close-modal-btn" data-target="report-detail-modal"><i data-feather="x"></i></button>
+            <button class="close-modal-btn" data-target="report-detail-modal" aria-label="Modalni yopish" title="Modalni yopish"><i data-feather="x"></i></button>
             <div id="report-detail-body" class="report-detail-body">
                 <div class="report-detail-loader">
                     <div class="spinner"></div>
@@ -3614,7 +3644,7 @@
     <!-- Import Jadval Tanlash Modal -->
     <div id="import-tables-modal" class="modal hidden" style="z-index: 1200;">
         <div class="modal-content" style="max-width: 900px;">
-            <button class="close-modal-btn" data-target="import-tables-modal">
+            <button class="close-modal-btn" data-target="import-tables-modal" aria-label="Modalni yopish" title="Modalni yopish">
                 <i data-feather="x"></i>
             </button>
             <div class="modal-header">

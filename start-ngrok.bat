@@ -1,0 +1,6 @@
+@echo off
+echo ngrok ishga tushirilmoqda...
+echo Port 3000 uchun tunnel ochilmoqda...
+ngrok http 3000
+pause
+

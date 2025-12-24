@@ -343,8 +343,11 @@ window.removeComparisonBrand = function() {
  * Solishtirish ma'lumotlarini yuklash
  */
 async function loadComparisonData() {
+    console.log('[COMPARISON] 🔍 loadComparisonData() chaqirildi');
+    
     // Agar allaqachon yuklanayotgan bo'lsa, kutish
     if (isLoadingData) {
+        console.log('[COMPARISON] ⚠️ Ma\'lumotlar allaqachon yuklanmoqda, kutish...');
         return;
     }
 
@@ -356,7 +359,18 @@ async function loadComparisonData() {
     const saveBtn = document.getElementById('comparison-save-btn');
     const exportBtn = document.getElementById('comparison-export-btn');
 
-    if (!dateFilter) return;
+    console.log('[COMPARISON] 📋 DOM elementlari:', {
+        dateFilter: !!dateFilter,
+        brandSelect: !!brandSelect,
+        loadBtn: !!loadBtn,
+        table: !!table,
+        emptyState: !!emptyState
+    });
+
+    if (!dateFilter) {
+        console.error('[COMPARISON] ❌ dateFilter topilmadi!');
+        return;
+    }
 
     // Sana olish (flatpickr yoki oddiy input)
     let date = currentDate;
@@ -371,16 +385,25 @@ async function loadComparisonData() {
 
     const brandId = currentBrandId || (brandSelect ? brandSelect.value : null);
 
+    console.log('[COMPARISON] 📅 Sana va brend:', {
+        date: date,
+        brandId: brandId,
+        currentDate: currentDate,
+        currentBrandId: currentBrandId
+    });
+
     // Loading flag'ni o'rnatish
     isLoadingData = true;
 
     if (!date) {
+        console.error('[COMPARISON] ❌ Sana tanlanmagan!');
         showToast('Iltimos, sanani tanlang', true);
         isLoadingData = false;
         return;
     }
 
     if (!brandId) {
+        console.error('[COMPARISON] ❌ Brend tanlanmagan!');
         showToast('Iltimos, brendni tanlang', true);
         isLoadingData = false;
         return;
@@ -409,20 +432,47 @@ async function loadComparisonData() {
         const params = new URLSearchParams({ date, brandId });
         const url = `/api/comparison/data?${params.toString()}`;
         
+        console.log('[COMPARISON] 📡 API so\'rovi yuborilmoqda:', url);
+        
         const res = await safeFetch(url);
         
+        console.log('[COMPARISON] 📥 API javob:', {
+            ok: res?.ok,
+            status: res?.status,
+            statusText: res?.statusText
+        });
+        
         if (!res || !res.ok) {
-            console.error('[COMPARISON] Backend xatolik:', res?.status, res?.statusText);
+            const errorText = await res.text().catch(() => 'Noma\'lum xatolik');
+            console.error('[COMPARISON] ❌ Backend xatolik:', {
+                status: res?.status,
+                statusText: res?.statusText,
+                errorText: errorText
+            });
             throw new Error('Ma\'lumotlarni yuklashda xatolik');
         }
 
         const data = await res.json();
         
+        console.log('[COMPARISON] 📊 API javob ma\'lumotlari:', {
+            success: data.success,
+            dataLength: data.data?.length || 0,
+            brandName: data.brand_name,
+            date: data.date
+        });
+        
         if (!data.success) {
+            console.error('[COMPARISON] ❌ API javob muvaffaqiyatsiz:', data.error);
             throw new Error(data.error || 'Ma\'lumotlar topilmadi');
         }
 
         comparisonData = data.data || [];
+        
+        console.log('[COMPARISON] ✅ Ma\'lumotlar yuklandi:', {
+            count: comparisonData.length,
+            firstItem: comparisonData[0],
+            allItems: comparisonData
+        });
         
         // Jadvalni ko'rsatish
         const tableWrapper = document.querySelector('.comparison-table-wrapper');
@@ -439,6 +489,16 @@ async function loadComparisonData() {
         const canExport = hasPermission(state.currentUser, 'comparison:export');
         const isAdmin = state.currentUser?.role === 'admin';
         const isManager = state.currentUser?.role === 'manager';
+        
+        console.log('[COMPARISON] 🔐 Permission tekshiruvi:', {
+            canEdit: canEdit,
+            canView: canView,
+            canExport: canExport,
+            isAdmin: isAdmin,
+            isManager: isManager,
+            userRole: state.currentUser?.role,
+            userPermissions: state.currentUser?.permissions
+        });
         
         // Admin va Manager uchun barcha funksiyalarga ruxsat berish
         const shouldShowEdit = canEdit || isAdmin || isManager;
@@ -488,9 +548,16 @@ async function loadComparisonData() {
         }
 
         // Jadvalni to'ldirish
+        console.log('[COMPARISON] 🎨 Jadval render qilinmoqda...');
         renderTable(comparisonData);
+        console.log('[COMPARISON] ✅ Jadval render qilindi');
 
     } catch (error) {
+        console.error('[COMPARISON] ❌ Xatolik:', error);
+        console.error('[COMPARISON] ❌ Xatolik tafsilotlari:', {
+            message: error.message,
+            stack: error.stack
+        });
         showToast(error.message || 'Xatolik yuz berdi', true);
         
         const tableWrapper = document.querySelector('.comparison-table-wrapper');
@@ -635,12 +702,19 @@ function updateComparisonCalculations(inputElement, comparisonAmount) {
  * Jadvalni ko'rsatish
  */
 function renderTable(data) {
+    console.log('[COMPARISON] 🎨 renderTable() chaqirildi:', {
+        dataLength: data?.length || 0,
+        data: data
+    });
+    
     const tableBody = document.getElementById('comparison-table-body');
     if (!tableBody) {
+        console.error('[COMPARISON] ❌ comparison-table-body topilmadi!');
         return;
     }
 
     if (!data || data.length === 0) {
+        console.log('[COMPARISON] ⚠️ Ma\'lumotlar bo\'sh, bo\'sh jadval ko\'rsatilmoqda');
         tableBody.innerHTML = `
             <tr>
                 <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-secondary);">
@@ -651,6 +725,7 @@ function renderTable(data) {
         return;
     }
 
+    console.log('[COMPARISON] 📊 Jadval qatorlari yaratilmoqda...');
     let html = '';
     
     for (const item of data) {
@@ -659,6 +734,15 @@ function renderTable(data) {
         const difference = item.difference;
         const percentage = item.percentage;
         const currency = item.currency || 'UZS';
+
+        console.log('[COMPARISON] 📋 Qator ma\'lumotlari:', {
+            location: item.location,
+            operatorAmount: operatorAmount,
+            comparisonAmount: comparisonAmount,
+            difference: difference,
+            percentage: percentage,
+            currency: currency
+        });
 
         // Rang kodini aniqlash
         let statusClass = '';
@@ -749,10 +833,13 @@ function renderTable(data) {
         `;
     }
 
+    console.log('[COMPARISON] 📝 HTML yaratildi, uzunligi:', html.length);
     tableBody.innerHTML = html;
+    console.log('[COMPARISON] ✅ HTML o\'rnatildi');
     
     // Input maydonlariga real-time hisoblash event listener qo'shish
     const inputs = tableBody.querySelectorAll('.comparison-input');
+    console.log('[COMPARISON] 🔘 Input maydonlari topildi:', inputs.length);
     
     inputs.forEach((input) => {
         input.addEventListener('input', function(e) {
@@ -844,6 +931,8 @@ function renderTable(data) {
     if (window.feather) {
         window.feather.replace();
     }
+    
+    console.log('[COMPARISON] ✅ renderTable() muvaffaqiyatli yakunlandi');
 }
 
 /**

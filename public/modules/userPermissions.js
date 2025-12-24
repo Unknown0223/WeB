@@ -924,6 +924,7 @@ function getPermissionExplanation(permKey) {
         'reports:edit_own': 'Faqat o\'zi yaratgan hisobotlarni tahrirlash',
         'reports:delete': 'Hisobotlarni o\'chirish',
         'reports:delete_all': 'Barcha hisobotlarni o\'chirish (xavfli operatsiya)',
+        'reports:delete_assigned': 'Biriktirilgan filial hisobotlarini o\'chirish',
         'reports:delete_own': 'Faqat o\'z hisobotlarini o\'chirish',
         'reports:export': 'Hisobotlarni Excel/PDF formatida eksport qilish',
         

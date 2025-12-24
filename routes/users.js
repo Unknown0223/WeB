@@ -830,6 +830,38 @@ router.put('/:id/reject', isAuthenticated, hasPermission('users:edit'), async (r
     }
 });
 
+// GET /api/users/statistics/today - Bugungi tasdiqlangan va rad etilgan foydalanuvchilar soni
+router.get('/statistics/today', isAuthenticated, hasPermission('users:view'), async (req, res) => {
+    try {
+        // Bugun boshlanishi (00:00:00)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayISO = today.toISOString();
+        
+        // Bugun tasdiqlangan foydalanuvchilar soni
+        const approvedCount = await db('audit_logs')
+            .where('action', 'approve_user')
+            .where('timestamp', '>=', todayISO)
+            .count('* as count')
+            .first();
+        
+        // Bugun rad etilgan foydalanuvchilar soni
+        const rejectedCount = await db('audit_logs')
+            .where('action', 'reject_user')
+            .where('timestamp', '>=', todayISO)
+            .count('* as count')
+            .first();
+        
+        res.json({
+            approved: parseInt(approvedCount?.count || 0),
+            rejected: parseInt(rejectedCount?.count || 0)
+        });
+    } catch (error) {
+        log.error('GET /api/users/statistics/today xatoligi:', error.message);
+        res.status(500).json({ message: "Statistikani yuklashda xatolik." });
+    }
+});
+
 // Foydalanuvchi parolini o'zgartirish
 router.put('/:id/password', isAuthenticated, hasPermission('users:change_password'), async (req, res) => {
     const { newPassword } = req.body;

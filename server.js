@@ -288,6 +288,7 @@ global.broadcastWebSocket = (type, payload) => {
         
         const { getSetting } = require('./utils/settingsCache.js');
         const botToken = await getSetting('telegram_bot_token', null);
+        const telegramEnabled = await getSetting('telegram_enabled', 'false');
 
         // Serverni ishga tushirish
         server.listen(PORT, '0.0.0.0', () => {
@@ -296,10 +297,10 @@ global.broadcastWebSocket = (type, payload) => {
                 process.send('ready');
             }
 
-            // Bot token mavjud bo'lsa, webhookni o'rnatish (async, lekin server bloklanmaydi)
+            // Bot token mavjud bo'lsa VA telegram aktiv bo'lsa, webhookni o'rnatish (async, lekin server bloklanmaydi)
             // Bot initialization'ni alohida async funksiya sifatida ishga tushirish
             // Shunda server darhol javob bera oladi va healthcheck muvaffaqiyatli bo'ladi
-            if (botToken) {
+            if (botToken && (telegramEnabled === 'true' || telegramEnabled === true)) {
                 (async () => {
                 // Deploy uchun webhook rejimida ishga tushirish
                 const appBaseUrl = process.env.APP_BASE_URL;

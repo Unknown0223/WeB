@@ -217,25 +217,23 @@ const initializeDB = async () => {
     }
     
     // Telegram sozlamalarini tekshirish va qo'yish (agar mavjud bo'lmasa)
-    // XAVFSIZLIK: Tokenlar .env faylidan olinadi
+    // Faqat mavjud bo'lmaganda bo'sh yaratish, avtomatik to'ldirmaslik
     const telegramSettings = [
-        { key: 'telegram_bot_token', value: process.env.TELEGRAM_BOT_TOKEN || '' },
-        { key: 'telegram_bot_username', value: process.env.TELEGRAM_BOT_USERNAME || '' },
-        { key: 'telegram_admin_chat_id', value: process.env.TELEGRAM_ADMIN_CHAT_ID || '' },
-        { key: 'telegram_group_id', value: process.env.TELEGRAM_GROUP_ID || '' }
+        { key: 'telegram_bot_token', value: '' },
+        { key: 'telegram_bot_username', value: '' },
+        { key: 'telegram_admin_chat_id', value: '' },
+        { key: 'telegram_group_id', value: '' },
+        { key: 'telegram_enabled', value: 'false' } // Telegram aktiv/neaktiv holati
     ];
     
     for (const setting of telegramSettings) {
         const existing = await db('settings').where({ key: setting.key }).first();
         if (!existing) {
-            // Yangi setting yaratish (hatto bo'sh bo'lsa ham)
+            // Yangi setting yaratish (faqat mavjud bo'lmaganda)
             await db('settings').insert(setting);
             log.debug(`Telegram sozlamasi qo'shildi: ${setting.key}`);
-        } else if (setting.value && (!existing.value || existing.value === '')) {
-            // Mavjud bo'sh setting'ni env variable'dan yangilash
-            await db('settings').where({ key: setting.key }).update({ value: setting.value });
-            log.debug(`Telegram sozlamasi yangilandi (env'dan): ${setting.key}`);
         }
+        // Mavjud bo'lsa, o'zgartirmaymiz - foydalanuvchi sozlamalar orqali boshqaradi
     }
     
     log.info('Database ishga tushirildi va boshlang\'ich ma\'lumotlar tekshirildi');

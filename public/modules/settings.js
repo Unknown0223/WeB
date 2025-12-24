@@ -90,6 +90,13 @@ export function renderGeneralSettings() {
 }
 
 export function renderTelegramSettings() {
+    // Telegram aktiv/neaktiv holatini ko'rsatish
+    const telegramEnabled = state.settings.telegram_enabled === 'true' || state.settings.telegram_enabled === true;
+    if (DOM.telegramEnabledToggle) {
+        DOM.telegramEnabledToggle.checked = telegramEnabled;
+    }
+    
+    // Telegram sozlamalarini ko'rsatish
     if (DOM.botTokenInput) DOM.botTokenInput.value = state.settings.telegram_bot_token || '';
     if (DOM.botUsernameInput) DOM.botUsernameInput.value = state.settings.telegram_bot_username || '';
     if (DOM.groupIdInput) DOM.groupIdInput.value = state.settings.telegram_group_id || '';
@@ -359,26 +366,96 @@ export async function handleTableSettingsActions(e) {
     }
 }
 
+// Takrorlanishni oldini olish uchun flag
+let isSavingTelegramSettings = false;
+
 export async function saveTelegramSettings() {
+    // Agar allaqachon saqlanmoqda bo'lsa, qayta chaqirmaslik
+    if (isSavingTelegramSettings) {
+        return;
+    }
+    
+    // Telegram aktiv/neaktiv holatini saqlash
+    const telegramEnabled = DOM.telegramEnabledToggle ? DOM.telegramEnabledToggle.checked : false;
+    
+    // Input elementlarini xavfsiz o'qish
+    const botToken = DOM.botTokenInput ? DOM.botTokenInput.value.trim() : '';
+    const botUsername = DOM.botUsernameInput ? DOM.botUsernameInput.value.trim() : '';
+    const groupId = DOM.groupIdInput ? DOM.groupIdInput.value.trim() : '';
+    const adminChatId = DOM.adminChatIdInput ? DOM.adminChatIdInput.value.trim() : '';
+    
     const settingsToSave = [
-        { key: 'telegram_bot_token', value: DOM.botTokenInput.value.trim() },
-        { key: 'telegram_bot_username', value: DOM.botUsernameInput.value.trim() },
-        { key: 'telegram_group_id', value: DOM.groupIdInput.value.trim() },
-        { key: 'telegram_admin_chat_id', value: DOM.adminChatIdInput.value.trim() }
+        { key: 'telegram_enabled', value: telegramEnabled ? 'true' : 'false' },
+        { key: 'telegram_bot_token', value: botToken },
+        { key: 'telegram_bot_username', value: botUsername },
+        { key: 'telegram_group_id', value: groupId },
+        { key: 'telegram_admin_chat_id', value: adminChatId }
     ];
     
     try {
-        for (const setting of settingsToSave) {
-            const res = await safeFetch('/api/settings', { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify(setting) 
-            });
-            if (!res || !res.ok) throw new Error((await res.json()).message);
+        isSavingTelegramSettings = true;
+        
+        // Save button'ni disable qilish
+        if (DOM.saveTelegramBtn) {
+            DOM.saveTelegramBtn.disabled = true;
+            const originalText = DOM.saveTelegramBtn.innerHTML;
+            DOM.saveTelegramBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saqlanmoqda...';
+            
+            try {
+                for (const setting of settingsToSave) {
+                    // Bo'sh string'lar ham yuborilishi mumkin (tozalash uchun)
+                    const res = await safeFetch('/api/settings', { 
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' }, 
+                        body: JSON.stringify(setting) 
+                    });
+                    if (!res || !res.ok) {
+                        const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
+                        throw new Error(errorData.message || 'Sozlamalarni saqlashda xatolik');
+                    }
+                }
+                
+                // State yangilash
+                state.settings.telegram_enabled = telegramEnabled ? 'true' : 'false';
+                state.settings.telegram_bot_token = botToken;
+                state.settings.telegram_bot_username = botUsername;
+                state.settings.telegram_group_id = groupId;
+                state.settings.telegram_admin_chat_id = adminChatId;
+                
+                showToast("Telegram sozlamalari saqlandi!");
+            } finally {
+                // Button'ni qayta tiklash
+                DOM.saveTelegramBtn.disabled = false;
+                DOM.saveTelegramBtn.innerHTML = originalText;
+            }
+        } else {
+            // Agar button topilmasa, oddiy saqlash
+            for (const setting of settingsToSave) {
+                const res = await safeFetch('/api/settings', { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify(setting) 
+                });
+                if (!res || !res.ok) {
+                    const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
+                    throw new Error(errorData.message || 'Sozlamalarni saqlashda xatolik');
+                }
+            }
+            
+            // State yangilash
+            state.settings.telegram_enabled = telegramEnabled ? 'true' : 'false';
+            state.settings.telegram_bot_token = botToken;
+            state.settings.telegram_bot_username = botUsername;
+            state.settings.telegram_group_id = groupId;
+            state.settings.telegram_admin_chat_id = adminChatId;
+            
+            showToast("Telegram sozlamalari saqlandi!");
         }
-        showToast("Telegram sozlamalari saqlandi!");
     } catch (error) { 
+        console.error('Telegram sozlamalarini saqlashda xatolik:', error);
         showToast(`Sozlamalarni saqlashda xatolik: ${error.message}`, true); 
+    } finally {
+        isSavingTelegramSettings = false;
     }
 }
 

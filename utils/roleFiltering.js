@@ -30,8 +30,9 @@ async function getVisibleLocations(user) {
         .where('user_id', user.id)
         .pluck('location_name');
     
-    // Agar foydalanuvchining o'z filiallari bo'lsa, ularni qaytaramiz
+    // MUAMMO TUZATILDI: Agar foydalanuvchining o'z filiallari bo'lsa, ularni qaytaramiz
     if (userLocations.length > 0) {
+        log.debug(`Foydalanuvchi ${user.id} uchun ${userLocations.length} ta filial topildi:`, userLocations);
         return userLocations;
     }
     
@@ -42,11 +43,13 @@ async function getVisibleLocations(user) {
         return [];
     }
     
-    // Agar requires_locations = false bo'lsa, barcha filiallar ko'rinadi
-    // Bu holda bo'sh array qaytaramiz (bu "barcha" degani)
+    // MUAMMO TUZATILDI: Agar requires_locations = false bo'lsa, null qaytaramiz (barcha filiallar degani)
+    // Lekin bu holatda ham, agar user_locations bo'sh bo'lsa va role_locations ham bo'sh bo'lsa,
+    // hech narsa ko'rsatilmaydi
     if (roleData.requires_locations === false || roleData.requires_locations === 0) {
-        log.debug(`Rol ${user.role} uchun filiallar talab qilinmaydi - barcha filiallar ko'rinadi`);
-        return []; // Bo'sh array "barcha" degani
+        log.debug(`Rol ${user.role} uchun filiallar talab qilinmaydi`);
+        // Agar user_locations ham bo'sh bo'lsa, bo'sh array qaytaramiz (hech narsa ko'rsatilmaydi)
+        return [];
     }
     
     // Rol uchun belgilangan filiallar
@@ -61,11 +64,13 @@ async function getVisibleLocations(user) {
     
     // Agar na filial, na brend belgilanmagan bo'lsa, hech narsa ko'rinmaydi
     if (roleLocations.length === 0 && roleBrands.length === 0) {
+        log.debug(`Rol ${user.role} uchun hech qanday filial yoki brend belgilanmagan`);
         return [];
     }
     
     // 1. Agar faqat filiallar belgilangan bo'lsa (brendlar belgilanmagan)
     if (roleLocations.length > 0 && roleBrands.length === 0) {
+        log.debug(`Rol ${user.role} uchun ${roleLocations.length} ta filial belgilangan:`, roleLocations);
         return roleLocations;
     }
     
@@ -76,6 +81,7 @@ async function getVisibleLocations(user) {
             .whereIn('brand_id', roleBrands)
             .distinct('location_name')
             .pluck('location_name');
+        log.debug(`Rol ${user.role} uchun brendlar bo'yicha ${brandLocations.length} ta filial topildi:`, brandLocations);
         return brandLocations;
     }
     
@@ -87,6 +93,7 @@ async function getVisibleLocations(user) {
             .whereIn('location_name', roleLocations)
             .distinct('location_name')
             .pluck('location_name');
+        log.debug(`Rol ${user.role} uchun filial va brend kesishmasi: ${combinedLocations.length} ta filial:`, combinedLocations);
         return combinedLocations;
     }
     

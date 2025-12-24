@@ -49,12 +49,17 @@ const isAuthenticated = async (req, res, next) => {
 
         // === YANGI MANTIQ: MAJBURIY TELEGRAM OBUNASINI TEKSHIRISH ===
         // Superadmin (role='superadmin' yoki 'super_admin') uchun bu tekshiruv o'tkazib yuboriladi.
-        // Barcha boshqa foydalanuvchilar uchun telegram obunasi majburiy
+        // Telegram aktiv bo'lsa va foydalanuvchi superadmin bo'lmasa, telegram obunasi majburiy
         const userRole = userSessionData.role;
         const userStatus = user.status;
 
+        // Telegram aktiv holatini tekshirish
+        const telegramEnabledSetting = await db('settings').where({ key: 'telegram_enabled' }).first();
+        const telegramEnabled = telegramEnabledSetting && (telegramEnabledSetting.value === 'true' || telegramEnabledSetting.value === true);
+
         // Superadmin uchun telegram tekshiruvi o'tkazib yuboriladi
-        if (userRole !== 'superadmin' && userRole !== 'super_admin') {
+        // Telegram neaktiv bo'lsa, bot obunasi shartdan shart emasga o'tadi
+        if (telegramEnabled && userRole !== 'superadmin' && userRole !== 'super_admin') {
             const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
             const hasTelegramChatId = !!user.telegram_chat_id;
 

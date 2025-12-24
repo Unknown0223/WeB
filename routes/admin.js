@@ -149,12 +149,20 @@ router.post('/restore-db', uploadDb.single('database'), async (req, res) => {
 });
 
 // POST /api/admin/clear-sessions - Barcha sessiyalarni tozalash
-router.post('/clear-sessions', async (req, res) => {
+router.post('/clear-sessions', isAuthenticated, hasPermission('users:manage_sessions'), async (req, res) => {
     try {
         const currentSessionId = req.sessionID;
 
         // O'zining (joriy adminning) sessiyasidan tashqari barcha sessiyalarni o'chiramiz.
         const changes = await db('sessions').whereNot('sid', currentSessionId).del();
+
+        // Online statusni real-time yangilash
+        if (global.broadcastWebSocket) {
+            global.broadcastWebSocket('sessions_cleared', {
+                clearedBy: req.session.user.id,
+                clearedCount: changes
+            });
+        }
 
         res.json({ message: `${changes} ta foydalanuvchi sessiyasi muvaffaqiyatli tugatildi.` });
     } catch (error) {

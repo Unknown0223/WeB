@@ -39,7 +39,16 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
     try {
         const { date, brandId } = req.query;
         
+        log.debug(`[COMPARISON] 📥 So'rov qabul qilindi:`, {
+            date: date,
+            brandId: brandId,
+            userId: req.session.user?.id,
+            userRole: req.session.user?.role,
+            userPermissions: req.session.user?.permissions
+        });
+        
         if (!date || !brandId) {
+            log.warn(`[COMPARISON] ⚠️ Sana yoki brend yo'q`);
             return res.status(400).json({
                 success: false,
                 error: 'Sana va brend majburiy'
@@ -48,14 +57,17 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
 
         // Sana formatini tekshirish va to'g'rilash
         let formattedDate = date;
-        // Agar sana YYYY-MM-DD formatida bo'lmasa, formatlash
         if (date.includes('.')) {
-            // DD.MM.YYYY -> YYYY-MM-DD
             const parts = date.split('.');
             if (parts.length === 3) {
                 formattedDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
             }
         }
+        
+        log.debug(`[COMPARISON] 📅 Sana formatlandi:`, {
+            originalDate: date,
+            formattedDate: formattedDate
+        });
 
         // Brend nomini alohida olish
         const brand = await db('brands')
@@ -64,7 +76,12 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
         
         const brandName = brand ? brand.name : null;
         
-        // Avval barcha hisobotlarni olamiz (brand_id null bo'lishi mumkin, lekin data ichida brand_id bor)
+        log.debug(`[COMPARISON] 🏷️ Brend topildi:`, {
+            brandId: brandId,
+            brandName: brandName
+        });
+        
+        // Avval barcha hisobotlarni olamiz
         const allReportsQuery = db('reports as r')
             .leftJoin('brands as b', 'r.brand_id', 'b.id')
             .select(
@@ -79,20 +96,49 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
             )
             .where('r.report_date', formattedDate);
         
+        log.debug(`[COMPARISON] 📊 Query yaratildi (filter qo'llanmasdan oldin):`, {
+            formattedDate: formattedDate,
+            userId: req.session.user?.id,
+            userRole: req.session.user?.role
+        });
+        
         // Universal access filter qo'llash
         await applyReportsFilter(allReportsQuery, req.session.user);
         
+        log.debug(`[COMPARISON] 📊 Query filter qo'llandi, so'rov bajarilmoqda...`);
+        
         const allReports = await allReportsQuery;
         
+        log.debug(`[COMPARISON] 📊 Barcha hisobotlar yuklandi:`, {
+            count: allReports.length,
+            locations: [...new Set(allReports.map(r => r.location))],
+            reports: allReports.map(r => ({
+                id: r.id,
+                location: r.location,
+                brand_id: r.brand_id,
+                report_date: r.report_date
+            }))
+        });
+        
         // Endi data ichidan brand_id ni tekshirib, faqat tanlangan brand_id uchun filtrlash
-        // BrandId'ni to'g'ri formatlash - string va number variantlarini tekshirish
         const targetBrandId = String(parseInt(brandId));
         const targetBrandIdNum = parseInt(brandId);
         const reports = [];
         
+        log.debug(`[COMPARISON] 🔍 Brand filter qo'llanmoqda:`, {
+            targetBrandId: targetBrandId,
+            targetBrandIdNum: targetBrandIdNum,
+            allReportsCount: allReports.length
+        });
+        
         for (const report of allReports) {
             // Agar report.brand_id mos kelsa, qo'shamiz
             if (report.brand_id === parseInt(brandId)) {
+                log.debug(`[COMPARISON] ✅ Report topildi (brand_id mos):`, {
+                    reportId: report.id,
+                    location: report.location,
+                    brand_id: report.brand_id
+                });
                 reports.push(report);
                 continue;
             }
@@ -101,12 +147,17 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
             if (!report.brand_id && report.data) {
                 try {
                     const reportData = JSON.parse(report.data);
-                    // Data ichida brand_id bor-yo'qligini tekshiramiz
                     let hasBrandId = false;
                     for (const key in reportData) {
                         const parts = key.split('_');
                         if (parts[0] === targetBrandId) {
                             hasBrandId = true;
+                            log.debug(`[COMPARISON] ✅ Report topildi (data ichida brand_id):`, {
+                                reportId: report.id,
+                                location: report.location,
+                                key: key,
+                                brandId: parts[0]
+                            });
                             break;
                         }
                     }
@@ -114,13 +165,28 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                         reports.push(report);
                     }
                 } catch (error) {
-                    // Silent error handling
+                    log.error(`[COMPARISON] ❌ Report data parse xatolik:`, {
+                        reportId: report.id,
+                        error: error.message
+                    });
                 }
             }
         }
-
+        
+        log.debug(`[COMPARISON] 📊 Brand filter qo'llandi:`, {
+            targetBrandId: targetBrandId,
+            reportsCount: reports.length,
+            reports: reports.map(r => ({
+                id: r.id,
+                location: r.location,
+                brand_id: r.brand_id
+            }))
+        });
+        
         // Har bir filial bo'yicha operatorlar kiritgan summalarni hisoblash
         const locationTotals = {};
+        
+        log.debug(`[COMPARISON] 💰 Location totals hisoblanmoqda...`);
         
         for (const report of reports) {
             const location = report.location || 'Noma\'lum';
@@ -140,12 +206,17 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                 
                 let reportTotal = 0;
                 
+                log.debug(`[COMPARISON] 📋 Report data tahlil qilinmoqda:`, {
+                    reportId: report.id,
+                    location: location,
+                    dataKeys: Object.keys(reportData).length,
+                    sampleKeys: Object.keys(reportData).slice(0, 5)
+                });
+                
                 for (const key in reportData) {
-                    // Key format: {brandId}_{columnName}
                     const parts = key.split('_');
                     if (parts.length >= 2) {
                         const keyBrandId = parts[0];
-                        // BrandId'ni string va number formatida tekshirish
                         const isMatch = keyBrandId === targetBrandId || 
                                       keyBrandId === String(targetBrandIdNum) || 
                                       parseInt(keyBrandId) === targetBrandIdNum ||
@@ -154,20 +225,41 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
                         if (isMatch) {
                             const value = parseFloat(reportData[key]) || 0;
                             reportTotal += value;
+                            log.debug(`[COMPARISON] ✅ Key mos keldi:`, {
+                                key: key,
+                                value: value,
+                                reportTotal: reportTotal
+                            });
                         }
                     }
                 }
                 
+                log.debug(`[COMPARISON] 💰 Report total hisoblandi:`, {
+                    reportId: report.id,
+                    location: location,
+                    reportTotal: reportTotal
+                });
+                
                 locationTotals[location].operator_amount += reportTotal;
             } catch (error) {
-                log.error(`[COMPARISON] Report parse xatolik (location: ${location}, report_id: ${report.id}):`, error.message);
+                log.error(`[COMPARISON] ❌ Report parse xatolik (location: ${location}, report_id: ${report.id}):`, error.message);
             }
         }
+        
+        log.debug(`[COMPARISON] 📊 Location totals hisoblandi:`, {
+            locationsCount: Object.keys(locationTotals).length,
+            totals: locationTotals
+        });
 
         // Saqlangan solishtirish ma'lumotlarini olish
         const savedComparisons = await db('comparisons')
             .where('comparison_date', date)
             .where('brand_id', brandId);
+
+        log.debug(`[COMPARISON] 💾 Saqlangan solishtirishlar:`, {
+            count: savedComparisons.length,
+            comparisons: savedComparisons
+        });
 
         const savedMap = {};
         for (const comp of savedComparisons) {
@@ -196,16 +288,19 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
         });
 
         // Agar hech qanday ma'lumot topilmasa, barcha filiallarni ko'rsatish
-        // (operator summa 0 bo'lsa ham)
         if (result.length === 0) {
-            // Barcha filiallarni olish (reports jadvalidan yoki branches jadvalidan)
+            log.debug(`[COMPARISON] ⚠️ Location totals bo'sh, barcha filiallar olinmoqda...`);
             const allLocations = await db('reports')
                 .select('location')
                 .distinct()
                 .whereNotNull('location')
                 .orderBy('location', 'asc');
             
-            // Har bir filial uchun 0 summa bilan yozuv yaratish
+            log.debug(`[COMPARISON] 📍 Barcha filiallar topildi:`, {
+                count: allLocations.length,
+                locations: allLocations.map(l => l.location)
+            });
+            
             for (const loc of allLocations) {
                 const saved = savedMap[loc.location];
                 result.push({
@@ -223,8 +318,16 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
             }
         }
 
-        // Filiallar ro'yxatini alfavit bo'yicha tartiblash
         result.sort((a, b) => a.location.localeCompare(b.location));
+
+        log.debug(`[COMPARISON] ✅ Natija tayyor:`, {
+            resultCount: result.length,
+            result: result.map(r => ({
+                location: r.location,
+                operator_amount: r.operator_amount,
+                comparison_amount: r.comparison_amount
+            }))
+        });
 
         res.json({
             success: true,
@@ -233,6 +336,12 @@ router.get('/data', isAuthenticated, hasPermission('comparison:view'), async (re
             date: date
         });
     } catch (error) {
+        log.error(`[COMPARISON] ❌ Xatolik:`, {
+            error: error.message,
+            stack: error.stack,
+            date: req.query.date,
+            brandId: req.query.brandId
+        });
         res.status(500).json({ 
             success: false, 
             error: error.message 
@@ -536,33 +645,44 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                             return `${index + 1}. ${diff.location}: ${diffSign} ${diffValue}`;
                         }).join('\n');
                         
-                        for (const operator of operators) {
-                            if (!operator.telegram_chat_id) {
-                                log.warn(`⚠️ [COMPARISON] Operator ${operator.username} (ID: ${operator.id}) da telegram_chat_id yo'q`);
-                                continue;
-                            }
-                            
-                            try {
-                                const telegramMessage = `🔔 <b>Solishtirishda farqlar aniqlandi</b>\n\n` +
-                                    `📅 <b>Sana:</b> ${date}\n` +
-                                    `🏷️ <b>Brend:</b> ${brandName}\n` +
-                                    `📊 <b>Farqlar soni:</b> ${differences.length} ta filial\n\n` +
-                                    `<b>Farqlar ro'yxati:</b>\n${differencesList}\n\n` +
-                                    `⚠️ Iltimos, tizimga kirib batafsil ma'lumotlarni ko'ring.`;
-                                
-                                const result = await safeSendMessage(operator.telegram_chat_id, telegramMessage);
-                                if (result) {
-                                    telegramSuccessCount++;
-                                    log.debug(`✅ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborildi`);
-                                } else {
-                                    telegramErrorCount++;
-                                    log.warn(`⚠️ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborilmadi`);
+                        // Parallel Telegram xabarlar yuborish (N+1 Query muammosini hal qilish)
+                        const telegramPromises = operators
+                            .filter(operator => operator.telegram_chat_id) // Faqat telegram_chat_id bor operatorlar
+                            .map(async (operator) => {
+                                try {
+                                    const telegramMessage = `🔔 <b>Solishtirishda farqlar aniqlandi</b>\n\n` +
+                                        `📅 <b>Sana:</b> ${date}\n` +
+                                        `🏷️ <b>Brend:</b> ${brandName}\n` +
+                                        `📊 <b>Farqlar soni:</b> ${differences.length} ta filial\n\n` +
+                                        `<b>Farqlar ro'yxati:</b>\n${differencesList}\n\n` +
+                                        `⚠️ Iltimos, tizimga kirib batafsil ma'lumotlarni ko'ring.`;
+                                    
+                                    const result = await safeSendMessage(operator.telegram_chat_id, telegramMessage);
+                                    if (result) {
+                                        log.debug(`✅ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborildi`);
+                                        return { success: true, operatorId: operator.id };
+                                    } else {
+                                        log.warn(`⚠️ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborilmadi`);
+                                        return { success: false, operatorId: operator.id };
+                                    }
+                                } catch (telegramError) {
+                                    log.error(`❌ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborishda xatolik:`, telegramError.message);
+                                    return { success: false, operatorId: operator.id, error: telegramError.message };
                                 }
-                            } catch (telegramError) {
+                            });
+                        
+                        // Barcha xabarlarni parallel yuborish
+                        const telegramResults = await Promise.allSettled(telegramPromises);
+                        telegramResults.forEach((result, index) => {
+                            if (result.status === 'fulfilled' && result.value.success) {
+                                telegramSuccessCount++;
+                            } else {
                                 telegramErrorCount++;
-                                log.error(`❌ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborishda xatolik:`, telegramError.message);
+                                if (result.status === 'rejected') {
+                                    log.error(`❌ [COMPARISON] Telegram promise rejected:`, result.reason);
+                                }
                             }
-                        }
+                        });
                         
                         if (telegramSuccessCount > 0) {
                             log.debug(`✅ [COMPARISON] Telegram: ${telegramSuccessCount} ta operatorga xabar yuborildi`);
@@ -574,42 +694,24 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                         log.error(`❌ [COMPARISON] Telegram yuborishda umumiy xatolik:`, telegramError.message);
                     }
                     
-                    // WebSocket orqali realtime yuborish
+                    // WebSocket orqali realtime yuborish (optimizatsiya: bir marta broadcast)
                     try {
                         if (global.broadcastWebSocket) {
-                            let successCount = 0;
-                            let errorCount = 0;
-                            
-                            // Har bir operator uchun alohida yuborish
-                            for (const operator of operators) {
-                                try {
-                                    const wsPayload = {
-                                        user_id: operator.id,
-                                        notification: {
-                                            type: 'comparison_difference',
-                                            title: `Solishtirishda farqlar aniqlandi`,
-                                            message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
-                                            details: {
-                                                date,
-                                                brand_id: brandId,
-                                                brand_name: brandName,
-                                                differences: differences,
-                                                total_differences: differences.length
-                                            }
-                                        }
-                                    };
-                                    
-                                    global.broadcastWebSocket('comparison_difference', wsPayload);
-                                    successCount++;
-                                } catch (operatorError) {
-                                    errorCount++;
-                                    log.error(`❌ [COMPARISON] Operator ${operator.id} ga yuborishda xatolik:`, operatorError.message);
+                            // Barcha operatorlar uchun bir marta broadcast (N+1 Query muammosini hal qilish)
+                            const wsPayload = {
+                                type: 'comparison_difference',
+                                payload: {
+                                    date,
+                                    brand_id: brandId,
+                                    brand_name: brandName,
+                                    differences: differences,
+                                    total_differences: differences.length,
+                                    operator_ids: operators.map(op => op.id)
                                 }
-                            }
+                            };
                             
-                            if (errorCount > 0) {
-                                log.warn(`⚠️ [COMPARISON] WebSocket yuborish: ${successCount} muvaffaqiyatli, ${errorCount} xatolik`);
-                            }
+                            global.broadcastWebSocket('notification', wsPayload);
+                            log.debug(`✅ [COMPARISON] WebSocket yuborildi: ${operators.length} ta operatorga`);
                         }
                     } catch (wsError) {
                         log.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError.message);
