@@ -6,13 +6,19 @@ const path = require('path');
 
 // Database type ni aniqlash - SQLite yoki PostgreSQL
 // Railway.com, Render.com, Heroku kabi platformalarda PostgreSQL majburiy
-const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
+const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
 const isRender = !!process.env.RENDER;
 const isHeroku = !!process.env.HEROKU_APP_NAME;
 const isCloudPlatform = isRailway || isRender || isHeroku;
 
+// Railway.com'da DATABASE_URL avtomatik yaratiladi (service qo'shilganda)
+// Build vaqtida bo'lmasa ham, start vaqtida bo'ladi
+const hasDatabaseUrl = !!process.env.DATABASE_URL;
+const hasPostgresConfig = !!(process.env.POSTGRES_HOST && process.env.POSTGRES_DB);
+
 // Cloud platformalarda PostgreSQL majburiy, aks holda SQLite
-const useSqlite = !isCloudPlatform && (process.env.DB_TYPE === 'sqlite' || (!process.env.POSTGRES_HOST && !process.env.DATABASE_URL));
+// Railway.com'da DATABASE_URL bo'lmasa ham, PostgreSQL ishlatish kerak (service qo'shilganda)
+const useSqlite = !isCloudPlatform && (process.env.DB_TYPE === 'sqlite' || (!hasPostgresConfig && !hasDatabaseUrl));
 
 if (useSqlite) {
   // SQLite konfiguratsiyasi (Development)
@@ -99,7 +105,36 @@ if (useSqlite) {
 
   const postgresConfig = getPostgresConnection();
 
+  // Railway.com'da build vaqtida DATABASE_URL bo'lmasa, migration'ni o'tkazib yuborish
+  // Start vaqtida DATABASE_URL mavjud bo'ladi (db.js da initializeDB() chaqiriladi)
   if (!postgresConfig) {
+    // Railway.com'da build vaqtida DATABASE_URL bo'lmasa, dummy config qaytarish
+    // Start vaqtida to'g'ri config bo'ladi (DATABASE_URL mavjud bo'ladi)
+    if (isRailway && !hasDatabaseUrl && !hasPostgresConfig) {
+      // Build vaqtida migration o'tkazib yuboriladi, start vaqtida to'g'ri config bo'ladi
+      // db.js da initializeDB() chaqirilganda, DATABASE_URL allaqachon mavjud bo'ladi
+      console.warn('⚠️ [KNEXFILE] Railway.com\'da DATABASE_URL hali sozlanmagan. Migration start vaqtida ishlaydi (db.js orqali).');
+      // Dummy config - build vaqtida migration o'tkazib yuboriladi
+      // Start vaqtida DATABASE_URL mavjud bo'ladi va to'g'ri config ishlatiladi
+      module.exports = {
+        development: {
+          client: 'pg',
+          connection: 'postgresql://dummy:dummy@localhost:5432/dummy',
+          migrations: {
+            directory: path.resolve(__dirname, 'migrations')
+          }
+        },
+        production: {
+          client: 'pg',
+          connection: 'postgresql://dummy:dummy@localhost:5432/dummy',
+          migrations: {
+            directory: path.resolve(__dirname, 'migrations')
+          }
+        }
+      };
+      return;
+    }
+    
     throw new Error(
       '❌ PostgreSQL sozlamalari topilmadi!\n' +
       'Iltimos, .env faylida quyidagilarni qo\'shing:\n' +
@@ -110,7 +145,8 @@ if (useSqlite) {
       'POSTGRES_PASSWORD=your_password\n' +
       'yoki\n' +
       'DATABASE_URL=postgresql://user:password@host:port/database\n' +
-      'yoki SQLite ishlatish uchun: DB_TYPE=sqlite'
+      'yoki SQLite ishlatish uchun: DB_TYPE=sqlite\n\n' +
+      'Railway.com uchun: PostgreSQL service qo\'shing va DATABASE_URL avtomatik yaratiladi.'
     );
   }
 
