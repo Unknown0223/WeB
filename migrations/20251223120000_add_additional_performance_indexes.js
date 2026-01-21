@@ -37,9 +37,7 @@ exports.up = async function(knex) {
       });
     } catch (err) {
       // Index allaqachon mavjud yoki boshqa xato - e'tiborsiz qoldirish
-      if (!err.message.includes('already exists') && !err.message.includes('duplicate')) {
-        console.warn(`${indexName} index yaratishda xato:`, err.message);
-      }
+      // Index allaqachon mavjud yoki boshqa xato - e'tiborsiz qoldirish (log qilmaymiz)
     }
   };
 
@@ -88,7 +86,7 @@ exports.up = async function(knex) {
         await createIndexSafe('pivot_templates', 'idx_pivot_templates_is_public', 'is_public');
       }
     } catch (err) {
-      console.warn('Pivot templates indexes qo\'shishda xato:', err.message);
+      // Xatoni e'tiborsiz qoldirish - migration'da ortiqcha loglar
     }
   }
 };
@@ -108,7 +106,7 @@ exports.down = async function(knex) {
       });
     } catch (err) {
       // Index mavjud emas yoki boshqa xato - e'tiborsiz qoldirish
-      console.warn(`${indexName} index o'chirishda xato:`, err.message);
+      // Index o'chirishda xato - e'tiborsiz qoldirish (migration'da ortiqcha loglar)
     }
   };
 

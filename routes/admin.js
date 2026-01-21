@@ -799,7 +799,7 @@ router.post('/import-full-db', async (req, res) => {
                                     tableName: tableName,
                                     previousRecordIndex: i > 0 ? i : null
                                 });
-                                console.error(`❌ [IMPORT] ${tableName} #${i + 1} (transaksiya abort): ${err.message.substring(0, 200)}`);
+                                log.error(`[IMPORT] ${tableName} #${i + 1} (transaksiya abort): ${err.message.substring(0, 200)}`);
                                 errors++;
                                 // Transaksiya abort qilingan, keyingi yozuvlarga o'tish mumkin emas
                                 break;
@@ -816,7 +816,7 @@ router.post('/import-full-db', async (req, res) => {
                                     tableName: tableName,
                                     recordPreview: JSON.stringify(record).substring(0, 200)
                                 });
-                                console.error(`❌ [IMPORT] ${tableName} #${i + 1} (ID: ${record.id || 'N/A'}): ${err.message.substring(0, 200)}`);
+                                // Error allaqachon log.error() orqali log qilingan
                                 errors++;
                             }
                         }
@@ -834,11 +834,7 @@ router.post('/import-full-db', async (req, res) => {
                         tableName: tableName,
                         recordCount: tableData.length
                     });
-                    console.error(`❌ [IMPORT ERROR] ${tableName}:`, {
-                        error: err.message,
-                        code: err.code,
-                        tableName: tableName
-                    });
+                    // Error allaqachon log.error() orqali log qilingan
                     importCounts[tableName] = 0;
                     skippedCounts[tableName] = 0;
                     errorCounts[tableName] = tableData.length;
@@ -1039,7 +1035,7 @@ router.post('/import-full-db', async (req, res) => {
                                 tableName: tableName,
                                 recordPreview: JSON.stringify(record).substring(0, 200)
                             });
-                            console.error(`❌ [IMPORT] ${tableName} #${i + 1} (ID: ${record.id || 'N/A'}): ${err.message.substring(0, 200)}`);
+                            // Error allaqachon log.error() orqali log qilingan
                             throw err;
                         }
                     }
@@ -1343,7 +1339,7 @@ router.post('/import-full-db', async (req, res) => {
             code: error.code,
             stack: error.stack
         });
-        console.error('❌ [IMPORT ERROR]:', {
+        log.error('[IMPORT ERROR]:', {
             error: error.message,
             code: error.code
         });

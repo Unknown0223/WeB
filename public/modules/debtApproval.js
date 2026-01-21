@@ -2,8 +2,10 @@
 
 import { state } from './state.js';
 import { DOM } from './dom.js';
-import { hasPermission, showToast, showConfirmDialog } from './utils.js';
+import { hasPermission, showToast, showConfirmDialog, createLogger } from './utils.js';
 import { safeFetch } from './api.js';
+
+const logger = createLogger('DEBT_APPROVAL');
 
 const API_URL = '/api/debt-approval';
 
@@ -39,7 +41,7 @@ function loadChartColors() {
             return JSON.parse(saved);
         }
     } catch (e) {
-        console.warn('Chart ranglarni yuklashda xatolik:', e);
+        logger.warn('Chart ranglarni yuklashda xatolik:', e);
     }
     return { ...DEFAULT_CHART_COLORS };
 }
@@ -50,7 +52,7 @@ function saveChartColors(colors) {
         localStorage.setItem('debtChartColors', JSON.stringify(colors));
         return true;
     } catch (e) {
-        console.error('Chart ranglarni saqlashda xatolik:', e);
+        logger.error('Chart ranglarni saqlashda xatolik:', e);
         return false;
     }
 }
@@ -308,13 +310,9 @@ function log() {
 function logDuplicates(type, before, after, source) {
     const hasDuplicates = before.length !== after.length;
     
-    // Dublikatlar bo'lsa, har doim ko'rsatish
+    // Dublikatlar bo'lsa, faqat warn level'da ko'rsatish (production'da ko'rinmaydi)
     if (hasDuplicates) {
-        console.group(`🔴 [DUPLICATE DETECTED] ${type} - ${source}`);
-        console.warn(`⚠️ DUBLIKATLAR TOPILDI!`);
-        console.log('📥 API dan kelgan:', before.length, 'ta');
-        console.log('✅ Unique qilingan:', after.length, 'ta');
-        console.log('❌ Dublikatlar soni:', before.length - after.length, 'ta');
+        logger.warn(`[DUPLICATE DETECTED] ${type} - ${source}: API=${before.length}, Unique=${after.length}, Dublikatlar=${before.length - after.length}`);
         
         // Dublikat ID'larni topish
         const idCounts = {};
@@ -324,32 +322,9 @@ function logDuplicates(type, before, after, source) {
         const duplicateIds = Object.keys(idCounts).filter(id => idCounts[id] > 1);
         
         if (duplicateIds.length > 0) {
-            console.warn('🔴 Dublikat IDlar:', duplicateIds);
-            duplicateIds.forEach(id => {
-                const duplicates = before.filter(b => b.id === parseInt(id));
-                console.warn(`  - ID ${id}:`, duplicates.map(d => ({ 
-                    name: d.name, 
-                    brand_id: d.brand_id,
-                    count: duplicates.length 
-                })));
-            });
+            logger.warn(`Dublikat IDlar (${type}):`, duplicateIds);
         }
-        
-        // Dublikat nomlar (agar mavjud bo'lsa)
-        const nameCounts = {};
-        before.forEach(item => {
-            const key = item.name;
-            if (!nameCounts[key]) nameCounts[key] = [];
-            nameCounts[key].push(item);
-        });
-        const duplicateNames = Object.keys(nameCounts).filter(name => nameCounts[name].length > 1);
-        
-        if (duplicateNames.length > 0 && duplicateNames.length < 20) { // Faqat kichik ro'yxatlar uchun
-            console.warn('🔴 Dublikat nomlar (turli IDlar bilan):', duplicateNames);
-        }
-        
-            console.groupEnd();
-        }
+    }
     // Dublikatlar yo'q bo'lsa, log qilmaymiz
 }
 
@@ -396,7 +371,7 @@ function setupExportButtons() {
                             }
                         }
                     }
-                    console.error('Export API xatolik:', { status: response?.status, errorData });
+                    logger.error('Export API xatolik:', { status: response?.status, errorData });
                     throw new Error(errorData.message || `Export qilishda xatolik (status: ${response?.status || 'unknown'})`);
                 }
                 
@@ -412,7 +387,7 @@ function setupExportButtons() {
                 document.body.removeChild(a);
                 showToast('Ma\'lumotlar muvaffaqiyatli export qilindi! ✅', false);
             } catch (error) {
-                console.error('Export error:', error);
+                logger.error('Export error:', error);
                 showToast(`Export qilishda xatolik: ${error.message}`, true);
             } finally {
                 exportBtn.disabled = false;
@@ -627,7 +602,7 @@ function showUpdateImportModal() {
                         throw new Error(result.message || 'Yangilashda xatolik');
                     }
                 } catch (error) {
-                    console.error('Update import error:', error);
+                    logger.error('Update import error:', error);
                     showToast(`Yangilashda xatolik: ${error.message}`, true);
                 } finally {
                     submitBtn.disabled = false;
@@ -647,7 +622,7 @@ function showUpdateImportModal() {
 export async function loadDebtApprovalPage() {
     const content = document.getElementById('debt-approval-content');
     if (!content) {
-        console.error('❌ debt-approval-content element topilmadi!');
+        logger.error('debt-approval-content element topilmadi!');
         return;
     }
     
@@ -660,13 +635,13 @@ export async function loadDebtApprovalPage() {
         
         if (!requestsRes || !requestsRes.ok) {
             const errorText = requestsRes ? await requestsRes.text().catch(() => '') : '';
-            console.error('[DEBT_APPROVAL] Requests API xatolik:', { status: requestsRes?.status, errorText });
+            logger.error('[DEBT_APPROVAL] Requests API xatolik:', { status: requestsRes?.status, errorText });
             throw new Error(`Requests API xatolik: ${requestsRes?.status || 'No response'}`);
         }
         
         if (!brandsRes || !brandsRes.ok) {
             const errorText = brandsRes ? await brandsRes.text().catch(() => '') : '';
-            console.error('[DEBT_APPROVAL] Brands API xatolik:', { status: brandsRes?.status, errorText });
+            logger.error('[DEBT_APPROVAL] Brands API xatolik:', { status: brandsRes?.status, errorText });
             throw new Error(`Brands API xatolik: ${brandsRes?.status || 'No response'}`);
         }
         
@@ -708,7 +683,7 @@ export async function loadDebtApprovalPage() {
                     detailedStats = await statsRes.json();
                 }
             } catch (error) {
-                console.error('Statistika yuklashda xatolik:', error);
+                logger.error('Statistika yuklashda xatolik:', error);
             }
             return detailedStats;
         }
@@ -2214,7 +2189,7 @@ export async function loadDebtApprovalPage() {
                             feather.replace();
                         }
                     } catch (error) {
-                        console.error('Error loading bot settings modal:', error);
+                        logger.error('Error loading bot settings modal:', error);
                         showToast('Bot sozlamalarini yuklashda xatolik yuz berdi', true);
                     }
                 });
@@ -2363,7 +2338,7 @@ export async function loadDebtApprovalPage() {
         setupExportButtons();
         
     } catch (error) {
-        console.error('Debt-approval sahifasini yuklashda xatolik:', error);
+        logger.error('Debt-approval sahifasini yuklashda xatolik:', error);
         content.innerHTML = `
             <div style="padding: 20px; background: rgba(255, 0, 0, 0.1); border: 1px solid red; border-radius: 8px; color: #ff6b6b;">
                 <h3>❌ Xatolik yuz berdi</h3>
@@ -2483,7 +2458,7 @@ async function loadDebtRequests(page = 1) {
             }
         }
     } catch (error) {
-        console.error('So\'rovlarni yuklashda xatolik:', error);
+        logger.error('So\'rovlarni yuklashda xatolik:', error);
         list.innerHTML = `
             <div style="padding: 15px; background: rgba(255, 0, 0, 0.1); border: 1px solid red; border-radius: 8px; color: #ff6b6b;">
                 <p><strong>Xatolik:</strong> ${error.message}</p>
@@ -2609,7 +2584,7 @@ async function viewRequestDetails(requestId) {
         showRequestDetailsModal(requestId, requestData, false);
         
     } catch (error) {
-        console.error('So\'rov ma\'lumotlarini yuklashda xatolik:', error);
+        logger.error('So\'rov ma\'lumotlarini yuklashda xatolik:', error);
         showRequestDetailsModal(requestId, null, false, error.message);
     }
 }
@@ -2762,7 +2737,7 @@ function renderRequestDetails(data) {
         try {
             data.excel_headers = JSON.parse(data.excel_headers);
         } catch (e) {
-            console.warn('excel_headers parse qilishda xatolik:', e);
+            logger.warn('excel_headers parse qilishda xatolik:', e);
             data.excel_headers = [];
         }
     }
@@ -2770,7 +2745,7 @@ function renderRequestDetails(data) {
         try {
             data.excel_data = JSON.parse(data.excel_data);
         } catch (e) {
-            console.warn('excel_data parse qilishda xatolik:', e);
+            logger.warn('excel_data parse qilishda xatolik:', e);
             data.excel_data = [];
         }
     }
@@ -3272,7 +3247,7 @@ function renderDebtCharts(stats) {
                     if (activeElements.length > 0) {
                         const index = activeElements[0].index;
                         const status = stats.statusDistribution[index].status;
-                        console.log('Status bosildi:', status);
+                        logger.debug('Status bosildi:', status);
                         // Bu yerga filter yoki boshqa interaktiv funksiya qo'shish mumkin
                     }
                 }
@@ -3353,7 +3328,7 @@ function renderDebtCharts(stats) {
                     if (activeElements.length > 0) {
                         const index = activeElements[0].index;
                         const type = stats.typeDistribution[index].type;
-                        console.log('Tur bosildi:', type);
+                        logger.debug('Tur bosildi:', type);
                         // Bu yerga filter yoki boshqa interaktiv funksiya qo'shish mumkin
                     }
                 }
@@ -3504,7 +3479,7 @@ function renderDebtCharts(stats) {
                     if (activeElements.length > 0) {
                         const index = activeElements[0].index;
                         const managerName = managerLabels[index];
-                        console.log('Menejer bosildi:', managerName);
+                        logger.debug('Menejer bosildi:', managerName);
                     }
                 }
             }
@@ -3554,12 +3529,12 @@ function toggleBotActivitySection() {
 // Bot faoliyatini yuklash
 let botActivityPage = 1;
 async function loadBotActivity(page = 1) {
-    console.log('[BOT_ACTIVITY] loadBotActivity() chaqirildi, page:', page);
+    logger.debug('[BOT_ACTIVITY] loadBotActivity() chaqirildi, page:', page);
     botActivityPage = page;
     
     const tableBody = document.getElementById('bot-activity-table-body');
     if (!tableBody) {
-        console.error('[BOT_ACTIVITY] Jadval body topilmadi!');
+        logger.error('[BOT_ACTIVITY] Jadval body topilmadi!');
         return;
     }
     
@@ -3713,10 +3688,10 @@ async function loadBotActivity(page = 1) {
             infoEl.textContent = `${pagination.total} ta yozuv, ${pagination.page}/${pagination.totalPages} sahifa`;
         }
         
-        console.log('[BOT_ACTIVITY] ✅ Jadval muvaffaqiyatli yuklandi');
+        logger.debug('[BOT_ACTIVITY] ✅ Jadval muvaffaqiyatli yuklandi');
         
     } catch (error) {
-        console.error('[BOT_ACTIVITY] ❌ Xatolik:', error);
+        logger.error('[BOT_ACTIVITY] ❌ Xatolik:', error);
         tableBody.innerHTML = `
             <tr>
                 <td colspan="7" style="padding: 40px; text-align: center; color: #ef4444;">
@@ -3759,11 +3734,11 @@ function renderBotActivityPagination(pagination) {
 
 // Kutilayotgan tasdiqlashlarni yuklash
 async function loadPendingApprovals() {
-    console.log('[PENDING_APPROVALS] loadPendingApprovals() chaqirildi');
+    logger.debug('[PENDING_APPROVALS] loadPendingApprovals() chaqirildi');
     
     const container = document.getElementById('pending-approvals-container');
     if (!container) {
-        console.error('[PENDING_APPROVALS] Konteyner topilmadi!');
+        logger.error('[PENDING_APPROVALS] Konteyner topilmadi!');
         return;
     }
     
@@ -3846,7 +3821,7 @@ async function loadPendingApprovals() {
                         });
                     }
                 } catch (e) {
-                    console.warn('[PENDING_APPROVALS] Sana formatlash xatolik:', e);
+                    logger.warn('[PENDING_APPROVALS] Sana formatlash xatolik:', e);
                 }
             }
             
@@ -3914,10 +3889,10 @@ async function loadPendingApprovals() {
         }).join('');
         
         if (typeof feather !== 'undefined') feather.replace();
-        console.log('[PENDING_APPROVALS] ✅ Kartalar muvaffaqiyatli yuklandi');
+        logger.debug('[PENDING_APPROVALS] ✅ Kartalar muvaffaqiyatli yuklandi');
         
     } catch (error) {
-        console.error('[PENDING_APPROVALS] ❌ Xatolik:', error);
+        logger.error('[PENDING_APPROVALS] ❌ Xatolik:', error);
         container.innerHTML = `
             <div style="padding: 40px; text-align: center; color: #ef4444; grid-column: 1 / -1;">
                 Xatolik: ${error.message || "Ma'lumotlar yuklanmadi"}
@@ -3958,7 +3933,7 @@ async function webApprove(requestId, action) {
             throw new Error(result.error || 'Xatolik yuz berdi');
         }
     } catch (error) {
-        console.error('[WEB_APPROVE] ❌ Xatolik:', error);
+        logger.error('[WEB_APPROVE] ❌ Xatolik:', error);
         showToast(error.message || 'Xatolik yuz berdi', 'error');
     }
 }
@@ -4098,7 +4073,7 @@ async function showPendingRequestDetails(requestId) {
         document.addEventListener('keydown', escHandler);
         
     } catch (error) {
-        console.error('[PENDING_APPROVALS] Modal yuklash xatolik:', error);
+        logger.error('[PENDING_APPROVALS] Modal yuklash xatolik:', error);
         showToast('Ma\'lumotlarni yuklashda xatolik yuz berdi', 'error');
     }
 }
@@ -4240,11 +4215,11 @@ window.showPendingRequestDetails = showPendingRequestDetails;
  * Filiallar bo'yicha holat kartalarini yuklash
  */
 async function loadBranchStatusCards() {
-    console.log('[BRANCH_STATUS] loadBranchStatusCards() chaqirildi');
+    logger.debug('[BRANCH_STATUS] loadBranchStatusCards() chaqirildi');
     
     const cardsContainer = document.getElementById('branch-status-cards');
     if (!cardsContainer) {
-        console.error('[BRANCH_STATUS] Kartalar konteyneri topilmadi!');
+        logger.error('[BRANCH_STATUS] Kartalar konteyneri topilmadi!');
         return;
     }
     
@@ -4284,7 +4259,7 @@ async function loadBranchStatusCards() {
             return;
         }
         
-        console.log('[BRANCH_STATUS] Filter qiymatlari:', { brandId, statusValue, searchValue });
+        logger.debug('[BRANCH_STATUS] Filter qiymatlari:', { brandId, statusValue, searchValue });
         
         const params = new URLSearchParams();
         if (brandId) params.append('brandId', brandId);
@@ -4465,10 +4440,10 @@ async function loadBranchStatusCards() {
             feather.replace();
         }
         
-        console.log('[BRANCH_STATUS] ✅ Kartalar muvaffaqiyatli yuklandi');
+        logger.debug('[BRANCH_STATUS] ✅ Kartalar muvaffaqiyatli yuklandi');
         
     } catch (error) {
-        console.error('[BRANCH_STATUS] ❌ Xatolik:', error);
+        logger.error('[BRANCH_STATUS] ❌ Xatolik:', error);
         cardsContainer.innerHTML = `
             <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: #ef4444;">
                 Xatolik: ${error.message || 'Ma\'lumotlar yuklanmadi'}
@@ -4481,11 +4456,11 @@ async function loadBranchStatusCards() {
  * Filiallar va tasdiqlovchilar jadvalini yuklash
  */
 window.loadBranchApproversTable = async function loadBranchApproversTable() {
-    console.log('[BRANCH_APPROVERS] loadBranchApproversTable() chaqirildi');
+    logger.debug('[BRANCH_APPROVERS] loadBranchApproversTable() chaqirildi');
     
     const tableBody = document.getElementById('branch-approvers-table-body');
     if (!tableBody) {
-        console.error('[BRANCH_APPROVERS] Jadval body topilmadi!');
+        logger.error('[BRANCH_APPROVERS] Jadval body topilmadi!');
         return;
     }
     
@@ -4532,14 +4507,14 @@ window.loadBranchApproversTable = async function loadBranchApproversTable() {
         
         const result = await response.json();
         
-        console.log('[BRANCH_APPROVERS] API javob:', result);
+        logger.debug('[BRANCH_APPROVERS] API javob:', result);
         
         if (!result.success || !result.data) {
             throw new Error(result.error || 'Ma\'lumotlar olinmadi');
         }
         
         const branchStats = result.data;
-        console.log('[BRANCH_APPROVERS] Branch stats ma\'lumotlari:', branchStats.length, 'ta qator', branchStats);
+        logger.debug('[BRANCH_APPROVERS] Branch stats ma\'lumotlari:', branchStats.length, 'ta qator');
         
         if (branchStats.length === 0) {
             tableBody.innerHTML = `
@@ -4592,11 +4567,11 @@ window.loadBranchApproversTable = async function loadBranchApproversTable() {
             feather.replace();
         }
         
-        console.log('[BRANCH_APPROVERS] ✅ Jadval muvaffaqiyatli to\'ldirildi');
+        logger.debug('[BRANCH_APPROVERS] ✅ Jadval muvaffaqiyatli to\'ldirildi');
         
     } catch (error) {
-        console.error('[BRANCH_APPROVERS] ❌ Xatolik:', error);
-        console.error('[BRANCH_APPROVERS] Xatolik tafsilotlari:', {
+        logger.error('[BRANCH_APPROVERS] ❌ Xatolik:', error);
+        logger.error('[BRANCH_APPROVERS] Xatolik tafsilotlari:', {
             message: error.message,
             stack: error.stack
         });
@@ -4731,15 +4706,10 @@ function setupCreateRequestForm() {
                 
                 if (response && response.ok) {
                     const data = await response.json();
-                    console.log('[EXCEL_UPLOAD] Backend javob:', data);
-                    console.log('[EXCEL_UPLOAD] Columns:', data.detectedColumns || data.columns);
-                    console.log('[EXCEL_UPLOAD] Headers:', data.headers);
-                    console.log('[EXCEL_UPLOAD] Total rows:', data.totalRows);
-                    console.log('[EXCEL_UPLOAD] Total sum:', data.total);
+                    logger.debug('[EXCEL_UPLOAD] Backend javob:', data);
                     
                     // Ma'lumotlarni saqlash
                     window.excelPreviewData = data;
-                    console.log('[EXCEL_UPLOAD] Ma\'lumotlar saqlandi: window.excelPreviewData =', window.excelPreviewData);
                     
                     // Preview'ni ko'rsatish
                     showExcelPreview(data);
@@ -4748,9 +4718,9 @@ function setupCreateRequestForm() {
                     setTimeout(() => {
                         const checkPreview = document.getElementById('excel-preview');
                         if (checkPreview && checkPreview.style.display !== 'none' && checkPreview.innerHTML.trim() !== '') {
-                            console.log('[EXCEL_UPLOAD] ✅ Preview muvaffaqiyatli ko\'rsatildi');
+                            logger.debug('[EXCEL_UPLOAD] ✅ Preview muvaffaqiyatli ko\'rsatildi');
                         } else {
-                            console.error('[EXCEL_UPLOAD] ⚠️ Preview ko\'rsatilmadi, qayta tiklanmoqda...');
+                            logger.warn('[EXCEL_UPLOAD] ⚠️ Preview ko\'rsatilmadi, qayta tiklanmoqda...');
                             if (window.excelPreviewData) {
                                 showExcelPreview(window.excelPreviewData);
                             }
@@ -4780,7 +4750,7 @@ function setupCreateRequestForm() {
                     showCreateRequestMessage(`❌ ${errorData.error || 'Excel faylni yuklashda xatolik'}`, 'error');
                 }
             } catch (error) {
-                console.error('[EXCEL_UPLOAD] Xatolik:', error);
+                logger.error('[EXCEL_UPLOAD] Xatolik:', error);
                 excelPreview.innerHTML = `<div style="padding: 15px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; color: #ef4444;">❌ ${error.message || 'Excel faylni yuklashda xatolik'}</div>`;
                 showCreateRequestMessage(`❌ ${error.message || 'Excel faylni yuklashda xatolik'}`, 'error');
             }
@@ -4790,7 +4760,7 @@ function setupCreateRequestForm() {
     // Brend tanlanganda filiallarni yuklash
     brandSelect.addEventListener('change', async () => {
         const brandId = brandSelect.value;
-        console.log('[CREATE_REQUEST] Brend tanlandi:', brandId);
+        logger.debug('[CREATE_REQUEST] Brend tanlandi:', brandId);
         
         branchSelect.innerHTML = '<option value="">Tanlang...</option>';
         svrSelect.innerHTML = '<option value="">Tanlang...</option>';
@@ -4799,39 +4769,31 @@ function setupCreateRequestForm() {
         updateExcelInputState();
         
         if (!brandId) {
-            console.log('[CREATE_REQUEST] Brend tanlanmagan, filiallar yuklanmaydi');
+            logger.debug('[CREATE_REQUEST] Brend tanlanmagan, filiallar yuklanmaydi');
             return;
         }
         
         try {
             const url = `${API_URL}/brands/branches?brand_id=${brandId}`;
-            console.log('[CREATE_REQUEST] Filiallarni yuklash uchun so\'rov yuborilmoqda:', url);
+            logger.debug('[CREATE_REQUEST] Filiallarni yuklash uchun so\'rov yuborilmoqda:', url);
             
             const response = await safeFetch(url, { credentials: 'include' });
             
-            console.log('[CREATE_REQUEST] Filiallar API javob:', {
-                response: response ? 'mavjud' : 'null',
-                ok: response?.ok,
-                status: response?.status,
-                statusText: response?.statusText,
-                contentType: response?.headers?.get('content-type')
-            });
-            
             if (!response) {
-                console.error('[CREATE_REQUEST] ❌ Filiallar API javob null qaytdi (ehtimol redirect qilindi)');
+                logger.error('[CREATE_REQUEST] ❌ Filiallar API javob null qaytdi (ehtimol redirect qilindi)');
                 return;
             }
             
             if (response.ok) {
                 const branches = await response.json();
-                console.log('[CREATE_REQUEST] ✅ Filiallar yuklandi:', branches.length, 'ta');
+                logger.debug('[CREATE_REQUEST] ✅ Filiallar yuklandi:', branches.length, 'ta');
                 branchSelect.innerHTML = '<option value="" style="background: rgba(30,30,30,0.95); color: rgba(255,255,255,0.7);">Tanlang...</option>' + 
                     branches.map(branch => `<option value="${branch.id}" style="background: rgba(30,30,30,0.95); color: #ffffff;">${branch.name}</option>`).join('');
             } else {
-                console.error('[CREATE_REQUEST] ❌ Filiallar API xatolik:', response.status, response.statusText);
+                logger.error('[CREATE_REQUEST] ❌ Filiallar API xatolik:', response.status, response.statusText);
             }
         } catch (error) {
-            console.error('[CREATE_REQUEST] ❌ Filiallarni yuklashda xatolik:', error);
+            logger.error('[CREATE_REQUEST] ❌ Filiallarni yuklashda xatolik:', error);
         }
     });
     
@@ -4839,7 +4801,7 @@ function setupCreateRequestForm() {
     branchSelect.addEventListener('change', async () => {
         const brandId = brandSelect.value;
         const branchId = branchSelect.value;
-        console.log('[CREATE_REQUEST] Filial tanlandi:', { brandId, branchId });
+        logger.debug('[CREATE_REQUEST] Filial tanlandi:', { brandId, branchId });
         
         svrSelect.innerHTML = '<option value="">Tanlang...</option>';
         
@@ -4847,39 +4809,31 @@ function setupCreateRequestForm() {
         updateExcelInputState();
         
         if (!brandId || !branchId) {
-            console.log('[CREATE_REQUEST] Brend yoki filial tanlanmagan, SVR\'lar yuklanmaydi');
+            logger.debug('[CREATE_REQUEST] Brend yoki filial tanlanmagan, SVR\'lar yuklanmaydi');
             return;
         }
         
         try {
             const url = `${API_URL}/brands/svrs?brand_id=${brandId}&branch_id=${branchId}`;
-            console.log('[CREATE_REQUEST] SVR\'larni yuklash uchun so\'rov yuborilmoqda:', url);
+            logger.debug('[CREATE_REQUEST] SVR\'larni yuklash uchun so\'rov yuborilmoqda:', url);
             
             const response = await safeFetch(url, { credentials: 'include' });
             
-            console.log('[CREATE_REQUEST] SVR\'lar API javob:', {
-                response: response ? 'mavjud' : 'null',
-                ok: response?.ok,
-                status: response?.status,
-                statusText: response?.statusText,
-                contentType: response?.headers?.get('content-type')
-            });
-            
             if (!response) {
-                console.error('[CREATE_REQUEST] ❌ SVR\'lar API javob null qaytdi (ehtimol redirect qilindi)');
+                logger.error('[CREATE_REQUEST] ❌ SVR\'lar API javob null qaytdi (ehtimol redirect qilindi)');
                 return;
             }
             
             if (response.ok) {
                 const svrs = await response.json();
-                console.log('[CREATE_REQUEST] ✅ SVR\'lar yuklandi:', svrs.length, 'ta');
+                logger.debug('[CREATE_REQUEST] ✅ SVR\'lar yuklandi:', svrs.length, 'ta');
                 svrSelect.innerHTML = '<option value="" style="background: rgba(30,30,30,0.95); color: rgba(255,255,255,0.7);">Tanlang...</option>' + 
                     svrs.map(svr => `<option value="${svr.id}" style="background: rgba(30,30,30,0.95); color: #ffffff;">${svr.name}</option>`).join('');
             } else {
-                console.error('[CREATE_REQUEST] ❌ SVR\'lar API xatolik:', response.status, response.statusText);
+                logger.error('[CREATE_REQUEST] ❌ SVR\'lar API xatolik:', response.status, response.statusText);
             }
         } catch (error) {
-            console.error('[CREATE_REQUEST] ❌ SVR\'larni yuklashda xatolik:', error);
+            logger.error('[CREATE_REQUEST] ❌ SVR\'larni yuklashda xatolik:', error);
         }
         
         // Excel input holatini yangilash
@@ -4916,11 +4870,11 @@ function setupCreateRequestForm() {
 function showExcelPreview(data) {
     const excelPreview = document.getElementById('excel-preview');
     if (!excelPreview) {
-        console.warn('[EXCEL_PREVIEW] excel-preview element topilmadi');
+        logger.warn('[EXCEL_PREVIEW] excel-preview element topilmadi');
         return;
     }
     
-    console.log('[EXCEL_PREVIEW] showExcelPreview chaqirildi, data:', data);
+    logger.debug('[EXCEL_PREVIEW] showExcelPreview chaqirildi');
     
     // Preview session ID yaratish - eski tekshirishlarni bekor qilish uchun
     const previewSessionId = Date.now();
@@ -4928,7 +4882,7 @@ function showExcelPreview(data) {
     
     // Ma'lumotlarni tekshirish
     if (!data || !data.headers || !Array.isArray(data.headers)) {
-        console.error('[EXCEL_PREVIEW] Ma\'lumotlar noto\'g\'ri formatda:', data);
+        logger.error('[EXCEL_PREVIEW] Ma\'lumotlar noto\'g\'ri formatda');
         excelPreview.innerHTML = '<div style="padding: 15px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; color: #ef4444;">❌ Excel ma\'lumotlari noto\'g\'ri formatda</div>';
         return;
     }
@@ -4959,13 +4913,7 @@ function showExcelPreview(data) {
     const totalRows = data.totalRows || 0;
     const total = data.total || 0;
     
-    console.log('[EXCEL_PREVIEW] Preview ma\'lumotlari:', {
-        totalRows,
-        total,
-        maxRows,
-        previewRowsCount: previewRows.length,
-        dataLength: data.data ? data.data.length : 0
-    });
+    logger.debug('[EXCEL_PREVIEW] Preview ma\'lumotlari:', { totalRows, total, maxRows, previewRowsCount: previewRows.length });
     
     let previewHTML = `
         <div style="padding: 15px; background: rgba(79,172,254,0.1); border: 1px solid rgba(79,172,254,0.3); border-radius: 8px;">
@@ -5019,7 +4967,7 @@ function showExcelPreview(data) {
     `;
     
     // Preview'ni ko'rsatishdan oldin tekshirish
-    console.log('[EXCEL_PREVIEW] Preview HTML yaratilmoqda, element mavjud:', !!excelPreview);
+    logger.debug('[EXCEL_PREVIEW] Preview HTML yaratilmoqda');
     
     // Preview'ni tozalashdan himoya qilish - MutationObserver qo'shish
     if (!window.excelPreviewObserver) {
@@ -5039,7 +4987,7 @@ function showExcelPreview(data) {
                         // Faqat 1 soniyadan keyin qayta tiklashga ruxsat berish (infinite loop oldini olish)
                         if (timeSinceLastRestore > 1000) {
                             window.excelPreviewLastMutationRestore = now;
-                        console.warn('[EXCEL_PREVIEW] ⚠️ Preview tozalanayotgani aniqlandi! Qayta tiklanmoqda...');
+                        logger.warn('[EXCEL_PREVIEW] ⚠️ Preview tozalanayotgani aniqlandi! Qayta tiklanmoqda...');
                         setTimeout(() => {
                                 if (window.excelPreviewData && document.getElementById('excel-preview')?.innerHTML.trim() === '') {
                                 showExcelPreview(window.excelPreviewData);
@@ -5057,13 +5005,13 @@ function showExcelPreview(data) {
                 childList: true,
                 subtree: true
             });
-            console.log('[EXCEL_PREVIEW] MutationObserver qo\'shildi, preview himoya qilindi');
+            logger.debug('[EXCEL_PREVIEW] MutationObserver qo\'shildi, preview himoya qilindi');
         }
     }
     
     excelPreview.style.display = 'block';
     excelPreview.innerHTML = previewHTML;
-    console.log('[EXCEL_PREVIEW] Preview HTML yaratildi va ko\'rsatildi, total:', total, 'so\'m');
+    logger.debug('[EXCEL_PREVIEW] Preview HTML yaratildi va ko\'rsatildi, total:', total, 'so\'m');
     
     if (typeof feather !== 'undefined') feather.replace();
     
@@ -5079,7 +5027,7 @@ function showExcelPreview(data) {
     
     // Agar 500ms ichida qayta render qilinsa, bu infinite loop bo'lishi mumkin
     if (timeSinceLastRender < 500) {
-        console.warn('[EXCEL_PREVIEW] ⚠️ Tez qayta render qilinmoqda, infinite loop oldini olish...');
+        logger.warn('[EXCEL_PREVIEW] ⚠️ Tez qayta render qilinmoqda, infinite loop oldini olish...');
         return; // Infinite loop oldini olish
     }
     
@@ -5210,8 +5158,7 @@ window.createDebtRequest = async function createDebtRequest() {
             }
         }
         
-        console.log('[CREATE_REQUEST] So\'rov yuborilmoqda:', { type, brandId, branchId, svrId, hasExcel: !!window.excelPreviewData });
-        console.log('[CREATE_REQUEST] API URL:', `${API_URL}/requests/`);
+        logger.debug('[CREATE_REQUEST] So\'rov yuborilmoqda:', { type, brandId, branchId, svrId, hasExcel: !!window.excelPreviewData });
         
         const response = await safeFetch(`${API_URL}/requests/`, {
             method: 'POST',
@@ -5219,11 +5166,9 @@ window.createDebtRequest = async function createDebtRequest() {
             body: formData
         });
         
-        console.log('[CREATE_REQUEST] API javob:', response ? { ok: response.ok, status: response.status, statusText: response.statusText } : 'null');
-        
         if (response && response.ok) {
             const data = await response.json();
-            console.log('[CREATE_REQUEST] ✅ So\'rov yaratildi:', data);
+            logger.debug('[CREATE_REQUEST] ✅ So\'rov yaratildi:', data);
             showCreateRequestMessage(
                 `✅ So\'rov muvaffaqiyatli yaratildi!<br><strong>So\'rov ID:</strong> ${data.request_uid}`,
                 'success'
@@ -5238,9 +5183,9 @@ window.createDebtRequest = async function createDebtRequest() {
                 loadDebtRequests(1);
             }
         } else {
-            console.error('[CREATE_REQUEST] ❌ API javob noto\'g\'ri:', response);
+            logger.error('[CREATE_REQUEST] ❌ API javob noto\'g\'ri:', response);
             const errorData = response ? await response.json().catch(() => ({ error: 'Noma\'lum xatolik' })) : { error: 'API javob null' };
-            console.error('[CREATE_REQUEST] Xatolik ma\'lumotlari:', errorData);
+            logger.error('[CREATE_REQUEST] Xatolik ma\'lumotlari:', errorData);
             
             // Dublikat so'rov xatolik xabari
             if (errorData.error && errorData.error.includes('jarayondagi so\'rov mavjud')) {
@@ -5256,7 +5201,7 @@ window.createDebtRequest = async function createDebtRequest() {
             }
         }
     } catch (error) {
-        console.error('[CREATE_REQUEST] ❌ Xatolik:', error);
+        logger.error('[CREATE_REQUEST] ❌ Xatolik:', error);
         showCreateRequestMessage(`❌ Xatolik: ${error.message || 'So\'rov yaratilmadi'}`, 'error');
     } finally {
         submitBtn.disabled = false;
@@ -5271,14 +5216,14 @@ window.createDebtRequest = async function createDebtRequest() {
 function showCreateRequestMessage(message, type = 'info') {
     const messageDiv = document.getElementById('create-request-message');
     if (!messageDiv) {
-        console.warn('[CREATE_REQUEST_MESSAGE] create-request-message element topilmadi');
+        logger.warn('[CREATE_REQUEST_MESSAGE] create-request-message element topilmadi');
         return;
     }
     
     // Excel preview'ni tekshirish va saqlab qolish
     const excelPreview = document.getElementById('excel-preview');
     const previewExists = excelPreview && excelPreview.style.display !== 'none' && excelPreview.innerHTML.trim() !== '';
-    console.log('[CREATE_REQUEST_MESSAGE] Xabar ko\'rsatilmoqda, Excel preview mavjud:', previewExists);
+    logger.debug('[CREATE_REQUEST_MESSAGE] Xabar ko\'rsatilmoqda, Excel preview mavjud:', previewExists);
     
     const bgColor = type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 
                    type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 
@@ -5312,7 +5257,7 @@ function showCreateRequestMessage(message, type = 'info') {
             if (!checkPreview || checkPreview.innerHTML.trim() === '' || checkPreview.style.display === 'none') {
                     // Faqat bir marta qayta tiklash
                     if (window.previewCheckCount === 1 && window.excelPreviewData) {
-                console.warn('[CREATE_REQUEST_MESSAGE] ⚠️ Excel preview yo\'qolib qoldi, qayta tiklanmoqda...');
+                logger.warn('[CREATE_REQUEST_MESSAGE] ⚠️ Excel preview yo\'qolib qoldi, qayta tiklanmoqda...');
                     showExcelPreview(window.excelPreviewData);
                 }
                 } else {
@@ -5331,7 +5276,7 @@ function showCreateRequestMessage(message, type = 'info') {
             if (window.excelPreviewData) {
                 const checkPreview = document.getElementById('excel-preview');
                 if (!checkPreview || checkPreview.innerHTML.trim() === '' || checkPreview.style.display === 'none') {
-                    console.warn('[CREATE_REQUEST_MESSAGE] ⚠️ Xabar yashirilgandan keyin Excel preview yo\'qolib qoldi, qayta tiklanmoqda...');
+                    logger.warn('[CREATE_REQUEST_MESSAGE] ⚠️ Xabar yashirilgandan keyin Excel preview yo\'qolib qoldi, qayta tiklanmoqda...');
                     showExcelPreview(window.excelPreviewData);
                 }
             }
@@ -5792,7 +5737,7 @@ function showImportModal() {
                     showToast('Import xatolik: ' + (data.error || 'Noma\'lum xatolik'), true);
                 }
             } catch (error) {
-                console.error('Import xatolik:', error);
+                logger.error('Import xatolik:', error);
                 showToast('Import xatolik yuz berdi: ' + error.message, true);
             }
         });
@@ -5907,7 +5852,7 @@ async function saveDebtSettings() {
         
     } catch (error) {
         log('❌ Sozlamalarni saqlashda xatolik (catch):', error);
-        console.error('Sozlamalarni saqlashda xatolik:', error);
+        logger.error('Sozlamalarni saqlashda xatolik:', error);
         showToast('Sozlamalarni saqlashda xatolik: ' + (error.message || 'Noma\'lum xatolik'), true);
     }
 }
@@ -6089,26 +6034,19 @@ async function loadRoleBindings(roleName) {
 
 // Setup debt restore requests section
 async function setupDebtRestoreRequests() {
-    console.log('[DEBT_RESTORE] setupDebtRestoreRequests() boshlanmoqda...');
+    logger.debug('[DEBT_RESTORE] setupDebtRestoreRequests() boshlanmoqda...');
     
     const yearSelect = document.getElementById('debt-restore-year');
     const monthSelect = document.getElementById('debt-restore-month');
     const restoreContent = document.getElementById('debt-restore-content');
     const restoreBtn = document.getElementById('debt-restore-requests-btn');
     
-    console.log('[DEBT_RESTORE] Elementlar topildi:', {
-        yearSelect: yearSelect ? 'topildi' : 'topilmadi',
-        monthSelect: monthSelect ? 'topildi' : 'topilmadi',
-        restoreContent: restoreContent ? 'topildi' : 'topilmadi',
-        restoreBtn: restoreBtn ? 'topildi' : 'topilmadi'
-    });
-    
     if (!yearSelect || !monthSelect || !restoreContent || !restoreBtn) {
-        console.error('[DEBT_RESTORE] ❌ Elementlar topilmadi, funksiya to\'xtatildi');
+        logger.error('[DEBT_RESTORE] ❌ Elementlar topilmadi, funksiya to\'xtatildi');
         return;
     }
     
-    console.log('[DEBT_RESTORE] ✅ Barcha elementlar topildi, sozlamalar boshlanmoqda...');
+    logger.debug('[DEBT_RESTORE] ✅ Barcha elementlar topildi, sozlamalar boshlanmoqda...');
     
     // Yillar ro'yxatini to'ldirish (2020 - hozirgi yil)
     const currentYear = new Date().getFullYear();
@@ -6118,7 +6056,7 @@ async function setupDebtRestoreRequests() {
     }
     yearSelect.innerHTML = '<option value="">Yil...</option>' + 
         years.map(y => `<option value="${y}">${y}</option>`).join('');
-    console.log('[DEBT_RESTORE] ✅ Yillar ro\'yxati to\'ldirildi:', years.length, 'ta');
+    logger.debug('[DEBT_RESTORE] ✅ Yillar ro\'yxati to\'ldirildi:', years.length, 'ta');
     
     // Oylar ro'yxatini to'ldirish
     const months = [
@@ -6137,45 +6075,43 @@ async function setupDebtRestoreRequests() {
     ];
     monthSelect.innerHTML = '<option value="">Oy...</option>' + 
         months.map(m => `<option value="${m.value}">${m.name}</option>`).join('');
-    console.log('[DEBT_RESTORE] ✅ Oylar ro\'yxati to\'ldirildi:', months.length, 'ta');
+    logger.debug('[DEBT_RESTORE] ✅ Oylar ro\'yxati to\'ldirildi:', months.length, 'ta');
     
     // Oy va yil tanlash handler
     const updateRestoreContent = async () => {
         const year = yearSelect.value;
         const month = monthSelect.value;
         
-        console.log('[DEBT_RESTORE] updateRestoreContent() chaqirildi:', { year, month });
+        logger.debug('[DEBT_RESTORE] updateRestoreContent() chaqirildi:', { year, month });
         
         if (!year || !month) {
-            console.log('[DEBT_RESTORE] Yil yoki oy tanlanmagan, content yashirilmoqda');
+            logger.debug('[DEBT_RESTORE] Yil yoki oy tanlanmagan, content yashirilmoqda');
             restoreContent.style.display = 'none';
             return;
         }
         
-        console.log('[DEBT_RESTORE] Content ko\'rsatilmoqda...');
+        logger.debug('[DEBT_RESTORE] Content ko\'rsatilmoqda...');
         restoreContent.style.display = 'block';
         
         // Arxivlangan so'rovlarni olish va filtrlash
         try {
             const archiveUrl = `${API_URL}/archive?year=${year}&month=${month}&limit=1000`;
-            console.log('[DEBT_RESTORE] API so\'rovi yuborilmoqda:', archiveUrl);
+            logger.debug('[DEBT_RESTORE] API so\'rovi yuborilmoqda:', archiveUrl);
             
             const response = await safeFetch(archiveUrl, {
                 credentials: 'include'
             });
             
-            console.log('[DEBT_RESTORE] API javob:', response ? { ok: response.ok, status: response.status } : 'null');
-            
             if (!response || !response.ok) {
                 const errorText = response ? await response.text().catch(() => '') : '';
-                console.error('[DEBT_RESTORE] API xatolik:', { status: response?.status, errorText });
+                logger.error('[DEBT_RESTORE] API xatolik:', { status: response?.status, errorText });
                 throw new Error('Arxivlangan so\'rovlarni yuklashda xatolik');
             }
             
             const data = await response.json();
             const requests = data.data || [];
             
-            console.log('[DEBT_RESTORE] Arxivlangan so\'rovlar soni:', requests.length);
+            logger.debug('[DEBT_RESTORE] Arxivlangan so\'rovlar soni:', requests.length);
             
             // Unique brendlar, filiallar va SVR'larni olish
             const brandsMap = new Map();
@@ -6198,11 +6134,7 @@ async function setupDebtRestoreRequests() {
             const branches = Array.from(branchesMap.values());
             const svrs = Array.from(svrsMap.values());
             
-            console.log('[DEBT_RESTORE] Unique ma\'lumotlar:', {
-                brands: brands.length,
-                branches: branches.length,
-                svrs: svrs.length
-            });
+            logger.debug('[DEBT_RESTORE] Unique ma\'lumotlar:', { brands: brands.length, branches: branches.length, svrs: svrs.length });
             
             // Brendlar ro'yxatini ko'rsatish
             const brandsContainer = document.getElementById('debt-restore-brands');
@@ -6260,37 +6192,37 @@ async function setupDebtRestoreRequests() {
             setupRestoreSelectAll('debt-restore-select-all-branches', 'debt-restore-branch-checkbox');
             setupRestoreSelectAll('debt-restore-select-all-svrs', 'debt-restore-svr-checkbox');
             
-            console.log('[DEBT_RESTORE] ✅ Ma\'lumotlar yuklandi va ko\'rsatildi');
+            logger.debug('[DEBT_RESTORE] ✅ Ma\'lumotlar yuklandi va ko\'rsatildi');
             
             if (window.feather) feather.replace();
         } catch (error) {
-            console.error('[DEBT_RESTORE] ❌ Error loading restore requests:', error);
+            logger.error('[DEBT_RESTORE] ❌ Error loading restore requests:', error);
             showToast('Arxivlangan so\'rovlarni yuklashda xatolik', true);
         }
     };
     
-    console.log('[DEBT_RESTORE] Event listener\'lar qo\'shilmoqda...');
+    logger.debug('[DEBT_RESTORE] Event listener\'lar qo\'shilmoqda...');
     yearSelect.addEventListener('change', (e) => {
-        console.log('[DEBT_RESTORE] Yil o\'zgardi:', e.target.value);
+        logger.debug('[DEBT_RESTORE] Yil o\'zgardi:', e.target.value);
         updateRestoreContent();
     });
     monthSelect.addEventListener('change', (e) => {
-        console.log('[DEBT_RESTORE] Oy o\'zgardi:', e.target.value);
+        logger.debug('[DEBT_RESTORE] Oy o\'zgardi:', e.target.value);
         updateRestoreContent();
     });
-    console.log('[DEBT_RESTORE] ✅ Event listener\'lar qo\'shildi');
+    logger.debug('[DEBT_RESTORE] ✅ Event listener\'lar qo\'shildi');
     
     // Qaytadan faollashtirish tugmasi
     restoreBtn.addEventListener('click', async () => {
-        console.log('[DEBT_RESTORE] Qaytadan faollashtirish tugmasi bosildi');
+        logger.debug('[DEBT_RESTORE] Qaytadan faollashtirish tugmasi bosildi');
         
         const year = yearSelect.value;
         const month = monthSelect.value;
         
-        console.log('[DEBT_RESTORE] Tanlangan qiymatlar:', { year, month });
+        logger.debug('[DEBT_RESTORE] Tanlangan qiymatlar:', { year, month });
         
         if (!year || !month) {
-            console.warn('[DEBT_RESTORE] ⚠️ Yil yoki oy tanlanmagan');
+            logger.warn('[DEBT_RESTORE] ⚠️ Yil yoki oy tanlanmagan');
             showToast('Iltimos, oy va yilni tanlang', true);
             return;
         }
@@ -6309,7 +6241,7 @@ async function setupDebtRestoreRequests() {
         const finalBranches = selectAllBranches ? undefined : (selectedBranches.length > 0 ? selectedBranches : undefined);
         const finalSvrs = selectAllSvrs ? undefined : (selectedSvrs.length > 0 ? selectedSvrs : undefined);
         
-        console.log('[DEBT_RESTORE] Tanlash natijasi:', {
+        logger.debug('[DEBT_RESTORE] Tanlash natijasi:', {
             brands: finalBrands,
             branches: finalBranches,
             svrs: finalSvrs,
@@ -6444,7 +6376,7 @@ async function setupDebtRestoreRequests() {
                 throw new Error(result.message || 'Qaytadan faollashtirishda xatolik');
             }
         } catch (error) {
-            console.error('Restore requests error:', error);
+            logger.error('Restore requests error:', error);
             showToast(`Qaytadan faollashtirishda xatolik: ${error.message}`, true);
         } finally {
             restoreBtn.disabled = false;
@@ -6560,7 +6492,7 @@ function downloadTemplate() {
             showToast('Shablon CSV formatida yuklab olindi!', false);
         }
     } catch (error) {
-        console.error('Shablon yuklab olishda xatolik:', error);
+        logger.error('Shablon yuklab olishda xatolik:', error);
         showToast('Shablon yuklab olishda xatolik yuz berdi', true);
     }
 }
@@ -6634,7 +6566,7 @@ async function setupAcceptedDataSection() {
             });
         }
     } catch (error) {
-        console.error('[ACCEPTED_DATA] Filter yuklashda xatolik:', error);
+        logger.error('[ACCEPTED_DATA] Filter yuklashda xatolik:', error);
     }
     
     // Search button
@@ -6687,7 +6619,7 @@ async function setupAcceptedDataSection() {
                 
                 showToast('Ma\'lumotlar muvaffaqiyatli export qilindi! ✅', false);
             } catch (error) {
-                console.error('[ACCEPTED_DATA] Export error:', error);
+                logger.error('[ACCEPTED_DATA] Export error:', error);
                 showToast(`Export qilishda xatolik: ${error.message}`, true);
             } finally {
                 exportBtn.disabled = false;
@@ -6707,7 +6639,7 @@ async function setupAcceptedDataSection() {
         });
     }
     
-    console.log('[ACCEPTED_DATA] setupAcceptedDataSection() yakunlandi');
+    logger.debug('[ACCEPTED_DATA] setupAcceptedDataSection() yakunlandi');
 }
 
 // Accepted data pagination state
@@ -6829,7 +6761,7 @@ async function loadAcceptedData(page = 1) {
             if (pagesDiv) pagesDiv.innerHTML = '';
         }
     } catch (error) {
-        console.error('Ma\'lumotlarni yuklashda xatolik:', error);
+        logger.error('Ma\'lumotlarni yuklashda xatolik:', error);
         tableBody.innerHTML = `
             <tr>
                 <td colspan="10" style="padding: 40px; text-align: center; color: #ef4444;">
@@ -6848,7 +6780,7 @@ window.loadAcceptedData = loadAcceptedData;
  * Bloklash bo'limini sozlash
  */
 async function setupDebtBlocked() {
-    console.log('[DEBT_BLOCKED] setupDebtBlocked() boshlanmoqda...');
+    logger.debug('[DEBT_BLOCKED] setupDebtBlocked() boshlanmoqda...');
     
     const filterBrand = document.getElementById('block-filter-brand');
     const filterBranch = document.getElementById('block-filter-branch');
@@ -6862,7 +6794,7 @@ async function setupDebtBlocked() {
     const filterStatus = document.getElementById('blocked-filter-status');
     
     if (!filterBrand || !filterBranch || !blockSVRsList || !blockBtn || !blockedList) {
-        console.warn('[DEBT_BLOCKED] DOM elementlar topilmadi');
+        logger.warn('[DEBT_BLOCKED] DOM elementlar topilmadi');
         return;
     }
     
@@ -6886,7 +6818,7 @@ async function setupDebtBlocked() {
                 }
             }
         } catch (error) {
-            console.error('[DEBT_BLOCKED] Brendlarni yuklashda xatolik:', error);
+            logger.error('[DEBT_BLOCKED] Brendlarni yuklashda xatolik:', error);
         }
     }
     
@@ -6922,7 +6854,7 @@ async function setupDebtBlocked() {
                 }
             }
         } catch (error) {
-            console.error('[DEBT_BLOCKED] Filiallarni yuklashda xatolik:', error);
+            logger.error('[DEBT_BLOCKED] Filiallarni yuklashda xatolik:', error);
             allBranches = [];
         }
     }
@@ -6967,7 +6899,7 @@ async function setupDebtBlocked() {
                 displaySVRsAsCheckboxes(true);
             }
         } catch (error) {
-            console.error('[DEBT_BLOCKED] SVR\'larni yuklashda xatolik:', error);
+            logger.error('[DEBT_BLOCKED] SVR\'larni yuklashda xatolik:', error);
             allSVRs = [];
             displaySVRsAsCheckboxes(true);
         }
@@ -7160,7 +7092,7 @@ async function setupDebtBlocked() {
                 showToast(`${successCount} ta SVR muvaffaqiyatli bloklandi! ✅`, false);
             } else if (successCount > 0) {
                 showToast(`${successCount} ta SVR bloklandi, ${errorCount} tasida xatolik yuz berdi`, true);
-                console.error('[DEBT_BLOCKED] Bloklash xatoliklari:', errors);
+                logger.error('[DEBT_BLOCKED] Bloklash xatoliklari:', errors);
             } else {
                 throw new Error('Barcha SVR\'lar bloklanmadi. ' + errors.join('; '));
             }
@@ -7180,7 +7112,7 @@ async function setupDebtBlocked() {
             const branchName = filterBranch.value || null;
             await loadAndDisplaySVRs(brandId, branchName);
         } catch (error) {
-            console.error('[DEBT_BLOCKED] Bloklashda xatolik:', error);
+            logger.error('[DEBT_BLOCKED] Bloklashda xatolik:', error);
             showToast(`Bloklashda xatolik: ${error.message}`, true);
         } finally {
             blockBtn.disabled = false;
@@ -7207,7 +7139,7 @@ async function setupDebtBlocked() {
                 throw new Error('Bloklangan elementlarni yuklashda xatolik');
             }
         } catch (error) {
-            console.error('[DEBT_BLOCKED] Bloklangan elementlarni yuklashda xatolik:', error);
+            logger.error('[DEBT_BLOCKED] Bloklangan elementlarni yuklashda xatolik:', error);
             blockedList.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 20px;">Xatolik: ${error.message}</div>`;
         }
     };
@@ -7274,7 +7206,7 @@ async function setupDebtBlocked() {
                 }
             }
         } catch (e) {
-            console.warn('Bloklangan element ma\'lumotlarini olishda xatolik:', e);
+            logger.warn('Bloklangan element ma\'lumotlarini olishda xatolik:', e);
         }
         
         const confirmed = await showConfirmDialog({
@@ -7306,7 +7238,7 @@ async function setupDebtBlocked() {
                 throw new Error(errorData.error || 'Bloklashni bekor qilishda xatolik');
             }
         } catch (error) {
-            console.error('[DEBT_BLOCKED] Bloklashni bekor qilishda xatolik:', error);
+            logger.error('[DEBT_BLOCKED] Bloklashni bekor qilishda xatolik:', error);
             showToast(`Xatolik: ${error.message}`, true);
         }
     };
@@ -7322,7 +7254,7 @@ async function setupDebtBlocked() {
     displaySVRsAsCheckboxes(false);
     await loadBlockedItems();
     
-    console.log('[DEBT_BLOCKED] setupDebtBlocked() yakunlandi');
+    logger.debug('[DEBT_BLOCKED] setupDebtBlocked() yakunlandi');
 }
 
 async function setupDebtUsers() {
@@ -7669,7 +7601,7 @@ async function setupDebtUsersRoleFilters() {
         updateRoleBadgesCounts();
         
     } catch (error) {
-        console.error('Role filters setup xatolik:', error);
+        logger.error('Role filters setup xatolik:', error);
     }
 }
 
@@ -7722,56 +7654,35 @@ window.openUserBindingsModal = async function(userId) {
         const tasks = tasksRes && tasksRes.ok ? await tasksRes.json() : [];
         const available = availableRes && availableRes.ok ? await availableRes.json() : { brands: [], branches: [], svrs: [] };
         
-        // Dublikat tekshiruvi - Brendlar
+        // Dublikat tekshiruvi - Utility funksiyalar ishlatiladi
         const originalBrands = [...available.brands];
-        const uniqueBrandsMap = new Map();
-        available.brands.forEach(brand => {
-            if (!uniqueBrandsMap.has(brand.id)) {
-                uniqueBrandsMap.set(brand.id, brand);
-            } else {
-                console.warn(`⚠️ [openUserBindingsModal] Brend dublikat topildi: ID=${brand.id}, Name=${brand.name}`);
-            }
+        available.brands = removeDuplicatesById(available.brands, 'id', {
+            warnOnDuplicate: true,
+            context: 'openUserBindingsModal',
+            sortFn: (a, b) => a.name.localeCompare(b.name)
         });
-        available.brands = Array.from(uniqueBrandsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
         logDuplicates('Brendlar', originalBrands, available.brands, 'available.brands');
         
-        // Dublikat tekshiruvi - Filiallar
         const originalBranches = [...available.branches];
-        const uniqueBranchesMap = new Map();
-        available.branches.forEach(branch => {
-            if (!uniqueBranchesMap.has(branch.id)) {
-                uniqueBranchesMap.set(branch.id, branch);
-            } else {
-                console.warn(`⚠️ [openUserBindingsModal] Filial dublikat topildi: ID=${branch.id}, Name=${branch.name}, BrandID=${branch.brand_id}`);
-            }
+        available.branches = removeDuplicatesById(available.branches, 'id', {
+            warnOnDuplicate: true,
+            context: 'openUserBindingsModal',
+            sortFn: (a, b) => a.name.localeCompare(b.name)
         });
-        available.branches = Array.from(uniqueBranchesMap.values()).sort((a, b) => a.name.localeCompare(b.name));
         logDuplicates('Filiallar', originalBranches, available.branches, 'available.branches');
         
-        // Dublikat tekshiruvi - Bindings brands
         const originalBindingsBrands = [...bindings.brands];
-        const uniqueBindingsBrandsMap = new Map();
-        bindings.brands.forEach(brand => {
-            if (!uniqueBindingsBrandsMap.has(brand.id)) {
-                uniqueBindingsBrandsMap.set(brand.id, brand);
-            } else {
-                console.warn(`⚠️ [openUserBindingsModal] Bindings brend dublikat topildi: ID=${brand.id}, Name=${brand.name}`);
-            }
+        bindings.brands = removeDuplicatesById(bindings.brands, 'id', {
+            warnOnDuplicate: true,
+            context: 'openUserBindingsModal'
         });
-        bindings.brands = Array.from(uniqueBindingsBrandsMap.values());
         logDuplicates('Bindings Brendlar', originalBindingsBrands, bindings.brands, 'bindings.brands');
         
-        // Dublikat tekshiruvi - Bindings branches
         const originalBindingsBranches = [...bindings.branches];
-        const uniqueBindingsBranchesMap = new Map();
-        bindings.branches.forEach(branch => {
-            if (!uniqueBindingsBranchesMap.has(branch.id)) {
-                uniqueBindingsBranchesMap.set(branch.id, branch);
-            } else {
-                console.warn(`⚠️ [openUserBindingsModal] Bindings filial dublikat topildi: ID=${branch.id}, Name=${branch.name}, BrandID=${branch.brand_id}`);
-            }
+        bindings.branches = removeDuplicatesById(bindings.branches, 'id', {
+            warnOnDuplicate: true,
+            context: 'openUserBindingsModal'
         });
-        bindings.branches = Array.from(uniqueBindingsBranchesMap.values());
         logDuplicates('Bindings Filiallar', originalBindingsBranches, bindings.branches, 'bindings.branches');
         
         // Modal yaratish
@@ -8012,7 +7923,7 @@ window.openUserBindingsModal = async function(userId) {
         });
         
     } catch (error) {
-        console.error('openUserBindingsModal() xatolik:', error);
+        logger.error('openUserBindingsModal() xatolik:', error);
         showToast(`Modal yaratishda xatolik: ${error.message}`, true);
     }
 };
@@ -8238,7 +8149,7 @@ function getUniqueBranchesHTML(availableBranches, bindingsBranches = [], onChang
         if (!uniqueBranchesByIdMap.has(branch.id)) {
             uniqueBranchesByIdMap.set(branch.id, branch);
         } else {
-            console.warn(`⚠️ [getUniqueBranchesHTML] Filial ID dublikat: ID=${branch.id}, Name=${branch.name}, BrandID=${branch.brand_id}`);
+            logger.warn(`[getUniqueBranchesHTML] Filial ID dublikat: ID=${branch.id}, Name=${branch.name}, BrandID=${branch.brand_id}`);
         }
     });
     
@@ -8520,22 +8431,22 @@ window.saveUserBindings = async function(userId) {
 export async function loadArchivePage() {
     const content = document.getElementById('debt-archive-content');
     if (!content) {
-        console.error('❌ debt-archive-content element topilmadi!');
+        logger.error('debt-archive-content element topilmadi!');
         return;
     }
     
     try {
-        console.log('[ARCHIVE_PAGE] Arxiv sahifasi yuklanmoqda...');
+        logger.debug('[ARCHIVE_PAGE] Arxiv sahifasi yuklanmoqda...');
         
         // Arxiv statistikasini olish
         const statsRes = await safeFetch(`${API_URL}/archive/stats`, { credentials: 'include' });
         const stats = statsRes && statsRes.ok ? await statsRes.json() : { stats: [] };
-        console.log('[ARCHIVE_PAGE] Arxiv statistikasi:', stats.stats?.length || 0, 'ta oy');
+        logger.debug('[ARCHIVE_PAGE] Arxiv statistikasi:', stats.stats?.length || 0, 'ta oy');
         
         // Arxivlangan so'rovlarni olish (birinchi sahifa)
         const archiveRes = await safeFetch(`${API_URL}/archive?page=1&limit=10`, { credentials: 'include' });
         const archiveData = archiveRes && archiveRes.ok ? await archiveRes.json() : { data: [], pagination: { page: 1, limit: 10, total: 0, totalPages: 0 } };
-        console.log('[ARCHIVE_PAGE] Arxivlangan so\'rovlar:', archiveData.data?.length || 0, 'ta (jami:', archiveData.pagination?.total || 0, ')');
+        logger.debug('[ARCHIVE_PAGE] Arxivlangan so\'rovlar:', archiveData.data?.length || 0, 'ta (jami:', archiveData.pagination?.total || 0, ')');
         
         // Oy va yil tanlash
         const now = new Date();
@@ -8652,7 +8563,7 @@ export async function loadArchivePage() {
             feather.replace();
         }
     } catch (error) {
-        console.error('Error loading archive page:', error);
+        logger.error('Error loading archive page:', error);
         showToast('Arxiv sahifasini yuklashda xatolik', true);
     }
 }
@@ -8785,7 +8696,7 @@ function setupArchiveEventListeners() {
             }
             
             try {
-                console.log('[ARCHIVE] Arxivlash boshlanmoqda:', { year, month });
+                logger.debug('[ARCHIVE] Arxivlash boshlanmoqda:', { year, month });
                 
                 archiveBtn.disabled = true;
                 archiveBtn.innerHTML = '<i data-feather="loader"></i> Arxivlanmoqda...';
@@ -8798,11 +8709,11 @@ function setupArchiveEventListeners() {
                     credentials: 'include'
                 });
                 
-                console.log('[ARCHIVE] API javob:', res ? { ok: res.ok, status: res.status } : 'null');
+                logger.debug('[ARCHIVE] API javob:', res ? { ok: res.ok, status: res.status } : 'null');
                 
                 if (res && res.ok) {
                     const data = await res.json();
-                    console.log('[ARCHIVE] Arxivlash natijasi:', data);
+                    logger.debug('[ARCHIVE] Arxivlash natijasi:', data);
                     
                     if (data.archived > 0) {
                         const monthName = getMonthName(month);
@@ -8819,11 +8730,11 @@ function setupArchiveEventListeners() {
                     await loadDebtApprovalPage(); // Sahifani yangilash
                 } else {
                     const errorData = res ? await res.json().catch(() => ({})) : {};
-                    console.error('[ARCHIVE] API xatolik:', errorData);
+                    logger.error('[ARCHIVE] API xatolik:', errorData);
                     throw new Error(errorData.message || 'Arxivlashda xatolik');
                 }
             } catch (error) {
-                console.error('[ARCHIVE] ❌ Arxivlash xatolik:', error);
+                logger.error('[ARCHIVE] ❌ Arxivlash xatolik:', error);
                 showToast(`Arxivlashda xatolik: ${error.message}`, true);
             } finally {
                 archiveBtn.disabled = false;
@@ -8861,7 +8772,7 @@ function setupArchiveEventListeners() {
                     throw new Error('Qayta yuborishda xatolik');
                 }
             } catch (error) {
-                console.error('Resend error:', error);
+                logger.error('Resend error:', error);
                 showToast('Qayta yuborishda xatolik', true);
             }
         });
@@ -8894,7 +8805,7 @@ function setupArchiveEventListeners() {
                     throw new Error('O\'chirishda xatolik');
                 }
             } catch (error) {
-                console.error('Delete error:', error);
+                logger.error('Delete error:', error);
                 showToast('O\'chirishda xatolik', true);
             }
         });
@@ -8951,7 +8862,7 @@ async function loadArchivePageWithPagination(page) {
             }
         }
     } catch (error) {
-        console.error('Error loading archive page:', error);
+        logger.error('Error loading archive page:', error);
         showToast('Sahifani yuklashda xatolik', true);
     }
 }
@@ -9134,7 +9045,7 @@ function showChangesConfirmationModal(changes, filePath, errors) {
                     throw new Error(result.message || 'Yangilashda xatolik');
                 }
             } catch (error) {
-                console.error('Confirm changes error:', error);
+                logger.error('Confirm changes error:', error);
                 showToast(`Yangilashda xatolik: ${error.message}`, true);
             } finally {
                 confirmBtn.disabled = false;

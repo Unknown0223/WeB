@@ -100,6 +100,9 @@ app.post('/telegram-webhook/:token', async (req, res) => {
 // Static files va session middleware (webhook'dan keyin)
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Production yoki development rejimini aniqlash (session store'dan oldin)
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production';
+
 // Sessiyani sozlash
 const session = require('express-session');
 const { isPostgres, isSqlite } = require('./db.js');
@@ -128,7 +131,14 @@ if (isPostgres) {
         createTableIfMissing: true
     });
 } else {
-    // SQLite session store
+    // SQLite session store (faqat development uchun)
+    // Production'da (Railway, Render, Heroku) PostgreSQL ishlatiladi
+    if (isProduction) {
+        log.error('[SESSION] Production rejimida SQLite ishlatilmoqda! PostgreSQL sozlang.');
+        log.error('[SESSION] Railway.com uchun PostgreSQL service qo\'shing va DATABASE_URL ni sozlang.');
+        throw new Error('Production rejimida SQLite ishlatilmaydi. PostgreSQL sozlang.');
+    }
+    
     const SQLiteStore = require('connect-sqlite3')(session);
     sessionStore = new SQLiteStore({
         db: 'database.db',
@@ -136,9 +146,6 @@ if (isPostgres) {
         table: 'sessions'
     });
 }
-
-// Production yoki development rejimini aniqlash
-const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production';
 // Railway.com yoki boshqa cloud platformalar uchun HTTPS tekshiruvi
 const isSecure = isProduction || 
                  process.env.RAILWAY_PUBLIC_DOMAIN || 

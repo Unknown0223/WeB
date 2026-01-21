@@ -43,21 +43,37 @@ exports.up = async function(knex) {
       });
     }
     
-    // Yangi unique constraint qo'shish (composite: request_id + reminder_type)
-    // Avval mavjud bo'lsa, o'chirish
-    try {
-      await knex.schema.table('debt_reminders', function(table) {
-        table.unique(['request_id', 'reminder_type'], 'debt_reminders_request_type_unique');
-      });
-    } catch (err) {
-      // Constraint allaqachon mavjud bo'lishi mumkin
-      if (!err.message.includes('already exists') && !err.message.includes('duplicate')) {
-        throw err;
+    // Avval reminder_type ustunining mavjudligini tekshirish
+    const hasReminderType = await knex.schema.hasColumn('debt_reminders', 'reminder_type');
+    
+    if (hasReminderType) {
+      // Agar reminder_type ustuni mavjud bo'lsa, composite unique constraint qo'shish
+      try {
+        await knex.schema.table('debt_reminders', function(table) {
+          table.unique(['request_id', 'reminder_type'], 'debt_reminders_request_type_unique');
+        });
+      } catch (err) {
+        // Constraint allaqachon mavjud bo'lishi mumkin
+        if (!err.message.includes('already exists') && !err.message.includes('duplicate')) {
+          throw err;
+        }
+      }
+    } else {
+      // Agar reminder_type ustuni yo'q bo'lsa, faqat request_id uchun unique constraint qo'shish
+      try {
+        await knex.schema.table('debt_reminders', function(table) {
+          table.unique('request_id', 'debt_reminders_request_id_unique');
+        });
+      } catch (err) {
+        // Constraint allaqachon mavjud bo'lishi mumkin
+        if (!err.message.includes('already exists') && !err.message.includes('duplicate')) {
+          throw err;
+        }
       }
     }
   } catch (err) {
-    console.warn('debt_reminders unique constraint yangilashda xato:', err.message);
     // Xatoni e'tiborsiz qoldirish - constraint allaqachon to'g'ri bo'lishi mumkin
+    // Log qilmaymiz - migration'da ortiqcha loglar
   }
 };
 
@@ -73,16 +89,25 @@ exports.down = async function(knex) {
   }
   
   try {
-    // Yangi constraint'ni o'chirish
-    await knex.schema.table('debt_reminders', function(table) {
-      table.dropUnique(['request_id', 'reminder_type'], 'debt_reminders_request_type_unique');
-    });
+    const hasReminderType = await knex.schema.hasColumn('debt_reminders', 'reminder_type');
+    
+    if (hasReminderType) {
+      // Yangi constraint'ni o'chirish
+      await knex.schema.table('debt_reminders', function(table) {
+        table.dropUnique(['request_id', 'reminder_type'], 'debt_reminders_request_type_unique');
+      });
+    } else {
+      // Faqat request_id constraint'ni o'chirish
+      await knex.schema.table('debt_reminders', function(table) {
+        table.dropUnique('request_id', 'debt_reminders_request_id_unique');
+      });
+    }
     
     // Eski constraint'ni qaytarish
     await knex.schema.table('debt_reminders', function(table) {
       table.unique('request_id', 'debt_reminders_request_id_unique');
     });
   } catch (err) {
-    console.warn('debt_reminders unique constraint rollback da xato:', err.message);
+    // Xatoni e'tiborsiz qoldirish - migration'da ortiqcha loglar
   }
 };

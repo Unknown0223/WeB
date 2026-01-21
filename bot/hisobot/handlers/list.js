@@ -5,62 +5,11 @@ const { db } = require('../../../db.js');
 const { createLogger } = require('../../../utils/logger.js');
 const userHelper = require('../../unified/userHelper.js');
 const { filterReportsByRole, getVisibleLocations, getVisibleBrands } = require('../../../utils/roleFiltering.js');
+const { getUserPermissions } = require('../../../utils/userPermissions.js');
 
 const log = createLogger('HISOBOT_LIST');
 
-/**
- * Foydalanuvchining permissions'larini olish
- * @deprecated userHelper.getUserPermissions ishlatish kerak
- */
-async function getUserPermissions(userId) {
-    try {
-        const user = await db('users').where('id', userId).first();
-        if (!user) return [];
-        
-        // Permissions'ni olish - permission_key ishlatish kerak, permission_id emas
-        const rolePermissions = await db('role_permissions as rp')
-            .join('permissions as p', 'rp.permission_key', 'p.permission_key')
-            .where('rp.role_name', user.role)
-            .select('p.permission_key');
-        
-        const permissions = rolePermissions.map(rp => rp.permission_key);
-        
-        // User-specific permissions - user_permissions jadvalini ham tekshirish kerak
-        const hasUserPermissionsTable = await db.schema.hasTable('user_permissions');
-        if (hasUserPermissionsTable) {
-            // Additional permissions qo'shish
-            const userPermissions = await db('user_permissions as up')
-                .join('permissions as p', 'up.permission_key', 'p.permission_key')
-                .where('up.user_id', userId)
-                .where('up.type', 'additional')
-                .select('p.permission_key');
-            
-            userPermissions.forEach(up => {
-                if (!permissions.includes(up.permission_key)) {
-                    permissions.push(up.permission_key);
-                }
-            });
-            
-            // Restricted permissions'ni olib tashlash
-            const restrictedPermissions = await db('user_permissions as up')
-                .where('up.user_id', userId)
-                .where('up.type', 'restricted')
-                .select('up.permission_key');
-            
-            restrictedPermissions.forEach(rp => {
-                const index = permissions.indexOf(rp.permission_key);
-                if (index > -1) {
-                    permissions.splice(index, 1);
-                }
-            });
-        }
-        
-        return permissions;
-    } catch (error) {
-        log.error('getUserPermissions xatolik:', error);
-        return [];
-    }
-}
+// getUserPermissions funksiyasi utils/userPermissions.js dan import qilingan
 
 /**
  * Hisobotlar ro'yxatini ko'rsatish

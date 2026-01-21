@@ -5,7 +5,14 @@ require('dotenv').config(); // .env faylini yuklash (migration'lar uchun)
 const path = require('path');
 
 // Database type ni aniqlash - SQLite yoki PostgreSQL
-const useSqlite = process.env.DB_TYPE === 'sqlite' || (!process.env.POSTGRES_HOST && !process.env.DATABASE_URL);
+// Railway.com, Render.com, Heroku kabi platformalarda PostgreSQL majburiy
+const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
+const isRender = !!process.env.RENDER;
+const isHeroku = !!process.env.HEROKU_APP_NAME;
+const isCloudPlatform = isRailway || isRender || isHeroku;
+
+// Cloud platformalarda PostgreSQL majburiy, aks holda SQLite
+const useSqlite = !isCloudPlatform && (process.env.DB_TYPE === 'sqlite' || (!process.env.POSTGRES_HOST && !process.env.DATABASE_URL));
 
 if (useSqlite) {
   // SQLite konfiguratsiyasi (Development)

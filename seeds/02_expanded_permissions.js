@@ -444,5 +444,5 @@ exports.seed = async function(knex) {
       .merge(['description', 'category']);
   }
 
-  console.log(`✅ ${permissions.length} ta huquq qo'shildi/yangilandi`);
+  // Production'da log qilmaymiz (faqat error loglar)
 };

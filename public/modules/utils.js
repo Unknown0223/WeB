@@ -424,7 +424,7 @@ const isDevelopment = window.location.hostname === 'localhost' ||
 const getLogLevel = () => {
     const stored = localStorage.getItem('LOG_LEVEL');
     if (stored) return stored;
-    // Development'da ham faqat warn va error loglar (performance uchun)
+    // Production'da faqat error loglar (deploy uchun)
     return isDevelopment ? 'warn' : 'error';
 };
 
