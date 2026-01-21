@@ -16,7 +16,8 @@ const DEBT_APPROVAL_COMMANDS = [
     "✅ Tasdiqlangan so'rovlar",
     "🕓 Qaytgan so'rovlar",
     "✅ Tasdiqlash",
-    "💾 SET (Muddat uzaytirish)"
+    "💾 SET (Muddat uzaytirish)",
+    "🔄 Rolni o'zgartirish"
 ];
 
 /**

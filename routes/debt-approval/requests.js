@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx');
-const { db } = require('../../db.js');
+const { db, isPostgres } = require('../../db.js');
 const { createLogger } = require('../../utils/logger.js');
 const { isAuthenticated, hasPermission } = require('../../middleware/auth.js');
 const { startReminder, stopReminder } = require('../../utils/debtReminder.js');
@@ -280,17 +280,24 @@ router.get('/branch-status', isAuthenticated, hasPermission(['roles:manage', 'de
                 
                 if (latestRequest) {
                     const requestType = latestRequest.type; // 'SET' yoki 'NORMAL'
-                    const requestStatus = latestRequest.status;
+                    const requestId = latestRequest.id;
                     
                     // Kerakli tasdiqlovchilar sonini hisoblash
                     if (requestType === 'SET') {
                         // SET so'rovlar uchun: Leader kerak
                         totalRequiredApprovers = leaderIds.length;
                         
-                        // Status bo'yicha tasdiqlangan leaderlar sonini aniqlash
-                        // Agar status APPROVED_BY_LEADER yoki undan keyingi bo'lsa, leader tasdiqlagan
-                        if (totalRequiredApprovers > 0 && ['APPROVED_BY_LEADER', 'APPROVED_BY_CASHIER', 'APPROVED_BY_OPERATOR', 'APPROVED_BY_SUPERVISOR', 'FINAL_APPROVED', 'DEBT_FOUND'].includes(requestStatus)) {
-                            approvedApprovers = totalRequiredApprovers; // Leader tasdiqlagan
+                        // Haqiqiy tasdiqlangan leaderlar sonini olish (debt_request_approvals jadvalidan)
+                        if (totalRequiredApprovers > 0 && requestId) {
+                            const approvedLeaders = await db('debt_request_approvals')
+                                .where('request_id', requestId)
+                                .where('approval_type', 'leader')
+                                .where('status', 'approved')
+                                .whereIn('approver_id', leaderIds)
+                                .count('* as count')
+                                .first();
+                            
+                            approvedApprovers = approvedLeaders ? parseInt(approvedLeaders.count) : 0;
                         } else {
                             approvedApprovers = 0;
                         }
@@ -300,14 +307,27 @@ router.get('/branch-status', isAuthenticated, hasPermission(['roles:manage', 'de
                         const operatorCount = operatorIds.length;
                         totalRequiredApprovers = cashierCount + operatorCount;
                         
-                        // Status bo'yicha tasdiqlangan cashier va operatorlar sonini aniqlash
-                        if (totalRequiredApprovers > 0 && ['APPROVED_BY_CASHIER', 'APPROVED_BY_OPERATOR', 'APPROVED_BY_SUPERVISOR', 'FINAL_APPROVED', 'DEBT_FOUND'].includes(requestStatus)) {
-                            // Cashier tasdiqlagan
-                            approvedApprovers = cashierCount;
-                            // Operator ham tasdiqlagan bo'lsa
-                            if (['APPROVED_BY_OPERATOR', 'APPROVED_BY_SUPERVISOR', 'FINAL_APPROVED', 'DEBT_FOUND'].includes(requestStatus)) {
-                                approvedApprovers += operatorCount;
-                            }
+                        // Haqiqiy tasdiqlangan cashier va operatorlar sonini olish (debt_request_approvals jadvalidan)
+                        if (totalRequiredApprovers > 0 && requestId) {
+                            const approvedCashiers = await db('debt_request_approvals')
+                                .where('request_id', requestId)
+                                .where('approval_type', 'cashier')
+                                .where('status', 'approved')
+                                .whereIn('approver_id', cashierIds)
+                                .count('* as count')
+                                .first();
+                            
+                            const approvedOperators = await db('debt_request_approvals')
+                                .where('request_id', requestId)
+                                .where('approval_type', 'operator')
+                                .where('status', 'approved')
+                                .whereIn('approver_id', operatorIds)
+                                .count('* as count')
+                                .first();
+                            
+                            const cashierApproved = approvedCashiers ? parseInt(approvedCashiers.count) : 0;
+                            const operatorApproved = approvedOperators ? parseInt(approvedOperators.count) : 0;
+                            approvedApprovers = cashierApproved + operatorApproved;
                         } else {
                             approvedApprovers = 0;
                         }
@@ -370,7 +390,8 @@ router.get('/branch-status', isAuthenticated, hasPermission(['roles:manage', 'de
             }
             
             // Status filter bo'yicha filtrlash
-            if (statusFilter && statusFilter.trim() !== '' && statusFilter.trim() !== 'all') {
+            // Faqat filter tanlangan bo'lsa va 'all' bo'lmasa, filtrlash bajariladi
+            if (statusFilter && typeof statusFilter === 'string' && statusFilter.trim() !== '' && statusFilter.trim() !== 'all') {
                 const filterStatus = statusFilter.trim();
                 log.debug(`[BRANCH_STATUS] Filial ${branchName}: branchStatus=${branchStatus}, filterStatus=${filterStatus}`);
                 
@@ -441,16 +462,75 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
         const allSvrRows = [];
         
         for (const branch of branches) {
-            // Filial uchun SVRlarni olish (brend filteriga qarab)
+            // 1. Avval debt_svrs jadvalidan SVRlarni olish
             let svrsQuery = db('debt_svrs')
                 .where('branch_id', branch.id)
                 .select('id', 'name')
                 .orderBy('name');
             
-            const svrs = await svrsQuery;
+            const svrsFromTable = await svrsQuery;
+            
+            // 2. Jarayondagi so'rovlardan SVR ID'larni olish
+            // To'liq tasdiqlangan holatlar (ularni o'tkazib yuboramiz - ro'yxatda ko'rsatilmaydi)
+            const fullyApprovedStatuses = ['FINAL_APPROVED', 'DEBT_FOUND'];
+            
+            const requestsWithSvrs = await db('debt_requests')
+                .where('branch_id', branch.id)
+                .whereNotIn('status', fullyApprovedStatuses)
+                .whereNotNull('svr_id')
+                .select('svr_id')
+                .distinct('svr_id');
+            
+            const svrIdsFromRequests = new Set(requestsWithSvrs.map(r => r.svr_id));
+            const svrIdsFromTable = new Set(svrsFromTable.map(s => s.id));
+            
+            // 3. Faqat debt_requests da mavjud, lekin debt_svrs da yo'q bo'lgan SVR ID'larni topish
+            const missingSvrIds = [...svrIdsFromRequests].filter(id => !svrIdsFromTable.has(id));
+            
+            // 4. Yo'q bo'lgan SVR ID'lar uchun SVR ma'lumotlarini olish
+            const missingSvrs = [];
+            if (missingSvrIds.length > 0) {
+                // debt_svrs jadvalidan yana bir bor tekshirish (ehtimol parallel query natijasi)
+                const missingSvrsFromTable = await db('debt_svrs')
+                    .whereIn('id', missingSvrIds)
+                    .select('id', 'name');
+                
+                const foundSvrIds = new Set(missingSvrsFromTable.map(s => s.id));
+                
+                // Topilgan SVR'larni qo'shish (lekin bu holatda ular allaqachon svrsFromTable da bo'lishi kerak edi)
+                // Bu faqat parallel query natijasini tekshirish uchun
+                for (const svr of missingSvrsFromTable) {
+                    if (!svrIdsFromTable.has(svr.id)) {
+                        missingSvrs.push(svr);
+                    }
+                }
+                
+                // Topilmagan SVR'lar uchun faqat ID ni ishlatamiz
+                const notFoundSvrIds = missingSvrIds.filter(id => !foundSvrIds.has(id));
+                for (const svrId of notFoundSvrIds) {
+                    // debt_requests jadvalidan SVR nomini olish mumkin emas, chunki u yerda faqat svr_id bor
+                    // Shuning uchun, faqat ID ni ishlatamiz yoki "Noma'lum SVR" deb ko'rsatamiz
+                    missingSvrs.push({
+                        id: svrId,
+                        name: `Noma'lum SVR (ID: ${svrId})`
+                    });
+                }
+            }
+            
+            // 5. Barcha SVR'larni birlashtirish (dublikatlarni olib tashlash)
+            const allSvrsMap = new Map();
+            for (const svr of svrsFromTable) {
+                allSvrsMap.set(svr.id, svr);
+            }
+            for (const svr of missingSvrs) {
+                if (!allSvrsMap.has(svr.id)) {
+                    allSvrsMap.set(svr.id, svr);
+                }
+            }
+            const allSvrs = Array.from(allSvrsMap.values());
             
             // Agar SVRlar bo'lmasa, bitta qator yaratamiz (SVR nomi "SVR topilmadi")
-            if (svrs.length === 0) {
+            if (allSvrs.length === 0) {
                 const branchData = await processBranchData(branch, null);
                 if (branchData) {
                     allSvrRows.push(branchData);
@@ -459,7 +539,8 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
             }
             
             // Har bir SVR uchun alohida qator yaratish
-            for (const svr of svrs) {
+            // To'liq tasdiqlangan so'rovlar ro'yxatda ko'rsatilmaydi
+            for (const svr of allSvrs) {
                 // SVR uchun eng so'nggi so'rovni olish va to'liq tasdiqlanganligini tekshirish
                 const latestRequest = await db('debt_requests')
                     .where('svr_id', svr.id)
@@ -469,6 +550,7 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                 // To'liq tasdiqlangan holatlar
                 const fullyApprovedStatuses = ['FINAL_APPROVED', 'DEBT_FOUND'];
                 
+                // Agar eng so'nggi so'rov to'liq tasdiqlangan bo'lsa, ro'yxatda ko'rsatilmaydi
                 if (latestRequest && fullyApprovedStatuses.includes(latestRequest.status)) {
                     continue; // To'liq tasdiqlangan SVRlarni o'tkazib yuborish
                 }
@@ -476,51 +558,6 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                 // SVR uchun filial ma'lumotlarini olish
                 const branchData = await processBranchData(branch, svr);
                 if (branchData) {
-                    // To'liq tasdiqlangan SVRlarni tekshirish
-                    // Agar barcha rollar "approved" bo'lsa va hech biri "pending" bo'lmasa, bu SVR to'liq tasdiqlangan
-                    const roleStatuses = branchData.roleStatuses || {};
-                    
-                    // Barcha rollar uchun statuslarni tekshirish
-                    const hasPending = 
-                        roleStatuses.manager === 'pending' || 
-                        roleStatuses.leader === 'pending' || 
-                        roleStatuses.cashier === 'pending' || 
-                        roleStatuses.operator === 'pending' || 
-                        roleStatuses.supervisor === 'pending';
-                    
-                    // Agar hech qanday rol "pending" bo'lmasa va kamida bitta rol "approved" bo'lsa
-                    // va barcha rollar "approved" yoki "none" bo'lsa, bu SVR to'liq tasdiqlangan
-                    const hasAtLeastOneApproved = 
-                        roleStatuses.manager === 'approved' || 
-                        roleStatuses.leader === 'approved' || 
-                        roleStatuses.cashier === 'approved' || 
-                        roleStatuses.operator === 'approved' || 
-                        roleStatuses.supervisor === 'approved';
-                    
-                    const allRolesNotPending = 
-                        roleStatuses.manager !== 'pending' && 
-                        roleStatuses.leader !== 'pending' && 
-                        roleStatuses.cashier !== 'pending' && 
-                        roleStatuses.operator !== 'pending' && 
-                        roleStatuses.supervisor !== 'pending';
-                    
-                    // Agar hech qanday rol "pending" bo'lmasa va kamida bitta rol "approved" bo'lsa
-                    // va barcha rollar "approved" yoki "none" bo'lsa, SVRni o'tkazib yuborish
-                    if (!hasPending && hasAtLeastOneApproved && allRolesNotPending) {
-                        // Barcha rollar "approved" yoki "none" bo'lishi kerak
-                        const allRolesApprovedOrNone = 
-                            (roleStatuses.manager === 'approved' || roleStatuses.manager === 'none') &&
-                            (roleStatuses.leader === 'approved' || roleStatuses.leader === 'none') &&
-                            (roleStatuses.cashier === 'approved' || roleStatuses.cashier === 'none') &&
-                            (roleStatuses.operator === 'approved' || roleStatuses.operator === 'none') &&
-                            (roleStatuses.supervisor === 'approved' || roleStatuses.supervisor === 'none');
-                        
-                        if (allRolesApprovedOrNone) {
-                            log.debug(`[BRANCH_APPROVERS_STATS] SVR ${svr.name} to'liq tasdiqlangan, o'tkazib yuborildi`);
-                            continue; // To'liq tasdiqlangan SVRlarni o'tkazib yuborish
-                        }
-                    }
-                    
                     allSvrRows.push(branchData);
                 }
             }
@@ -601,16 +638,18 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                 let userRequests = [];
                 
                 if (role === 'manager' || role === 'menejer') {
-                    // Menejer yaratgan so'rovlar - barcha statuslar
+                    // ✅ Tuzatish: Menejer yaratgan so'rovlar - faqat NORMAL so'rovlar (SET so'rovlarni istisno qilish)
+                    // SET so'rovlar uchun faqat Rahbar ustunida "Jarayondagi" ko'rsatilishi kerak
                     let query = db('debt_requests')
                         .where('branch_id', currentBranchId)
-                        .where('created_by', userId);
+                        .where('created_by', userId)
+                        .where('type', '!=', 'SET'); // SET so'rovlarni istisno qilish
                     
                     if (currentSvrId) {
                         query = query.where('svr_id', currentSvrId);
                     }
                     
-                    userRequests = await query.select('status', 'current_approver_type', 'current_approver_id');
+                    userRequests = await query.select('status', 'current_approver_type', 'current_approver_id', 'type');
                 } else if (role === 'leader' || role === 'rahbar') {
                     // Rahbar uchun SET so'rovlar
                     let query = db('debt_requests')
@@ -634,26 +673,47 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                     if (cashierBranches.length > 0) {
                         let query = db('debt_requests')
                             .where('branch_id', currentBranchId)
-                            .where('type', '!=', 'SET') // SET so'rovlar emas
                             .where(function() {
-                                this.where('status', 'PENDING_APPROVAL')
-                                    .orWhere('status', 'APPROVED_BY_LEADER')
-                                    .orWhere('status', 'APPROVED_BY_CASHIER')
-                                    .orWhere('status', 'APPROVED_BY_OPERATOR')
-                                    .orWhere('status', 'APPROVED_BY_SUPERVISOR')
-                                    .orWhere('status', 'FINAL_APPROVED')
-                                    .orWhere('status', 'DEBT_FOUND')
-                                    .orWhere(function() {
-                                        this.where('current_approver_type', 'cashier')
-                                            .where('current_approver_id', userId);
-                                    });
+                                // NORMAL so'rovlar uchun
+                                this.where(function() {
+                                    this.where('type', '!=', 'SET')
+                                        .where(function() {
+                                            this.where('status', 'PENDING_APPROVAL')
+                                                .orWhere('status', 'APPROVED_BY_LEADER')
+                                                .orWhere('status', 'APPROVED_BY_CASHIER')
+                                                .orWhere('status', 'APPROVED_BY_OPERATOR')
+                                                .orWhere('status', 'APPROVED_BY_SUPERVISOR')
+                                                .orWhere('status', 'FINAL_APPROVED')
+                                                .orWhere('status', 'DEBT_FOUND')
+                                                .orWhere(function() {
+                                                    this.where('current_approver_type', 'cashier')
+                                                        .where('current_approver_id', userId);
+                                                });
+                                        });
+                                })
+                                // SET so'rovlar uchun (APPROVED_BY_LEADER dan keyin)
+                                .orWhere(function() {
+                                    this.where('type', 'SET')
+                                        .where(function() {
+                                            this.where('status', 'APPROVED_BY_LEADER')
+                                                .orWhere('status', 'APPROVED_BY_CASHIER')
+                                                .orWhere('status', 'APPROVED_BY_OPERATOR')
+                                                .orWhere('status', 'APPROVED_BY_SUPERVISOR')
+                                                .orWhere('status', 'FINAL_APPROVED')
+                                                .orWhere('status', 'DEBT_FOUND')
+                                                .orWhere(function() {
+                                                    this.where('current_approver_type', 'cashier')
+                                                        .where('current_approver_id', userId);
+                                                });
+                                        });
+                                });
                             });
                         
                         if (currentSvrId) {
                             query = query.where('svr_id', currentSvrId);
                         }
                         
-                        userRequests = await query.select('status', 'current_approver_id', 'current_approver_type');
+                        userRequests = await query.select('status', 'current_approver_id', 'current_approver_type', 'type');
                     }
                 } else if (role === 'operator') {
                     // Operator uchun so'rovlar - faqat bu operatorga biriktirilgan so'rovlar
@@ -744,28 +804,14 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                     (req.current_approver_type && req.current_approver_id === userId)
                 );
                 
-                // Loglar qo'shish
-                log.debug(`[BRANCH_APPROVERS_STATS] getApproverStatus: userId=${userId}, role=${role}, svrId=${currentSvrId || 'null'}`);
-                log.debug(`[BRANCH_APPROVERS_STATS] So'rovlar soni: ${userRequests.length}`);
-                log.debug(`[BRANCH_APPROVERS_STATS] So'rovlar statuslari:`, userRequests.map(r => r.status));
-                log.debug(`[BRANCH_APPROVERS_STATS] Role approved statuses:`, roleApprovedStatuses);
-                log.debug(`[BRANCH_APPROVERS_STATS] allApproved: ${allApproved}, hasApproved: ${hasApproved}, hasPending: ${hasPending}`);
-                
                 let finalStatus = 'none';
                 if (allApproved) {
                     finalStatus = 'approved'; // Barchasi to'liq tasdiqlangan
-                    log.debug(`[BRANCH_APPROVERS_STATS] ✅ Barchasi tasdiqlangan -> approved`);
                 } else if (hasApproved) {
                     finalStatus = 'approved'; // Ba'zilari tasdiqlangan
-                    log.debug(`[BRANCH_APPROVERS_STATS] ✅ Ba'zilari tasdiqlangan -> approved`);
                 } else if (hasPending) {
                     finalStatus = 'pending'; // Jarayondagi
-                    log.debug(`[BRANCH_APPROVERS_STATS] ⏳ Jarayondagi -> pending`);
-                } else {
-                    log.debug(`[BRANCH_APPROVERS_STATS] ❌ So'rov yuborilmagan -> none`);
                 }
-                
-                log.debug(`[BRANCH_APPROVERS_STATS] Yakuniy status: ${finalStatus}`);
                 
                 return finalStatus;
             };
@@ -885,28 +931,32 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                 return 'none';
             };
             
-            // Menejer statusi - faqat menejer yaratgan so'rovlar
+            // ✅ Tuzatish: Menejer statusi - faqat menejer yaratgan NORMAL so'rovlar
+            // SET so'rovlar uchun faqat Rahbar ustunida "Jarayondagi" ko'rsatilishi kerak
             if (approvers.manager.length > 0) {
                 const managerStatuses = approvers.manager.map(m => m.status);
                 const approvedCount = managerStatuses.filter(s => s === 'approved').length;
                 const pendingCount = managerStatuses.filter(s => s === 'pending').length;
                 roleStatuses.manager = determineStatus(approvedCount, pendingCount, managerStatuses.length);
             } else if (allBranchRequests.length > 0) {
-                // Agar menejer topilmasa, lekin so'rovlar bo'lsa, menejer so'rov yaratgan
-                const managerCreatedRequests = allBranchRequests;
-                const approvedCount = managerCreatedRequests.filter(r => 
-                    r.status === 'APPROVED_BY_LEADER' ||
-                    r.status === 'APPROVED_BY_CASHIER' ||
-                    r.status === 'APPROVED_BY_OPERATOR' ||
-                    r.status === 'APPROVED_BY_SUPERVISOR' ||
-                    r.status === 'FINAL_APPROVED' ||
-                    r.status === 'DEBT_FOUND'
-                ).length;
-                const pendingCount = managerCreatedRequests.filter(r => 
-                    r.status.includes('PENDING') ||
-                    r.status === 'SET_PENDING'
-                ).length;
-                roleStatuses.manager = determineStatus(approvedCount, pendingCount, managerCreatedRequests.length);
+                // ✅ Tuzatish: Faqat NORMAL so'rovlarni tekshirish (SET so'rovlarni istisno qilish)
+                const normalRequests = allBranchRequests.filter(r => r.type !== 'SET');
+                
+                if (normalRequests.length > 0) {
+                    // Agar menejer topilmasa, lekin NORMAL so'rovlar bo'lsa, menejer so'rov yaratgan
+                    const approvedCount = normalRequests.filter(r => 
+                        r.status === 'APPROVED_BY_LEADER' ||
+                        r.status === 'APPROVED_BY_CASHIER' ||
+                        r.status === 'APPROVED_BY_OPERATOR' ||
+                        r.status === 'APPROVED_BY_SUPERVISOR' ||
+                        r.status === 'FINAL_APPROVED' ||
+                        r.status === 'DEBT_FOUND'
+                    ).length;
+                    const pendingCount = normalRequests.filter(r => 
+                        r.status.includes('PENDING') && r.status !== 'SET_PENDING' // SET_PENDING ni istisno qilish
+                    ).length;
+                    roleStatuses.manager = determineStatus(approvedCount, pendingCount, normalRequests.length);
+                }
             }
             
             // Rahbar statusi - faqat SET so'rovlar uchun
@@ -930,19 +980,30 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                 roleStatuses.leader = determineStatus(approvedCount, pendingCount, setRequests.length);
             }
             
-            // Kassir statusi - faqat kassir tasdiqlashi kerak bo'lgan so'rovlar
-            const cashierRequests = allBranchRequests.filter(r => 
-                r.type !== 'SET' && (
-                    r.status === 'PENDING_APPROVAL' || 
-                    r.status === 'APPROVED_BY_LEADER' ||
-                    r.status === 'APPROVED_BY_CASHIER' ||
-                    r.status === 'APPROVED_BY_OPERATOR' ||
-                    r.status === 'APPROVED_BY_SUPERVISOR' ||
-                    r.status === 'FINAL_APPROVED' ||
-                    r.status === 'DEBT_FOUND' ||
-                    (r.current_approver_type === 'cashier')
-                )
-            );
+            // Kassir statusi - kassir tasdiqlashi kerak bo'lgan so'rovlar
+            // SET so'rovlar uchun: APPROVED_BY_LEADER dan keyin kassirga yuboriladi
+            // NORMAL so'rovlar uchun: PENDING_APPROVAL dan boshlanadi
+            const cashierRequests = allBranchRequests.filter(r => {
+                // SET so'rovlar uchun
+                if (r.type === 'SET') {
+                    return r.status === 'APPROVED_BY_LEADER' ||
+                           r.status === 'APPROVED_BY_CASHIER' ||
+                           r.status === 'APPROVED_BY_OPERATOR' ||
+                           r.status === 'APPROVED_BY_SUPERVISOR' ||
+                           r.status === 'FINAL_APPROVED' ||
+                           r.status === 'DEBT_FOUND' ||
+                           (r.current_approver_type === 'cashier');
+                }
+                // NORMAL so'rovlar uchun
+                return r.status === 'PENDING_APPROVAL' || 
+                       r.status === 'APPROVED_BY_LEADER' ||
+                       r.status === 'APPROVED_BY_CASHIER' ||
+                       r.status === 'APPROVED_BY_OPERATOR' ||
+                       r.status === 'APPROVED_BY_SUPERVISOR' ||
+                       r.status === 'FINAL_APPROVED' ||
+                       r.status === 'DEBT_FOUND' ||
+                       (r.current_approver_type === 'cashier');
+            });
             
             if (cashierRequests.length > 0) {
                 const approvedCount = cashierRequests.filter(r => 
@@ -987,6 +1048,15 @@ router.get('/branch-approvers-stats', isAuthenticated, hasPermission('roles:mana
                     r.current_approver_type === 'operator'
                 ).length;
                 roleStatuses.operator = determineStatus(approvedCount, pendingCount, operatorRequests.length);
+                
+                // Agar operator "Jarayondagi" bo'lsa, kassir ham tasdiqlangan bo'lishi kerak
+                // Chunki operator faqat kassir tasdiqlagandan keyin ishlaydi
+                if (pendingCount > 0) {
+                    // Operator "Jarayondagi" bo'lsa, kassir ham tasdiqlangan bo'lishi kerak
+                    if (roleStatuses.cashier === 'none' || !roleStatuses.cashier) {
+                        roleStatuses.cashier = 'approved';
+                    }
+                }
             } else if (approvers.operator.length > 0) {
                 const operatorStatuses = approvers.operator.map(o => o.status);
                 const approvedCount = operatorStatuses.filter(s => s === 'approved').length;
@@ -1558,11 +1628,24 @@ router.post('/', isAuthenticated, upload.single('excel'), async (req, res) => {
                 // Excel faylni parse qilish
                 const parsed = await parseExcelFile(excelFilePath, requestData);
                 
+                // Excel faylni o'chirish (ma'lumotlar o'qildi, endi fayl kerak emas)
+                try {
+                    if (fs.existsSync(excelFilePath)) {
+                        fs.unlinkSync(excelFilePath);
+                        log.info(`[WEB_REQUEST] Excel fayl o'chirildi: filePath=${excelFilePath}`);
+                    }
+                } catch (unlinkError) {
+                    log.warn(`[WEB_REQUEST] Excel faylni o'chirishda xatolik (keraksiz): filePath=${excelFilePath}, error=${unlinkError.message}`);
+                }
+                
                 // Excel ma'lumotlarini JSON formatida saqlash
                 excelDataJson = JSON.stringify(parsed.filteredData);
                 excelHeadersJson = JSON.stringify(parsed.headers);
                 excelColumnsJson = JSON.stringify(parsed.columns);
                 excelTotal = parsed.total;
+                
+                // Fayl yo'li null (fayl saqlanmaydi)
+                excelFilePath = null;
                 
                 // Qiymat tekshiruvi (0 dan farq qilishi kerak, manfiy bo'lishi mumkin)
                 log.info(`[WEB_REQUEST] 💰 Qiymat tekshiruvi: excelTotal=${excelTotal}, type=${typeof excelTotal}`);
@@ -1570,14 +1653,6 @@ router.post('/', isAuthenticated, upload.single('excel'), async (req, res) => {
                 
                 if (!isValidTotal) {
                     log.warn(`[WEB_REQUEST] ❌ SET so'rov uchun fayldagi qiymat 0 yoki noto'g'ri: userId=${creatorId}, excelTotal=${excelTotal}`);
-                    // Faylni o'chirish
-                    if (excelFilePath && fs.existsSync(excelFilePath)) {
-                        try {
-                            fs.unlinkSync(excelFilePath);
-                        } catch (unlinkError) {
-                            log.warn(`Faylni o'chirishda xatolik: ${unlinkError.message}`);
-                        }
-                    }
                     return res.status(400).json({ 
                         error: 'SET so\'rov yaratish uchun fayldagi qiymat 0 bo\'lmasligi kerak',
                         message: `SET (Muddat uzaytirish) so'rovi yaratish uchun Excel fayldagi jami qiymat 0 dan farq qilishi kerak. Hozirgi qiymat: ${excelTotal || 0}`
@@ -1599,23 +1674,45 @@ router.post('/', isAuthenticated, upload.single('excel'), async (req, res) => {
             }
         }
         
-        const [id] = await db('debt_requests').insert({
-            request_uid: requestUID,
-            type,
-            brand_id,
-            branch_id: branch_id || null,
-            svr_id: svr_id || null,
-            status,
-            created_by: creatorId,
-            extra_info: extra_info || null,
-            excel_file_path: excelFilePath,
-            excel_data: excelDataJson,
-            excel_headers: excelHeadersJson,
-            excel_columns: excelColumnsJson,
-            excel_total: excelTotal,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-        });
+        let id;
+        if (isPostgres) {
+            const [result] = await db('debt_requests').insert({
+                request_uid: requestUID,
+                type,
+                brand_id,
+                branch_id: branch_id || null,
+                svr_id: svr_id || null,
+                status,
+                created_by: creatorId,
+                extra_info: extra_info || null,
+                excel_file_path: null, // Excel fayl saqlanmaydi, faqat ma'lumotlar database'ga saqlanadi
+                excel_data: excelDataJson,
+                excel_headers: excelHeadersJson,
+                excel_columns: excelColumnsJson,
+                excel_total: excelTotal,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            }).returning('id');
+            id = result.id;
+        } else {
+            [id] = await db('debt_requests').insert({
+                request_uid: requestUID,
+                type,
+                brand_id,
+                branch_id: branch_id || null,
+                svr_id: svr_id || null,
+                status,
+                created_by: creatorId,
+                extra_info: extra_info || null,
+                excel_file_path: null, // Excel fayl saqlanmaydi, faqat ma'lumotlar database'ga saqlanadi
+                excel_data: excelDataJson,
+                excel_headers: excelHeadersJson,
+                excel_columns: excelColumnsJson,
+                excel_total: excelTotal,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            });
+        }
         
         // Log yozish
         await db('debt_request_logs').insert({

@@ -3,7 +3,7 @@
 
 const { createLogger } = require('../../../utils/logger.js');
 const { db } = require('../../../db.js');
-const { formatFinalGroupMessage } = require('../../../utils/messageTemplates.js');
+const { formatFinalGroupMessage, formatRequestMessageWithApprovals } = require('../../../utils/messageTemplates.js');
 const { getPreviousMonthName } = require('../../../utils/dateHelper.js');
 const { getBot } = require('../../../utils/bot.js');
 
@@ -29,6 +29,14 @@ async function sendToFinalGroup(requestId) {
         
         if (!request) {
             log.warn(`Request not found: requestId=${requestId}`);
+            return;
+        }
+        
+        // Agar allaqachon FINAL_APPROVED bo'lsa, xabarni yangilash (ikkinchi marta yubormaslik)
+        if (request.status === 'FINAL_APPROVED' && request.final_message_id) {
+            log.info(`[FINAL_GROUP] So'rov allaqachon FINAL_APPROVED, xabarni yangilash: requestId=${requestId}, finalMessageId=${request.final_message_id}`);
+            const { updateFinalGroupMessage } = require('../../../utils/messageUpdater.js');
+            await updateFinalGroupMessage(request);
             return;
         }
         
@@ -115,6 +123,7 @@ async function sendToFinalGroup(requestId) {
                 log.info(`[FINAL_GROUP] Telegraph sahifa yaratish boshlanmoqda: requestId=${requestId}, requestUID=${request.request_uid}`);
                 const { createDebtDataPage } = require('../../../utils/telegraph.js');
                 telegraphUrl = await createDebtDataPage({
+                    request_id: requestId, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
                     request_uid: request.request_uid,
                     brand_name: request.brand_name,
                     filial_name: request.filial_name,
@@ -128,29 +137,23 @@ async function sendToFinalGroup(requestId) {
                 });
                 if (telegraphUrl) {
                     log.info(`[FINAL_GROUP] ✅ Telegraph sahifa muvaffaqiyatli yaratildi: requestId=${requestId}, URL=${telegraphUrl}`);
-                } else {
-                    log.warn(`[FINAL_GROUP] ⚠️ Telegraph sahifa yaratilmadi (URL null): requestId=${requestId}`);
                 }
+                // Agar sahifa yaratilmagan bo'lsa, log qilmaymiz (ixtiyoriy xizmat)
             } catch (telegraphError) {
-                log.error(`[FINAL_GROUP] Telegraph sahifa yaratishda xatolik: requestId=${requestId}`, telegraphError);
-                // Telegraph xatosi so'rovni to'xtatmaydi
+                // Telegraph xatolari silent qilinadi (ixtiyoriy xizmat)
+                log.debug(`[FINAL_GROUP] Telegraph sahifa yaratishda xatolik (ixtiyoriy xizmat): requestId=${requestId}`);
             }
         }
         
-        const message = formatFinalGroupMessage({
-            request_uid: request.request_uid,
-            brand_name: request.brand_name,
-            filial_name: request.filial_name,
-            svr_name: request.svr_name,
-            month_name: month_name,
-            extra_info: request.extra_info,
-            approvals: approvals,
-            total_amount: total_amount,
-            excel_data: excel_data,
-            excel_headers: excel_headers,
-            excel_columns: excel_columns,
-            telegraph_url: telegraphUrl // Telegraph URL'ni message'ga qo'shish
-        });
+        // Request object'ga telegraphUrl va excel ma'lumotlarini qo'shish
+        request.telegraph_url = telegraphUrl;
+        request.excel_data = excel_data;
+        request.excel_headers = excel_headers;
+        request.excel_columns = excel_columns;
+        
+        // formatRequestMessageWithApprovals ishlatish - original xabar + tasdiqlashlar
+        // ✅ MUHIM: Final guruh uchun 'final' roli bilan chaqirish (vaqt hisoblash uchun va link ko'rsatish uchun)
+        const message = await formatRequestMessageWithApprovals(request, db, 'final');
         
         // Xabarni yuborish
         const bot = getBot();

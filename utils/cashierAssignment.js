@@ -29,6 +29,7 @@ async function assignCashierToRequest(branchId, requestId) {
             .where('debt_cashiers.branch_id', branchId)
             .where('debt_cashiers.is_active', true)
             .where('users.status', 'active')
+            .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
             .select(
                 'debt_cashiers.user_id',
                 'debt_cashiers.id as cashier_id',
@@ -54,6 +55,7 @@ async function assignCashierToRequest(branchId, requestId) {
                     .whereIn('debt_cashiers.branch_id', branchIdsWithSameName)
                     .where('debt_cashiers.is_active', true)
                     .where('users.status', 'active')
+                    .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
                     .select(
                         'debt_cashiers.user_id',
                         'debt_cashiers.id as cashier_id',
@@ -90,6 +92,7 @@ async function assignCashierToRequest(branchId, requestId) {
             .where('debt_user_branches.branch_id', branchId)
             .whereIn('users.role', ['kassir', 'cashier'])
             .where('users.status', 'active')
+            .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
             .select(
                 'debt_user_branches.user_id',
                 'users.telegram_chat_id',
@@ -113,6 +116,7 @@ async function assignCashierToRequest(branchId, requestId) {
                     .whereIn('debt_user_branches.branch_id', branchIdsWithSameName)
                     .whereIn('users.role', ['kassir', 'cashier'])
                     .where('users.status', 'active')
+                    .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
                     .select(
                         'debt_user_branches.user_id',
                         'users.telegram_chat_id',
@@ -151,6 +155,7 @@ async function assignCashierToRequest(branchId, requestId) {
                     .orWhere('debt_user_tasks.task_type', 'debt:approve_cashier');
             })
             .where('users.status', 'active')
+            .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
             .where(function() {
                 // Agar branch_id null bo'lsa, barcha filiallar uchun, aks holda faqat shu filial
                 this.whereNull('debt_user_tasks.branch_id')
@@ -210,7 +215,7 @@ async function assignCashierToRequest(branchId, requestId) {
         
         // Birlashtirish (dublikatlarni olib tashlash)
         const cashiersMap = new Map();
-        [...cashiersFromTable, ...cashiersFromBindings].forEach(c => {
+        [...cashiersFromTable, ...cashiersFromBindings, ...cashiersFromTasks].forEach(c => {
             if (!cashiersMap.has(c.user_id)) {
                 cashiersMap.set(c.user_id, {
                     user_id: c.user_id,
@@ -420,6 +425,7 @@ async function assignOperatorToRequest(brandId, requestId) {
             .where('debt_operators.brand_id', brandId)
             .where('debt_operators.is_active', true)
             .where('users.status', 'active')
+            .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
             .select(
                 'debt_operators.user_id',
                 'debt_operators.id as operator_id',
@@ -445,6 +451,7 @@ async function assignOperatorToRequest(brandId, requestId) {
             .where('debt_user_brands.brand_id', brandId)
             .whereIn('users.role', ['operator'])
             .where('users.status', 'active')
+            .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
             .select(
                 'debt_user_brands.user_id',
                 'users.telegram_chat_id',
@@ -472,6 +479,7 @@ async function assignOperatorToRequest(brandId, requestId) {
                     .orWhere('debt_user_tasks.task_type', 'debt:approve_operator');
             })
             .where('users.status', 'active')
+            .whereNotNull('users.telegram_chat_id') // Faqat telegram_chat_id bor foydalanuvchilar
             .select(
                 'debt_user_tasks.user_id',
                 'users.telegram_chat_id',

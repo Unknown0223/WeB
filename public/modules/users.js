@@ -2078,6 +2078,34 @@ export function toggleLocationVisibilityForUserForm() {
 // Event listener qo'shilganligini tekshirish uchun flag
 let approvalRoleSelectListenerAdded = false;
 
+// localStorage'dan user form sozlamalarini yuklash
+function loadUserSettingsFromLocalStorage() {
+    try {
+        const savedSettings = localStorage.getItem('userFormDefaultSettings');
+        if (savedSettings) {
+            const settings = JSON.parse(savedSettings);
+            // Har doim localStorage'dan yuklash (bo'sh bo'lsa ham)
+            if (DOM.userRequiresLocations) {
+                DOM.userRequiresLocations.value = settings.requires_locations || '';
+                debugLog('User form sozlamalari localStorage\'dan yuklandi (Filiallar):', settings.requires_locations || 'bo\'sh');
+            }
+            if (DOM.userRequiresBrands) {
+                DOM.userRequiresBrands.value = settings.requires_brands || '';
+                debugLog('User form sozlamalari localStorage\'dan yuklandi (Brendlar):', settings.requires_brands || 'bo\'sh');
+            }
+        } else {
+            // localStorage'da sozlamalar yo'q bo'lsa, default qiymatlar
+            if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
+            if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
+        }
+    } catch (error) {
+        errorLog('localStorage\'dan yuklashda xatolik:', error);
+        // Default qiymatlar
+        if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
+        if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
+    }
+}
+
 export async function toggleLocationVisibilityForApprovalForm() {
     const role = DOM.approvalRoleSelect?.value;
     
@@ -2579,9 +2607,8 @@ async function executeOpenUserModalForAdd(modalInstance) {
     // Event listener'larni qo'shish
     setupLocationBrandSelectors();
     
-    // Sozlamalarni tozalash
-    if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
-    if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
+    // Sozlamalarni localStorage'dan yuklash (yangi foydalanuvchi uchun)
+    loadUserSettingsFromLocalStorage();
     
     // Rol tanlanganda sozlamalar bo'limini ko'rsatish
     if (DOM.userRoleSelect) {
@@ -2794,26 +2821,36 @@ async function executeOpenUserModalForEdit(userId, modalInstance) {
         DOM.deviceLimitInput.value = user.device_limit;
         
         // User-specific sozlamalarni yuklash
+        let settingsLoaded = false;
         try {
             const settingsRes = await safeFetch(`/api/users/${userId}/settings`);
             if (settingsRes && settingsRes.ok) {
                 const settings = await settingsRes.json();
-                if (DOM.userRequiresLocations) {
-                    DOM.userRequiresLocations.value = settings.requires_locations === null ? 'null' : 
-                        settings.requires_locations === true ? 'true' : 
-                        settings.requires_locations === false ? 'false' : '';
+                // Agar database'da sozlamalar mavjud bo'lsa, ularni ishlatish
+                if (settings.requires_locations !== null && settings.requires_locations !== undefined) {
+                    if (DOM.userRequiresLocations) {
+                        DOM.userRequiresLocations.value = settings.requires_locations === null ? 'null' : 
+                            settings.requires_locations === true ? 'true' : 
+                            settings.requires_locations === false ? 'false' : '';
+                    }
+                    settingsLoaded = true;
                 }
-                if (DOM.userRequiresBrands) {
-                    DOM.userRequiresBrands.value = settings.requires_brands === null ? 'null' : 
-                        settings.requires_brands === true ? 'true' : 
-                        settings.requires_brands === false ? 'false' : '';
+                if (settings.requires_brands !== null && settings.requires_brands !== undefined) {
+                    if (DOM.userRequiresBrands) {
+                        DOM.userRequiresBrands.value = settings.requires_brands === null ? 'null' : 
+                            settings.requires_brands === true ? 'true' : 
+                            settings.requires_brands === false ? 'false' : '';
+                    }
+                    settingsLoaded = true;
                 }
             }
         } catch (error) {
             errorLog('User settings yuklanmadi:', error);
-            // Default qiymatlar
-            if (DOM.userRequiresLocations) DOM.userRequiresLocations.value = '';
-            if (DOM.userRequiresBrands) DOM.userRequiresBrands.value = '';
+        }
+        
+        // Agar database'dan sozlamalar yuklanmagan bo'lsa, localStorage'dan yuklash
+        if (!settingsLoaded) {
+            loadUserSettingsFromLocalStorage();
         }
         
         // Rol tanlanganda sozlamalar bo'limini ko'rsatish
@@ -3660,9 +3697,22 @@ export async function handleUserFormSubmit(e) {
     }
     
     // User-specific sozlamalarni qo'shish
-    const requiresLocations = DOM.userRequiresLocations?.value;
-    const requiresBrands = DOM.userRequiresBrands?.value;
+    const requiresLocations = DOM.userRequiresLocations?.value || '';
+    const requiresBrands = DOM.userRequiresBrands?.value || '';
     
+    // localStorage'ga saqlash (har doim, keyingi safar uchun)
+    try {
+        const savedSettings = {
+            requires_locations: requiresLocations,
+            requires_brands: requiresBrands
+        };
+        localStorage.setItem('userFormDefaultSettings', JSON.stringify(savedSettings));
+        debugLog('User form sozlamalari localStorage\'ga saqlandi:', savedSettings);
+    } catch (error) {
+        errorLog('localStorage\'ga saqlashda xatolik:', error);
+    }
+    
+    // API'ga yuborish uchun user_settings
     if (requiresLocations || requiresBrands) {
         data.user_settings = {
             requires_locations: requiresLocations === 'true' ? true : 
@@ -6806,24 +6856,27 @@ function formatRelativeTime(dateStr) {
 // Format date (sana) - xavfsiz formatlash
 function formatDate(timestamp) {
     if (!timestamp) {
-        console.log('⚠️ [formatDate] Timestamp yo\'q:', timestamp);
         return 'Noma\'lum';
     }
     
     try {
         let date;
         if (typeof timestamp === 'string') {
-            // SQLite formatini ISO formatiga o'tkazish
-            // "2025-12-10 14:54:43" -> "2025-12-10T14:54:43Z"
-            const isoString = timestamp.replace(' ', 'T');
-            date = new Date(isoString + 'Z');
+            // Agar allaqachon ISO formatida bo'lsa (T yoki Z bor), to'g'ridan-to'g'ri parse qilish
+            if (timestamp.includes('T') || timestamp.endsWith('Z')) {
+                date = new Date(timestamp);
+            } else {
+                // SQLite formatini ISO formatiga o'tkazish
+                // "2025-12-10 14:54:43" -> "2025-12-10T14:54:43Z"
+                const isoString = timestamp.replace(' ', 'T');
+                date = new Date(isoString + 'Z');
+            }
         } else {
             date = new Date(timestamp);
         }
         
         // Invalid Date tekshiruvi
         if (isNaN(date.getTime())) {
-            console.log('⚠️ [formatDate] Invalid Date:', timestamp);
             return 'Noma\'lum';
         }
         
@@ -6838,55 +6891,82 @@ function formatDate(timestamp) {
         const formatted = formatter.format(date);
         return formatted;
     } catch (error) {
-        console.error('❌ [formatDate] Date formatlash xatolik:', error, 'Timestamp:', timestamp);
         return 'Noma\'lum';
     }
 }
 
 // Format date and time (aniq vaqt) - Toshkent vaqti (+5) bilan hisoblanadi
 function formatDateTime(timestamp) {
-    // Timestamp'ni to'g'ri parse qilish
-    // Agar timestamp string formatida bo'lsa (masalan: "2025-12-07 09:49:37")
-    // uni ISO formatiga o'tkazish kerak
-    let date;
-    
-    if (typeof timestamp === 'string') {
-        // SQLite formatini ISO formatiga o'tkazish
-        // "2025-12-07 09:49:37" -> "2025-12-07T09:49:37"
-        const isoString = timestamp.replace(' ', 'T');
-        // Agar timezone yo'q bo'lsa, UTC sifatida qabul qilamiz
-        // Keyin Toshkent vaqtiga konvertatsiya qilamiz
-        date = new Date(isoString + 'Z'); // Z qo'shish UTC ekanligini bildiradi
-    } else {
-        date = new Date(timestamp);
+    if (!timestamp) {
+        return 'Noma\'lum';
     }
     
-    // Toshkent vaqti (UTC+5) - Intl.DateTimeFormat ishlatish
-    // Vaqt Toshkent mintaqasida hisoblanadi, lekin "+5 Toshkent" yozuvi ko'rsatilmaydi
-    const formatter = new Intl.DateTimeFormat('uz-UZ', {
-        timeZone: 'Asia/Tashkent',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
-    
-    // Format qilish va tozalash
-    const parts = formatter.formatToParts(date);
-    const day = parts.find(p => p.type === 'day').value;
-    const month = parts.find(p => p.type === 'month').value;
-    const year = parts.find(p => p.type === 'year').value;
-    const hour = parts.find(p => p.type === 'hour').value;
-    const minute = parts.find(p => p.type === 'minute').value;
-    const second = parts.find(p => p.type === 'second').value;
-    
-    const formattedTime = `${day}/${month}/${year}, ${hour}:${minute}:${second}`;
-    
-    // "+5 Toshkent" yozuvini olib tashlash, faqat vaqt ko'rsatiladi
-    return formattedTime;
+    try {
+        // Timestamp'ni to'g'ri parse qilish
+        // Agar timestamp string formatida bo'lsa (masalan: "2025-12-07 09:49:37")
+        // uni ISO formatiga o'tkazish kerak
+        let date;
+        
+        if (typeof timestamp === 'string') {
+            // Agar bo'sh string bo'lsa
+            if (timestamp.trim() === '') {
+                return 'Noma\'lum';
+            }
+            
+            // Agar allaqachon ISO formatida bo'lsa (T yoki Z bor), to'g'ridan-to'g'ri parse qilish
+            if (timestamp.includes('T') || timestamp.endsWith('Z')) {
+                date = new Date(timestamp);
+            } else {
+                // SQLite formatini ISO formatiga o'tkazish
+                // "2025-12-07 09:49:37" -> "2025-12-07T09:49:37"
+                const isoString = timestamp.replace(' ', 'T');
+                // Agar timezone yo'q bo'lsa, UTC sifatida qabul qilamiz
+                // Keyin Toshkent vaqtiga konvertatsiya qilamiz
+                date = new Date(isoString + 'Z'); // Z qo'shish UTC ekanligini bildiradi
+            }
+        } else {
+            date = new Date(timestamp);
+        }
+        
+        // Invalid Date tekshiruvi
+        if (isNaN(date.getTime())) {
+            return 'Noma\'lum';
+        }
+        
+        // Toshkent vaqti (UTC+5) - Intl.DateTimeFormat ishlatish
+        // Vaqt Toshkent mintaqasida hisoblanadi, lekin "+5 Toshkent" yozuvi ko'rsatilmaydi
+        const formatter = new Intl.DateTimeFormat('uz-UZ', {
+            timeZone: 'Asia/Tashkent',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        
+        // Format qilish va tozalash
+        const parts = formatter.formatToParts(date);
+        const day = parts.find(p => p.type === 'day')?.value;
+        const month = parts.find(p => p.type === 'month')?.value;
+        const year = parts.find(p => p.type === 'year')?.value;
+        const hour = parts.find(p => p.type === 'hour')?.value;
+        const minute = parts.find(p => p.type === 'minute')?.value;
+        const second = parts.find(p => p.type === 'second')?.value;
+        
+        if (!day || !month || !year || hour === undefined || minute === undefined || second === undefined) {
+            return 'Noma\'lum';
+        }
+        
+        const formattedTime = `${day}/${month}/${year}, ${hour}:${minute}:${second}`;
+        
+        // "+5 Toshkent" yozuvini olib tashlash, faqat vaqt ko'rsatiladi
+        return formattedTime;
+    } catch (error) {
+        console.warn('formatDateTime xatolik:', error, 'timestamp:', timestamp);
+        return 'Noma\'lum';
+    }
 }
 
 // Rol shartlarini belgilash modalini ochish

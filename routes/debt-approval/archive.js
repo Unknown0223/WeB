@@ -6,7 +6,7 @@ const router = express.Router();
 const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
-const { db } = require('../../db.js');
+const { db, isPostgres } = require('../../db.js');
 const { createLogger } = require('../../utils/logger.js');
 const { isAuthenticated, hasPermission } = require('../../middleware/auth.js');
 
@@ -46,18 +46,30 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
             // created_at bo'yicha filtrlash (qaytadan faollashtirish uchun)
             const yearStr = year.toString();
             const monthStr = month.toString().padStart(2, '0');
-            query = query.whereRaw("strftime('%Y', debt_requests_archive.created_at) = ? AND strftime('%m', debt_requests_archive.created_at) = ?", [yearStr, monthStr]);
+            if (isPostgres) {
+                query = query.whereRaw("TO_CHAR(debt_requests_archive.created_at, 'YYYY') = ? AND TO_CHAR(debt_requests_archive.created_at, 'MM') = ?", [yearStr, monthStr]);
+            } else {
+                query = query.whereRaw("strftime('%Y', debt_requests_archive.created_at) = ? AND strftime('%m', debt_requests_archive.created_at) = ?", [yearStr, monthStr]);
+            }
             log.debug(`[ARCHIVE] Yil va oy bo'yicha filtrlash (created_at): ${yearStr}-${monthStr}`);
         } else {
             // archived_at bo'yicha filtrlash (arxivlangan so'rovlarni ko'rish uchun)
             if (year) {
                 const yearStr = year.toString();
-                query = query.whereRaw("strftime('%Y', debt_requests_archive.archived_at) = ?", [yearStr]);
+                if (isPostgres) {
+                    query = query.whereRaw("TO_CHAR(debt_requests_archive.archived_at, 'YYYY') = ?", [yearStr]);
+                } else {
+                    query = query.whereRaw("strftime('%Y', debt_requests_archive.archived_at) = ?", [yearStr]);
+                }
                 log.debug(`[ARCHIVE] Yil bo'yicha filtrlash (archived_at): ${yearStr}`);
             }
             if (month) {
                 const monthStr = month.toString().padStart(2, '0');
-                query = query.whereRaw("strftime('%m', debt_requests_archive.archived_at) = ?", [monthStr]);
+                if (isPostgres) {
+                    query = query.whereRaw("TO_CHAR(debt_requests_archive.archived_at, 'MM') = ?", [monthStr]);
+                } else {
+                    query = query.whereRaw("strftime('%m', debt_requests_archive.archived_at) = ?", [monthStr]);
+                }
                 log.debug(`[ARCHIVE] Oy bo'yicha filtrlash (archived_at): ${monthStr}`);
             }
         }
@@ -130,7 +142,9 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
         
         // Avval jami so'rovlar sonini tekshirish
         const totalRequests = await db('debt_requests')
-            .whereRaw("strftime('%Y', created_at) = ? AND strftime('%m', created_at) = ?", [yearStr, monthStr])
+            .whereRaw(isPostgres 
+                ? "TO_CHAR(created_at, 'YYYY') = ? AND TO_CHAR(created_at, 'MM') = ?"
+                : "strftime('%Y', created_at) = ? AND strftime('%m', created_at) = ?", [yearStr, monthStr])
             .count('* as count')
             .first();
         
@@ -141,7 +155,9 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
             .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
             .leftJoin('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
             .leftJoin('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
-            .whereRaw("strftime('%Y', debt_requests.created_at) = ? AND strftime('%m', debt_requests.created_at) = ?", [
+            .whereRaw(isPostgres
+                ? "TO_CHAR(debt_requests.created_at, 'YYYY') = ? AND TO_CHAR(debt_requests.created_at, 'MM') = ?"
+                : "strftime('%Y', debt_requests.created_at) = ? AND strftime('%m', debt_requests.created_at) = ?", [
                 yearStr,
                 monthStr
             ])
@@ -295,7 +311,9 @@ router.post('/bulk-resend', isAuthenticated, hasPermission('roles:manage'), asyn
         
         // Filtrlash - created_at bo'yicha (so'rov yuborilgan oy)
         if (year && month) {
-            query = query.whereRaw("strftime('%Y', debt_requests_archive.created_at) = ? AND strftime('%m', debt_requests_archive.created_at) = ?", [
+            query = query.whereRaw(isPostgres
+                ? "TO_CHAR(debt_requests_archive.created_at, 'YYYY') = ? AND TO_CHAR(debt_requests_archive.created_at, 'MM') = ?"
+                : "strftime('%Y', debt_requests_archive.created_at) = ? AND strftime('%m', debt_requests_archive.created_at) = ?", [
                 year.toString(),
                 month.toString().padStart(2, '0')
             ]);
@@ -470,15 +488,28 @@ router.delete('/:id', isAuthenticated, hasPermission('roles:manage'), async (req
  */
 router.get('/stats', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     try {
-        // SQLite uchun strftime ishlatish
-        const stats = await db('debt_requests_archive')
-            .select(
-                db.raw("CAST(strftime('%Y', archived_at) AS INTEGER) as year"),
-                db.raw("CAST(strftime('%m', archived_at) AS INTEGER) as month"),
-                db.raw('COUNT(*) as count')
-            )
-            .groupByRaw("strftime('%Y', archived_at), strftime('%m', archived_at)")
-            .orderByRaw("strftime('%Y', archived_at) DESC, strftime('%m', archived_at) DESC");
+        let stats;
+        if (isPostgres) {
+            // PostgreSQL uchun TO_CHAR ishlatish
+            stats = await db('debt_requests_archive')
+                .select(
+                    db.raw("CAST(TO_CHAR(archived_at, 'YYYY') AS INTEGER) as year"),
+                    db.raw("CAST(TO_CHAR(archived_at, 'MM') AS INTEGER) as month"),
+                    db.raw('COUNT(*) as count')
+                )
+                .groupByRaw("TO_CHAR(archived_at, 'YYYY'), TO_CHAR(archived_at, 'MM')")
+                .orderByRaw("TO_CHAR(archived_at, 'YYYY') DESC, TO_CHAR(archived_at, 'MM') DESC");
+        } else {
+            // SQLite uchun strftime ishlatish
+            stats = await db('debt_requests_archive')
+                .select(
+                    db.raw("CAST(strftime('%Y', archived_at) AS INTEGER) as year"),
+                    db.raw("CAST(strftime('%m', archived_at) AS INTEGER) as month"),
+                    db.raw('COUNT(*) as count')
+                )
+                .groupByRaw("strftime('%Y', archived_at), strftime('%m', archived_at)")
+                .orderByRaw("strftime('%Y', archived_at) DESC, strftime('%m', archived_at) DESC");
+        }
         
         res.json({
             success: true,

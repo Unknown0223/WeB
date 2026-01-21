@@ -26,7 +26,7 @@ import {
 } from './modules/users.js';
 import { setupPivot, savePivotTemplate, handleTemplateActions, handleTemplateModalActions } from './modules/pivot.js';
 import { setupComparison } from './modules/comparison.js';
-import { renderRoles, handleRoleSelection, saveRolePermissions, handleBackupDb, handleRestoreDb, handleClearSessions, initExportImport, setupAddNewRole } from './modules/roles.js';
+import { renderRoles, handleRoleSelection, saveRolePermissions, handleBackupDb, handleRestoreDb, handleClearSessions, initExportImport, setupAddNewRole, loadCategories } from './modules/roles.js';
 import { 
     renderTableSettings,
     renderGeneralSettings,
@@ -114,6 +114,12 @@ async function init() {
         }
         
         applyPermissions();
+        
+        // Tema yuklash
+        await loadAdminTheme();
+        
+        // Admin user info yangilash
+        updateAdminUserInfo();
         
         // Settings'ni AVVAL yuklash (branding uchun)
         const settingsPromise = hasPermission(state.currentUser, 'settings:view') 
@@ -247,6 +253,26 @@ async function renderAllComponents() {
     if (hasPermission(state.currentUser, 'roles:manage')) {
         initEnhancedSecurity();
     }
+    
+    // Debt-approval bo'limi - barcha tegishli permission'ga ega foydalanuvchilar uchun
+    const hasDebtPermission = hasPermission(state.currentUser, 'roles:manage') ||
+                              hasPermission(state.currentUser, 'debt:create') ||
+                              hasPermission(state.currentUser, 'debt:view_own') ||
+                              hasPermission(state.currentUser, 'debt:view_statistics') ||
+                              hasPermission(state.currentUser, 'debt:approve_cashier') ||
+                              hasPermission(state.currentUser, 'debt:approve_operator') ||
+                              hasPermission(state.currentUser, 'debt:approve_leader');
+    
+    if (hasDebtPermission) {
+        (async () => {
+            try {
+                const { setupDebtApproval } = await import('./modules/debtApproval.js');
+                setupDebtApproval();
+            } catch (error) {
+                console.error('Debt-approval modulini yuklashda xatolik:', error);
+            }
+        })();
+    }
 }
 
 function setupEventListeners() {
@@ -306,6 +332,15 @@ function setupEventListeners() {
     window.addEventListener('hashchange', () => navigateTo(window.location.hash.substring(1)));
     addSafeListener(DOM.sidebarNav, 'click', handleNavigation);
     addSafeListener(DOM.logoutBtn, 'click', logout);
+    
+    // Admin tema toggle
+    const adminThemeToggleBtn = document.getElementById('admin-theme-toggle-btn');
+    if (adminThemeToggleBtn) {
+        addSafeListener(adminThemeToggleBtn, 'click', async (e) => {
+            e.stopPropagation();
+            await toggleAdminTheme();
+        });
+    }
     
     // Users bo'limi
     if (hasPermission(state.currentUser, 'users:view')) {
@@ -477,14 +512,24 @@ function setupEventListeners() {
         const toggleBtn = e.target.closest('.toggle-visibility-btn');
         if (!toggleBtn) return;
 
+        console.log('[ADMIN] Toggle button clicked');
         const wrapper = toggleBtn.closest('.secure-input-wrapper');
-        const input = wrapper?.querySelector('input');
-        if (!input) return;
+        if (!wrapper) {
+            console.warn('[ADMIN] secure-input-wrapper topilmadi');
+            return;
+        }
+        const input = wrapper.querySelector('input');
+        if (!input) {
+            console.warn('[ADMIN] Input topilmadi');
+            return;
+        }
 
         const icon = toggleBtn.querySelector('i');
+        console.log('[ADMIN] Input type:', input.type, 'Icon:', icon ? 'mavjud' : 'yo\'q', 'Emoji:', !icon);
 
         if (input.type === 'password') {
             input.type = 'text';
+            console.log('[ADMIN] Parol ko\'rsatildi');
             // Feather ikonkasi bo'lsa
             if (icon) {
                 icon.setAttribute('data-feather', 'eye-off');
@@ -494,6 +539,7 @@ function setupEventListeners() {
             }
         } else {
             input.type = 'password';
+            console.log('[ADMIN] Parol yashirildi');
             if (icon) {
                 icon.setAttribute('data-feather', 'eye');
             } else {
@@ -503,8 +549,102 @@ function setupEventListeners() {
 
         if (window.feather) {
             feather.replace();
+            console.log('[ADMIN] Feather icons yangilandi');
+        } else {
+            console.warn('[ADMIN] Feather mavjud emas');
         }
     });
+}
+
+// Admin tema funksiyalari
+async function loadAdminTheme() {
+    try {
+        const res = await fetch('/api/users/me/theme');
+        if (res.ok) {
+            const data = await res.json();
+            const theme = data.theme || 'dark';
+            applyAdminTheme(theme);
+            updateAdminThemeUI(theme);
+        }
+    } catch (error) {
+        console.error('Admin tema yuklashda xatolik:', error);
+        applyAdminTheme('dark');
+    }
+}
+
+function applyAdminTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+}
+
+function updateAdminThemeUI(theme) {
+    const themeIcon = document.getElementById('admin-theme-icon');
+    if (themeIcon) {
+        themeIcon.setAttribute('data-feather', theme === 'dark' ? 'sun' : 'moon');
+        feather.replace();
+    }
+}
+
+async function toggleAdminTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    try {
+        const res = await fetch('/api/users/me/theme', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ theme: newTheme })
+        });
+        
+        if (res.ok) {
+            applyAdminTheme(newTheme);
+            updateAdminThemeUI(newTheme);
+        } else {
+            console.error('Admin tema saqlashda xatolik');
+        }
+    } catch (error) {
+        console.error('Admin tema o\'zgartirishda xatolik:', error);
+    }
+}
+
+function updateAdminUserInfo() {
+    const usernameEl = document.getElementById('admin-username');
+    const roleEl = document.getElementById('admin-user-role');
+    const avatarEl = document.getElementById('admin-user-avatar');
+    
+    if (usernameEl && state.currentUser) {
+        usernameEl.textContent = state.currentUser.username || 'Foydalanuvchi';
+    }
+    
+    if (roleEl && state.currentUser) {
+        roleEl.textContent = state.currentUser.role || '';
+    }
+    
+    // Avatar yuklash
+    if (avatarEl) {
+        loadAdminAvatar();
+    }
+}
+
+async function loadAdminAvatar() {
+    try {
+        const res = await fetch('/api/users/me/avatar');
+        const avatarEl = document.getElementById('admin-user-avatar');
+        
+        if (res.ok && avatarEl) {
+            const data = await res.json();
+            if (data.avatar_url) {
+                avatarEl.innerHTML = `<img src="${data.avatar_url}" alt="Avatar">`;
+            } else {
+                avatarEl.innerHTML = '<i data-feather="user"></i>';
+                feather.replace();
+            }
+        }
+    } catch (error) {
+        console.error('Admin avatar yuklashda xatolik:', error);
+    }
 }
 
 // Global feather replace funksiyasi

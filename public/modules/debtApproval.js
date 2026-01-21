@@ -298,19 +298,13 @@ window.closeColorSettingsModal = closeColorSettingsModal;
 window.resetChartColors = resetChartColors;
 window.applyChartColors = applyChartColors;
 
-// Logger funksiyasi - faqat muhim loglar uchun
-const DEBUG_MODE = false; // Production'da false qiling
-function log(message, data = null) {
-    if (!DEBUG_MODE) return;
-    const timestamp = new Date().toLocaleTimeString('uz-UZ');
-    const logMessage = `[DEBT-APPROVAL ${timestamp}] ${message}`;
-    console.log(logMessage, data || '');
-    if (data) {
-        console.log('  Data:', data);
-    }
+// No-op log function (optimallashtirish: log() chaqiruvlarini olib tashlash rejalashtirilgan)
+function log() {
+    // Bu funksiya DEBUG_MODE o'chirilganidan keyin qoldirilgan, lekin hali kodda ishlatilmoqda
+    // Keyingi optimallashtirish bosqichida barcha log() chaqiruvlari olib tashlanadi
 }
 
-// Dublikat ma'lumotlar uchun maxsus logger - HAR DOIM ISHLAYDI
+// Dublikat ma'lumotlar uchun maxsus logger - faqat dublikatlar bo'lsa log qiladi
 function logDuplicates(type, before, after, source) {
     const hasDuplicates = before.length !== after.length;
     
@@ -354,17 +348,9 @@ function logDuplicates(type, before, after, source) {
             console.warn('🔴 Dublikat nomlar (turli IDlar bilan):', duplicateNames);
         }
         
-        console.groupEnd();
-    } else {
-        // Dublikatlar yo'q bo'lsa, faqat DEBUG_MODE da ko'rsatish
-        if (DEBUG_MODE) {
-            console.group(`✅ [NO DUPLICATES] ${type} - ${source}`);
-            console.log('📥 API dan kelgan:', before.length, 'ta');
-            console.log('✅ Unique qilingan:', after.length, 'ta');
-            console.log('✅ Dublikatlar yo\'q');
             console.groupEnd();
         }
-    }
+    // Dublikatlar yo'q bo'lsa, log qilmaymiz
 }
 
 // Setup debt-approval page
@@ -666,19 +652,11 @@ export async function loadDebtApprovalPage() {
     }
     
     try {
-        console.log('[DEBT_APPROVAL] Sahifa yuklanmoqda...');
-        
         // Load dashboard stats
-        console.log('[DEBT_APPROVAL] API so\'rovlari yuborilmoqda...');
         const [requestsRes, brandsRes] = await Promise.all([
             safeFetch(`${API_URL}/requests?limit=1000`, { credentials: 'include' }),
             safeFetch(`${API_URL}/brands`, { credentials: 'include' })
         ]);
-        
-        console.log('[DEBT_APPROVAL] API javoblar:', {
-            requests: requestsRes ? { ok: requestsRes.ok, status: requestsRes.status } : 'null',
-            brands: brandsRes ? { ok: brandsRes.ok, status: brandsRes.status } : 'null'
-        });
         
         if (!requestsRes || !requestsRes.ok) {
             const errorText = requestsRes ? await requestsRes.text().catch(() => '') : '';
@@ -725,24 +703,11 @@ export async function loadDebtApprovalPage() {
                 const startDate = `${year}-${month}-01`;
                 const endDate = new Date(year, parseInt(month), 0).toISOString().split('T')[0];
                 const url = `${API_URL}/requests/stats/summary?startDate=${startDate}&endDate=${endDate}`;
-                log('Statistika API chaqirilmoqda...', { url });
                 const statsRes = await safeFetch(url);
-                log('Statistika API response:', {
-                    response: statsRes ? 'OK' : 'NULL',
-                    status: statsRes?.status,
-                    ok: statsRes?.ok
-                });
                 if (statsRes && statsRes.ok) {
                     detailedStats = await statsRes.json();
-                    log('Detailed stats yuklandi:', detailedStats);
-                } else {
-                    log('⚠️ Statistika API xatolik:', {
-                        status: statsRes?.status,
-                        statusText: statsRes?.statusText
-                    });
                 }
             } catch (error) {
-                log('❌ Statistika yuklashda xatolik:', error);
                 console.error('Statistika yuklashda xatolik:', error);
             }
             return detailedStats;
@@ -2048,6 +2013,36 @@ export async function loadDebtApprovalPage() {
                                     </div>
                                 </div>
                             </div>
+                            
+                            <!-- Bot Knopkalari Sozlamalari -->
+                            <div class="debt-settings-card" data-group="bot-buttons-settings">
+                                <div class="debt-settings-card-header" data-group="bot-buttons-settings">
+                                    <div class="debt-settings-card-icon" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(167, 139, 250, 0.2));">
+                                        <i data-feather="grid"></i>
+                                    </div>
+                                    <div class="debt-settings-card-title">
+                                        <h4>Bot Knopkalari Sozlamalari</h4>
+                                        <p>Har bir rol uchun ko'rinadigan knopkalarni sozlash</p>
+                                    </div>
+                                    <button type="button" class="debt-settings-toggle-btn">
+                                        <i data-feather="chevron-down" class="debt-group-chevron"></i>
+                                    </button>
+                                </div>
+                                <div class="debt-settings-card-content" data-content="bot-buttons-settings">
+                                    <div style="padding: 20px;">
+                                        <div style="margin-bottom: 20px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-left: 3px solid rgba(139, 92, 246, 0.5); border-radius: 6px;">
+                                            <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 13px;">
+                                                <strong>ℹ️ Bot Knopkalari:</strong> Har bir rol uchun qaysi Telegram bot knopkalari ko'rinishi kerakligini sozlang. 
+                                                Bu sozlamalar bot orqali foydalanuvchilarga ko'rsatiladigan menu knopkalarini boshqaradi.
+                                            </p>
+                                        </div>
+                                        <button type="button" id="bot-buttons-settings-btn" class="btn btn-primary" style="width: 100%; padding: 12px; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                            <i data-feather="grid" style="width: 18px; height: 18px;"></i>
+                                            <span>Bot Knopkalarini Sozlash</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         
                         <button type="submit" class="btn btn-primary debt-settings-save-btn">
@@ -2086,9 +2081,6 @@ export async function loadDebtApprovalPage() {
                 }
             });
         });
-        
-        log('HTML content yaratildi');
-        
         // Feather icons
         if (typeof feather !== 'undefined') {
             feather.replace();
@@ -2199,35 +2191,49 @@ export async function loadDebtApprovalPage() {
         // Settings form submit handler
         const settingsForm = document.getElementById('debt-settings-form');
         if (settingsForm) {
-            log('Settings form topildi, submit handler qo\'shilmoqda...');
             settingsForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                log('Settings form submit qilindi');
                 await saveDebtSettings();
             });
             // Load settings on page load
             await loadDebtSettings();
         } else {
-            log('⚠️ Settings form topilmadi!');
         }
+        
+        // Setup bot buttons settings button
+        setTimeout(() => {
+            const botButtonsBtn = document.getElementById('bot-buttons-settings-btn');
+            if (botButtonsBtn) {
+                botButtonsBtn.addEventListener('click', async () => {
+                    // Dynamic import for debt-settings module
+                    try {
+                        const { showDebtSettingsModal } = await import('./debt-settings.js');
+                        showDebtSettingsModal();
+                        // Feather icons ni yangilash
+                        if (typeof feather !== 'undefined') {
+                            feather.replace();
+                        }
+                    } catch (error) {
+                        console.error('Error loading bot settings modal:', error);
+                        showToast('Bot sozlamalarini yuklashda xatolik yuz berdi', true);
+                    }
+                });
+            }
+        }, 100);
         
         // Setup filters
         const statusFilter = document.getElementById('debt-status-filter');
         if (statusFilter) {
-            log('Status filter topildi');
             statusFilter.addEventListener('change', () => {
-                log('Status filter o\'zgardi', { value: statusFilter.value });
                 loadDebtRequests(1); // Birinchi sahifaga qaytish
             });
         } else {
-            log('⚠️ Status filter topilmadi!');
         }
         
         // Setup per page selector
         const perPageSelect = document.getElementById('debt-requests-per-page');
         if (perPageSelect) {
             perPageSelect.addEventListener('change', () => {
-                log('Per page o\'zgardi', { value: perPageSelect.value });
                 loadDebtRequests(1); // Birinchi sahifaga qaytish
             });
         }
@@ -2235,82 +2241,16 @@ export async function loadDebtApprovalPage() {
         // Setup month selector
         setupDebtMonthSelector(selectedYear, selectedMonth, loadDebtStats);
         
-        // Real-time statistics update function
-        async function updateStatisticsRealTime() {
-            if (isStatsUpdating) return;
-            isStatsUpdating = true;
-            
-            try {
-                const currentYear = document.getElementById('debt-dropdown-year')?.textContent || selectedYear;
-                const currentMonthText = document.getElementById('debt-current-month-text')?.textContent;
-                let monthNumber = selectedMonth;
-                
-                if (currentMonthText) {
-                    const monthName = currentMonthText.split(' ')[0];
-                    monthNumber = getMonthNumber(monthName);
-                }
-                
-                const updatedStats = await loadDebtStats(currentYear, monthNumber);
-                if (updatedStats) {
-                    // Update stat cards with animation
-                    updateStatsDisplay(updatedStats);
-                    
-                    // Update charts
-                    renderDebtCharts(updatedStats);
-                }
-            } catch (error) {
-                console.error('Real-time statistics update xatolik:', error);
-            } finally {
-                isStatsUpdating = false;
-            }
-        }
         
-        // Start real-time updates (every 30 seconds)
+        // Avtomatik yangilanish o'chirilgan - endi faqat "Yangilash" knopkasi orqali yangilanadi
         if (statsUpdateInterval) {
             clearInterval(statsUpdateInterval);
-        }
-        statsUpdateInterval = setInterval(updateStatisticsRealTime, 30000);
-        
-        // Avtomatik yangilanish funksiyasi - Filiallar va Tasdiqlovchilar Statistikasi
-        function updateBranchData() {
-            // Faqat agar sahifa faol bo'lsa va filterlar tanlangan bo'lsa
-            const branchStatsBrandFilter = document.getElementById('branch-stats-brand-filter');
-            const brandId = branchStatsBrandFilter && branchStatsBrandFilter.value ? branchStatsBrandFilter.value : null;
-            
-            // Agar brand tanlangan bo'lsa, jadvalni yangilash
-            if (brandId) {
-                loadBranchApproversTable();
+            statsUpdateInterval = null;
             }
-            
-            // Filiallar bo'yicha holat kartalarini yangilash (faqat agar filter tanlangan bo'lsa)
-            const branchStatusBrandFilter = document.getElementById('branch-status-brand-filter');
-            const branchStatusStatusFilter = document.getElementById('branch-status-status-filter');
-            const branchStatusSearch = document.getElementById('branch-status-search');
-            
-            const hasBranchStatusFilter = (branchStatusBrandFilter && branchStatusBrandFilter.value) ||
-                                        (branchStatusStatusFilter && branchStatusStatusFilter.value) ||
-                                        (branchStatusSearch && branchStatusSearch.value && branchStatusSearch.value.trim() !== '');
-            
-            if (hasBranchStatusFilter) {
-                loadBranchStatusCards();
-            }
-        }
-        
-        // Avtomatik yangilanishni boshlash (har 30 soniyada)
         if (branchDataUpdateInterval) {
             clearInterval(branchDataUpdateInterval);
-        }
-        branchDataUpdateInterval = setInterval(updateBranchData, 30000);
-        
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', () => {
-            if (statsUpdateInterval) {
-                clearInterval(statsUpdateInterval);
+            branchDataUpdateInterval = null;
             }
-            if (branchDataUpdateInterval) {
-                clearInterval(branchDataUpdateInterval);
-            }
-        });
         
         // Render charts
         if (detailedStats) {
@@ -2472,16 +2412,7 @@ async function loadDebtRequests(page = 1) {
         const data = await response.json();
         debtRequestsTotal = data.total || 0;
         debtRequestsPage = page;
-        
-        log('Requests ma\'lumotlari yuklandi:', {
-            requestsCount: data.requests?.length || 0,
-            total: data.total,
-            page: page,
-            perPage: perPage
-        });
-        
         if (data.requests && data.requests.length > 0) {
-            log('Requests jadvali yaratilmoqda...', { count: data.requests.length });
             list.innerHTML = `
                 <div style="overflow-x: auto;">
                     <table class="table debt-requests-table" style="width: 100%; border-collapse: separate; border-spacing: 0;">
@@ -2826,6 +2757,24 @@ function showRequestDetailsModal(requestId, requestData, isLoading, errorMessage
 
 // So'rov batafsil ma'lumotlarini render qilish
 function renderRequestDetails(data) {
+    // excel_headers va excel_data ni parse qilish (agar string bo'lsa)
+    if (data.excel_headers && typeof data.excel_headers === 'string') {
+        try {
+            data.excel_headers = JSON.parse(data.excel_headers);
+        } catch (e) {
+            console.warn('excel_headers parse qilishda xatolik:', e);
+            data.excel_headers = [];
+        }
+    }
+    if (data.excel_data && typeof data.excel_data === 'string') {
+        try {
+            data.excel_data = JSON.parse(data.excel_data);
+        } catch (e) {
+            console.warn('excel_data parse qilishda xatolik:', e);
+            data.excel_data = [];
+        }
+    }
+    
     const formatDateTime = (dateString) => {
         if (!dateString) return 'N/A';
         const date = new Date(dateString);
@@ -3036,7 +2985,7 @@ function renderRequestDetails(data) {
                             <div style="color: #f97316; font-size: 20px; font-weight: 600;">${parseFloat(data.excel_total).toLocaleString('uz-UZ')} so'm</div>
                         </div>
                     ` : ''}
-                    ${data.excel_headers && data.excel_headers.length > 0 ? `
+                    ${data.excel_headers && Array.isArray(data.excel_headers) && data.excel_headers.length > 0 ? `
                         <div style="margin-top: 16px; overflow-x: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                                 <thead>
@@ -3233,7 +3182,6 @@ function renderDebtCharts(stats) {
     
     // Check if Chart.js is available
     if (typeof Chart === 'undefined') {
-        log('⚠️ Chart.js topilmadi, diagrammalar yaratilmaydi');
         return;
     }
     
@@ -4455,13 +4403,19 @@ async function loadBranchStatusCards() {
                     ? `<span style="font-size: 10px; color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px; margin-left: 6px;">${svr.brandName}</span>` 
                     : '';
                 
+                // SVR nomini qisqartirish (agar juda uzun bo'lsa)
+                const maxNameLength = 25;
+                const displayName = svr.name.length > maxNameLength 
+                    ? svr.name.substring(0, maxNameLength) + '...' 
+                    : svr.name;
+                
                 return `
-                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 6px; border-left: 3px solid ${svrStatusColor};">
-                        <span style="color: rgba(255,255,255,0.95); font-size: 13px; font-weight: 500;">${svr.name}${brandTag}</span>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span style="color: ${percentageColor}; font-size: 12px; font-weight: 700; min-width: 35px; text-align: right;">${percentageText}</span>
-                            <i data-feather="${svrStatusIcon}" style="width: 14px; height: 14px; color: ${svrStatusColor};"></i>
-                            <span style="color: ${svrStatusColor}; font-size: 12px; font-weight: 600;">${svrStatusText}</span>
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 4px; border-left: 3px solid ${svrStatusColor};">
+                        <span style="color: rgba(255,255,255,0.95); font-size: 12px; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;" title="${svr.name}">${displayName}${brandTag}</span>
+                        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                            <span style="color: ${percentageColor}; font-size: 11px; font-weight: 700; min-width: 32px; text-align: right;">${percentageText}</span>
+                            <i data-feather="${svrStatusIcon}" style="width: 12px; height: 12px; color: ${svrStatusColor};"></i>
+                            <span style="color: ${svrStatusColor}; font-size: 11px; font-weight: 600; white-space: nowrap;">${svrStatusText}</span>
                         </div>
                     </div>
                 `;
@@ -4473,33 +4427,33 @@ async function loadBranchStatusCards() {
                 : '';
             
             return `
-                <div style="background: ${standardBgColor}; border: 2px solid ${standardColor}; border-radius: 12px; padding: 16px; transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;" 
+                <div style="background: ${standardBgColor}; border: 2px solid ${standardColor}; border-radius: 12px; padding: 14px; transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;" 
                      onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 24px ${standardColor}40'; this.style.borderColor='${standardColor}';" 
                      onmouseout="this.style.transform=''; this.style.boxShadow=''; this.style.borderColor='${standardColor}';">
-                    <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px;">
-                        <div>
-                            <h4 style="margin: 0; color: #ffffff; font-size: 16px; font-weight: 700;">${branch.branch.name}</h4>
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px;">
+                        <div style="flex: 1; min-width: 0;">
+                            <h4 style="margin: 0; color: #ffffff; font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${branch.branch.name}</h4>
                             ${brandsInfo}
                         </div>
-                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: ${standardColor}20; border-radius: 6px; border: 1px solid ${standardColor}40;">
-                            <i data-feather="${statusIcon}" style="width: 18px; height: 18px; color: ${standardColor};"></i>
-                            <span style="color: ${standardColor}; font-size: 13px; font-weight: 700;">${statusText}</span>
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: ${standardColor}20; border-radius: 6px; border: 1px solid ${standardColor}40; flex-shrink: 0; margin-left: 8px;">
+                            <i data-feather="${statusIcon}" style="width: 16px; height: 16px; color: ${standardColor};"></i>
+                            <span style="color: ${standardColor}; font-size: 12px; font-weight: 700; white-space: nowrap;">${statusText}</span>
                         </div>
                     </div>
                     
                     <!-- To'liq yakunlanish foiz darajasi -->
-                    <div style="margin-bottom: 12px;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                            <span style="color: rgba(255,255,255,0.8); font-size: 12px; font-weight: 500;">To'liq yakunlanish:</span>
-                            <span style="color: ${standardColor}; font-size: 14px; font-weight: 700; text-shadow: 0 0 8px ${standardColor}80;">${branch.completionPercentage}%</span>
+                    <div style="margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="color: rgba(255,255,255,0.8); font-size: 11px; font-weight: 500;">To'liq yakunlanish:</span>
+                            <span style="color: ${standardColor}; font-size: 13px; font-weight: 700; text-shadow: 0 0 8px ${standardColor}80;">${branch.completionPercentage}%</span>
                         </div>
-                        <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
+                        <div style="width: 100%; height: 7px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
                             <div style="width: ${branch.completionPercentage}%; height: 100%; background: linear-gradient(90deg, ${standardColor}, ${standardColor}cc); box-shadow: 0 0 10px ${standardColor}60; transition: width 0.5s;"></div>
                         </div>
                     </div>
                     
                     <!-- SVR'lar ro'yxati -->
-                    <div style="max-height: 200px; overflow-y: auto;">
+                    <div style="max-height: 180px; overflow-y: auto; overflow-x: hidden;">
                         ${svrsList}
                     </div>
                 </div>
@@ -4578,11 +4532,14 @@ window.loadBranchApproversTable = async function loadBranchApproversTable() {
         
         const result = await response.json();
         
+        console.log('[BRANCH_APPROVERS] API javob:', result);
+        
         if (!result.success || !result.data) {
             throw new Error(result.error || 'Ma\'lumotlar olinmadi');
         }
         
         const branchStats = result.data;
+        console.log('[BRANCH_APPROVERS] Branch stats ma\'lumotlari:', branchStats.length, 'ta qator', branchStats);
         
         if (branchStats.length === 0) {
             tableBody.innerHTML = `
@@ -5280,11 +5237,6 @@ window.createDebtRequest = async function createDebtRequest() {
             if (typeof loadDebtRequests === 'function') {
                 loadDebtRequests(1);
             }
-            
-            // Statistikani yangilash
-            if (typeof updateStatisticsRealTime === 'function') {
-                updateStatisticsRealTime();
-            }
         } else {
             console.error('[CREATE_REQUEST] ❌ API javob noto\'g\'ri:', response);
             const errorData = response ? await response.json().catch(() => ({ error: 'Noma\'lum xatolik' })) : { error: 'API javob null' };
@@ -5424,7 +5376,6 @@ function setupDebtMonthSelector(initialYear, initialMonth, loadStatsCallback) {
     const dropdownYear = document.getElementById('debt-dropdown-year');
     
     if (!monthDisplayBtn || !monthDropdown) {
-        log('⚠️ Month selector elementlari topilmadi');
         return;
     }
     
@@ -5554,29 +5505,6 @@ function setupDebtMonthSelector(initialYear, initialMonth, loadStatsCallback) {
         });
     }
     
-    // Statistika ko'rsatkichlarini yangilash (animatsiya bilan)
-    function updateStatsDisplay(newStats) {
-        if (!newStats || !newStats.summary) return;
-        
-        const statCards = {
-            'stat-total': newStats.summary.total || 0,
-            'stat-pending': newStats.summary.pending || 0,
-            'stat-approved': newStats.summary.approved || 0,
-            'stat-debt': newStats.summary.debtFound || 0,
-            'stat-cancelled': newStats.summary.cancelled || 0
-        };
-        
-        Object.entries(statCards).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) {
-                const oldValue = parseInt(element.textContent) || 0;
-                if (oldValue !== value) {
-                    animateValue(element, oldValue, value, 500);
-                }
-            }
-        });
-    }
-    
     // Tanlangan oyni yangilash (faqat oy tanlanganda)
     async function updateSelectedMonth() {
         const monthStr = (currentMonth + 1).toString().padStart(2, '0');
@@ -5585,7 +5513,6 @@ function setupDebtMonthSelector(initialYear, initialMonth, loadStatsCallback) {
         
         // Statistika yangilash
         if (loadStatsCallback) {
-            log('Oy o\'zgardi, statistika yangilanmoqda...', { year: currentYear, month: monthStr });
             const newStats = await loadStatsCallback(currentYear, monthStr);
             if (newStats) {
                 updateStatsDisplay(newStats);
@@ -5611,7 +5538,6 @@ function showImportModal() {
     // Create modal if not exists
     let modal = document.getElementById('debt-import-modal');
     if (!modal) {
-        log('Modal yaratilmoqda...');
         modal = document.createElement('div');
         modal.id = 'debt-import-modal';
         modal.className = 'modal hidden';
@@ -5756,8 +5682,6 @@ function showImportModal() {
             </div>
         `;
         document.body.appendChild(modal);
-        log('Modal yaratildi va DOM ga qo\'shildi');
-        
         // File upload area interaktivligi
         const fileInput = document.getElementById('debt-import-file');
         const fileUploadArea = document.getElementById('file-upload-area');
@@ -5770,7 +5694,6 @@ function showImportModal() {
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
-                log('Fayl tanlandi:', { name: file.name, size: file.size });
                 fileUploadContent.style.display = 'none';
                 fileSelectedInfo.style.display = 'block';
                 fileName.textContent = file.name;
@@ -5817,13 +5740,11 @@ function showImportModal() {
         
         // Shablon yuklab olish
         document.getElementById('download-template-btn').addEventListener('click', () => {
-            log('Shablon yuklab olish bosildi');
             downloadTemplate();
         });
         
         // Cancel button
         document.getElementById('cancel-import-btn').addEventListener('click', () => {
-            log('Import bekor qilindi');
             modal.classList.add('hidden');
             document.getElementById('debt-import-form').reset();
             fileUploadContent.style.display = 'block';
@@ -5835,46 +5756,23 @@ function showImportModal() {
         // Setup form handler
         document.getElementById('debt-import-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            log('Import form submit qilindi');
-            
             const formData = new FormData();
             const file = document.getElementById('debt-import-file').files[0];
             const clearExisting = document.getElementById('debt-clear-existing').checked;
-            
-            log('Form ma\'lumotlari:', {
-                fileName: file?.name,
-                fileSize: file?.size,
-                clearExisting
-            });
-            
             formData.append('file', file);
             formData.append('clearExisting', clearExisting);
             
             try {
-                log('Import API chaqirilmoqda...', { url: `${API_URL}/brands/import` });
                 const response = await safeFetch(`${API_URL}/brands/import`, {
                     method: 'POST',
                     body: formData
                 });
-                
-                log('Import response:', {
-                    response: response ? 'OK' : 'NULL',
-                    status: response?.status,
-                    ok: response?.ok
-                });
-                
                 if (!response || !response.ok) {
-                    log('❌ Import API xatolik:', {
-                        status: response?.status
-                    });
                     throw new Error(`Import xatolik: ${response?.status || 'No response'}`);
                 }
                 
                 const data = await response.json();
-                log('Import natijasi:', data);
-                
                 if (data.success) {
-                    log('✅ Import muvaffaqiyatli', data.imported);
                     const imported = data.imported;
                     let message = `✅ Muvaffaqiyatli import qilindi:\n`;
                     message += `• Brendlar: ${imported.brands || 0}\n`;
@@ -5884,7 +5782,6 @@ function showImportModal() {
                     
                     if (data.errors && data.errors.length > 0) {
                         message += `\n\n⚠️ Xatoliklar: ${data.errors.length} ta`;
-                        log('⚠️ Import xatoliklari:', data.errors);
                     }
                     
                     showToast(message, false);
@@ -5892,14 +5789,9 @@ function showImportModal() {
                     document.getElementById('debt-import-form').reset();
                     loadDebtApprovalPage();
                 } else {
-                    log('❌ Import muvaffaqiyatsiz:', data);
                     showToast('Import xatolik: ' + (data.error || 'Noma\'lum xatolik'), true);
                 }
             } catch (error) {
-                log('❌ Import xatolik:', {
-                    message: error.message,
-                    stack: error.stack
-                });
                 console.error('Import xatolik:', error);
                 showToast('Import xatolik yuz berdi: ' + error.message, true);
             }
@@ -5907,7 +5799,6 @@ function showImportModal() {
         
         // Close button
         document.getElementById('close-debt-import-modal').addEventListener('click', () => {
-            log('Modal yopildi');
             modal.classList.add('hidden');
             document.getElementById('debt-import-form').reset();
             fileUploadContent.style.display = 'block';
@@ -5916,8 +5807,6 @@ function showImportModal() {
             fileUploadArea.style.background = 'rgba(79, 172, 254, 0.05)';
         });
     }
-    
-    log('Modal ko\'rsatilmoqda...');
     modal.classList.remove('hidden');
     if (window.feather) {
         feather.replace();
@@ -5926,19 +5815,14 @@ function showImportModal() {
 
 // Sozlamalarni yuklash
 async function loadDebtSettings() {
-    log('Sozlamalar yuklanmoqda...');
-    
     try {
         const response = await safeFetch(`${API_URL}/settings`);
         if (!response || !response.ok) {
-            log('⚠️ Sozlamalarni yuklab bo\'lmadi:', { status: response?.status, statusText: response?.statusText });
             // Xatolik bo'lsa ham, default qiymatlar bilan ishlash
             return;
         }
         
         const settings = await response.json();
-        log('Sozlamalar yuklandi:', settings);
-        
         // Sozlamalar form'ini to'ldirish
         const leadersGroupInput = document.getElementById('debt-leaders-group');
         const operatorsGroupInput = document.getElementById('debt-operators-group');
@@ -5959,19 +5843,13 @@ async function loadDebtSettings() {
         if (excelClientNameInput) excelClientNameInput.value = settings.debt_excel_client_name_column || 'client_name,name,fio';
         if (excelDebtAmountInput) excelDebtAmountInput.value = settings.debt_excel_debt_amount_column || 'debt_amount,debt,qarz';
         if (fileSizeLimitInput) fileSizeLimitInput.value = settings.max_file_size_mb || 20;
-        
-        log('✅ Sozlamalar form\'ga yuklandi');
-        
     } catch (error) {
-        log('❌ Sozlamalarni yuklashda xatolik:', error);
         showToast('Sozlamalarni yuklashda xatolik', true);
     }
 }
 
 // Sozlamalarni saqlash
 async function saveDebtSettings() {
-    log('=== Sozlamalar saqlash jarayoni boshlanmoqda ===');
-    
     try {
         const leadersGroupInput = document.getElementById('debt-leaders-group');
         const operatorsGroupInput = document.getElementById('debt-operators-group');
@@ -5982,13 +5860,6 @@ async function saveDebtSettings() {
         const excelClientNameInput = document.getElementById('debt-excel-client-name');
         const excelDebtAmountInput = document.getElementById('debt-excel-debt-amount');
         const fileSizeLimitInput = document.getElementById('debt-file-size-limit');
-        
-        log('Input elementlar topildi:', {
-            leadersGroup: !!leadersGroupInput,
-            operatorsGroup: !!operatorsGroupInput,
-            finalGroup: !!finalGroupInput
-        });
-        
         const settings = {
             leaders_group_id: leadersGroupInput?.value.trim() || '',
             leaders_group_name: 'Rahbarlar guruhi',
@@ -6003,9 +5874,6 @@ async function saveDebtSettings() {
             excel_column_svr: 'SVR FISH',
             max_file_size_mb: fileSizeLimitInput?.value ? parseInt(fileSizeLimitInput.value) : 20
         };
-        
-        log('Saqlanayotgan sozlamalar:', settings);
-        
         const response = await safeFetch(`${API_URL}/settings`, {
             method: 'POST',
             headers: {
@@ -6013,9 +5881,6 @@ async function saveDebtSettings() {
             },
             body: JSON.stringify(settings)
         });
-        
-        log('API javob kelindi:', { ok: response?.ok, status: response?.status });
-        
         if (!response || !response.ok) {
             let errorText = 'Server xatolik';
             try {
@@ -6035,7 +5900,6 @@ async function saveDebtSettings() {
         }
         
         const result = await response.json();
-        log('✅ Sozlamalar saqlandi:', result);
         showToast('Sozlamalar muvaffaqiyatli saqlandi! ✅', false);
         
         // Sozlamalarni qayta yuklash
@@ -6066,7 +5930,6 @@ async function setupDebtBindings() {
     const saveBtn = document.getElementById('debt-bindings-save-btn');
     
     if (!roleSelect || !bindingsContent || !saveBtn) {
-        log('⚠️ Bindings elementlari topilmadi');
         return;
     }
     
@@ -6089,10 +5952,7 @@ async function setupDebtBindings() {
             filteredRoles.map(r => 
                 `<option value="${r.role_name}">${r.role_name}</option>`
             ).join('');
-        
-        log('✅ Rollar yuklandi:', filteredRoles.length);
     } catch (error) {
-        log('❌ Rollarni yuklashda xatolik:', error);
         showToast('Rollarni yuklashda xatolik', true);
         return;
     }
@@ -6218,9 +6078,6 @@ async function loadRoleBindings(roleName) {
                 }
             });
         };
-        
-        log('✅ Role bindings yuklandi');
-        
         if (typeof feather !== 'undefined') {
             feather.replace();
         }
@@ -6647,7 +6504,6 @@ async function saveRoleBindings(roleName) {
         }
         
         const result = await response.json();
-        log('✅ Bog\'lanishlar saqlandi:', result);
         showToast('Bog\'lanishlar muvaffaqiyatli saqlandi! ✅', false);
         
     } catch (error) {
@@ -6664,8 +6520,6 @@ async function saveRoleBindings(roleName) {
 
 // Excel shablon yuklab olish
 function downloadTemplate() {
-    log('Excel shablon yaratilmoqda...');
-    
     // Sample data
     const sampleData = [
         { 'Brend': 'Coca-Cola', 'Filial': 'Toshkent', 'SVR (FISH)': 'Aliyev Ali' },
@@ -6690,7 +6544,6 @@ function downloadTemplate() {
             
             XLSX.utils.book_append_sheet(wb, ws, 'Ma\'lumotlar');
             XLSX.writeFile(wb, 'debt-approval-shablon.xlsx');
-            log('✅ Shablon yuklab olindi');
             showToast('Shablon muvaffaqiyatli yuklab olindi!', false);
         } else {
             // Agar XLSX library yo'q bo'lsa, CSV formatida yuklab olish
@@ -6704,11 +6557,9 @@ function downloadTemplate() {
             link.href = URL.createObjectURL(blob);
             link.download = 'debt-approval-shablon.csv';
             link.click();
-            log('✅ CSV shablon yuklab olindi');
             showToast('Shablon CSV formatida yuklab olindi!', false);
         }
     } catch (error) {
-        log('❌ Shablon yuklab olishda xatolik:', error);
         console.error('Shablon yuklab olishda xatolik:', error);
         showToast('Shablon yuklab olishda xatolik yuz berdi', true);
     }
@@ -7619,7 +7470,6 @@ async function loadDebtUsers(roleFilter = '', append = false) {
         }
         
     } catch (error) {
-        log('❌ Foydalanuvchilarni yuklashda xatolik:', error);
         usersList.innerHTML = `<div class="alert alert-danger">Xatolik: ${error.message}</div>`;
     } finally {
         debtUsersState.isLoading = false;
@@ -8186,12 +8036,17 @@ function renderTasksList(tasks) {
         {
             role: 'nazoratchi',
             label: '👮 Nazoratchi',
-            description: 'Nazoratchi vazifalari - so\'rovlarni nazorat qilish va tasdiqlash',
+            description: 'Nazoratchi vazifalari - kasirlar yoki operatorlar tasdiqlaganidan keyin so\'rovlarni nazorat qilish',
             tasks: [
                 { 
-                    key: 'approve_supervisor', 
-                    label: 'Nazoratchi sifatida so\'rovlarni tasdiqlash',
-                    description: 'So\'rovlarni Nazoratchi sifatida tasdiqlash va nazorat qilish huquqi'
+                    key: 'approve_supervisor_cashier', 
+                    label: 'Kasirlarga nazoratchi',
+                    description: 'Barcha kasirlar tasdiqlagandan keyin so\'rovlarni tasdiqlash (kasir → nazoratchi → operator)'
+                },
+                { 
+                    key: 'approve_supervisor_operator', 
+                    label: 'Operatorlarga nazoratchi',
+                    description: 'Barcha operatorlar tasdiqlagandan keyin so\'rovlarni tasdiqlash (operator → nazoratchi → final)'
                 }
             ]
         },
@@ -8361,8 +8216,15 @@ window.toggleTaskType = function(taskType, checked) {
     }
 };
 
-// Get unique branches HTML (dublikatlarni olib tashlash) - Bindings uchun
-function getUniqueBranchesHTML(availableBranches, bindingsBranches, onChangeHandler) {
+/**
+ * Filiallar ro'yxatini HTML'ga aylantirish (dublikatlarni olib tashlash bilan)
+ * @param {Array} availableBranches - Filiallar ro'yxati
+ * @param {Array} bindingsBranches - Tanlangan filiallar (Bindings uchun)
+ * @param {Function|null} onChangeHandler - onChange handler (Bindings uchun)
+ * @param {string} mode - 'bindings' yoki 'tasks'
+ * @returns {string} HTML string
+ */
+function getUniqueBranchesHTML(availableBranches, bindingsBranches = [], onChangeHandler = null, mode = 'bindings') {
     if (availableBranches.length === 0) {
         return '<p style="text-align: center; color: rgba(255,255,255,0.5); padding: 10px; font-size: 13px;">Filiallar topilmadi</p>';
     }
@@ -8383,7 +8245,7 @@ function getUniqueBranchesHTML(availableBranches, bindingsBranches, onChangeHand
     const uniqueBranches = Array.from(uniqueBranchesByIdMap.values());
     
     // Dublikat tekshiruvi va log
-    logDuplicates('Filiallar (Bindings)', originalBranches, uniqueBranches, 'getUniqueBranchesHTML');
+    logDuplicates(`Filiallar (${mode === 'bindings' ? 'Bindings' : 'Tasks'})`, originalBranches, uniqueBranches, 'getUniqueBranchesHTML');
     
     // Nom bo'yicha sort qilish
     uniqueBranches.sort((a, b) => {
@@ -8392,61 +8254,32 @@ function getUniqueBranchesHTML(availableBranches, bindingsBranches, onChangeHand
         return (a.brand_id || 0) - (b.brand_id || 0);
     });
     
-    const onChangeAttr = onChangeHandler ? `onchange="${onChangeHandler}(); updateUserBranchesFilter();"` : '';
-    
+    if (mode === 'tasks') {
+        // Tasks rejimi
     return uniqueBranches.map(branch => `
         <label style="display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; margin-bottom: 5px;" 
                data-brand-id="${branch.brand_id}"
                onmouseover="this.style.background='rgba(79, 172, 254, 0.1)'" 
                onmouseout="this.style.background='transparent'">
-            <input type="checkbox" value="${branch.id}" ${bindingsBranches.some(b => b.id === branch.id) ? 'checked' : ''} 
-                   style="width: 18px; height: 18px; cursor: pointer;" ${onChangeAttr}>
+                <input type="checkbox" value="${branch.id}" class="user-task-branch-checkbox"
+                       style="width: 18px; height: 18px; cursor: pointer;">
             <span style="flex: 1; font-size: 14px;">${branch.name}</span>
         </label>
     `).join('');
-}
-
-// Get unique branches HTML for Tasks tab
-function getUniqueBranchesHTMLForTasks(availableBranches) {
-    if (availableBranches.length === 0) {
-        return '<p style="text-align: center; color: rgba(255,255,255,0.5); padding: 10px; font-size: 13px;">Filiallar topilmadi</p>';
-    }
-    
-    // Original ma'lumotlarni saqlash (log uchun)
-    const originalBranches = [...availableBranches];
-    
-    // Dublikat tekshiruvi - ID bo'yicha (asosiy)
-    const uniqueBranchesByIdMap = new Map();
-    availableBranches.forEach(branch => {
-        if (!uniqueBranchesByIdMap.has(branch.id)) {
-            uniqueBranchesByIdMap.set(branch.id, branch);
         } else {
-            console.warn(`⚠️ [getUniqueBranchesHTMLForTasks] Filial ID dublikat: ID=${branch.id}, Name=${branch.name}, BrandID=${branch.brand_id}`);
-        }
-    });
-    
-    const uniqueBranches = Array.from(uniqueBranchesByIdMap.values());
-    
-    // Dublikat tekshiruvi va log
-    logDuplicates('Filiallar (Tasks)', originalBranches, uniqueBranches, 'getUniqueBranchesHTMLForTasks');
-    
-    // Nom bo'yicha sort qilish
-    uniqueBranches.sort((a, b) => {
-        const nameCompare = a.name.localeCompare(b.name);
-        if (nameCompare !== 0) return nameCompare;
-        return (a.brand_id || 0) - (b.brand_id || 0);
-    });
-    
+        // Bindings rejimi
+        const onChangeAttr = onChangeHandler ? `onchange="${onChangeHandler}(); updateUserBranchesFilter();"` : '';
     return uniqueBranches.map(branch => `
         <label style="display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; margin-bottom: 5px;" 
                data-brand-id="${branch.brand_id}"
                onmouseover="this.style.background='rgba(79, 172, 254, 0.1)'" 
                onmouseout="this.style.background='transparent'">
-            <input type="checkbox" value="${branch.id}" class="user-task-branch-checkbox"
-                   style="width: 18px; height: 18px; cursor: pointer;">
+                <input type="checkbox" value="${branch.id}" ${bindingsBranches.some(b => b.id === branch.id) ? 'checked' : ''} 
+                       style="width: 18px; height: 18px; cursor: pointer;" ${onChangeAttr}>
             <span style="flex: 1; font-size: 14px;">${branch.name}</span>
         </label>
     `).join('');
+    }
 }
 
 // Save user bindings
@@ -8475,6 +8308,9 @@ window.saveUserBindings = async function(userId) {
         // Kassir uchun "approve_cashier" yoki Operator uchun "approve_operator" tanlansa, filiallar/brendlar majburiy
         const cashierTasks = ['approve_cashier', 'debt:approve_cashier'];
         const operatorTasks = ['approve_operator', 'debt:approve_operator'];
+        // Supervisor task'lari
+        const supervisorCashierTasks = ['approve_supervisor_cashier'];
+        const supervisorOperatorTasks = ['approve_supervisor_operator'];
         // Bloklash permission'lari uchun brand_id, branch_id, svr_id kerak emas (umumiy permission)
         const blockTasks = ['debt:block', 'debt:unblock', 'debt:admin'];
         const needsBranchSelection = (isCashier && selectedTaskTypes.some(t => cashierTasks.includes(t)));
@@ -8494,6 +8330,55 @@ window.saveUserBindings = async function(userId) {
                 });
                 return; // Keyingi task'ga o'tish
             }
+            
+            // Supervisor kasirlarga biriktirilgan
+            if (supervisorCashierTasks.includes(taskType)) {
+                if (bindingsBranches.length > 0) {
+                    // Har bir filial uchun vazifa (kasirlar filial bo'yicha)
+                    bindingsBranches.forEach(branchId => {
+                        tasks.push({
+                            task_type: taskType,
+                            brand_id: null,
+                            branch_id: branchId,
+                            svr_id: null
+                        });
+                    });
+                } else {
+                    // Umumiy vazifa (barcha filiallar)
+                    tasks.push({
+                        task_type: taskType,
+                        brand_id: null,
+                        branch_id: null,
+                        svr_id: null
+                    });
+                }
+                return;
+            }
+            
+            // Supervisor operatorlarga biriktirilgan
+            if (supervisorOperatorTasks.includes(taskType)) {
+                if (bindingsBrands.length > 0) {
+                    // Har bir brend uchun vazifa (operatorlar brend bo'yicha)
+                    bindingsBrands.forEach(brandId => {
+                        tasks.push({
+                            task_type: taskType,
+                            brand_id: brandId,
+                            branch_id: null,
+                            svr_id: null
+                        });
+                    });
+                } else {
+                    // Umumiy vazifa (barcha brendlar)
+                    tasks.push({
+                        task_type: taskType,
+                        brand_id: null,
+                        branch_id: null,
+                        svr_id: null
+                    });
+                }
+                return;
+            }
+            
             // Kassir uchun filiallar kerak, Operator uchun brendlar kerak
             if (needsBranchSelection && bindingsBranches.length > 0) {
                 // Kassir uchun - har bir filial uchun vazifa

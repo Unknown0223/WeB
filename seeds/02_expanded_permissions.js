@@ -347,6 +347,93 @@ exports.seed = async function(knex) {
       description: 'Tizim ma\'lumotlarini ko\'rish', 
       category: 'Tizim Boshqaruvi' 
     },
+
+    // ============ QARZDORLIK TASDIQLASH (Debt Approval) ============
+    { 
+      permission_key: 'debt:view_all', 
+      description: 'Barcha qarzdorlik so\'rovlarini ko\'rish', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:view_own', 
+      description: 'Faqat o\'z qarzdorlik so\'rovlarini ko\'rish', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:create', 
+      description: 'Yangi qarzdorlik so\'rovi yaratish', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:approve_leader', 
+      description: 'Leader sifatida SET so\'rovlarni tasdiqlash', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:approve_cashier', 
+      description: 'Cashier sifatida so\'rovlarni tasdiqlash', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:approve_operator', 
+      description: 'Operator sifatida so\'rovlarni tasdiqlash', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:approve_supervisor', 
+      description: 'Nazoratchi sifatida so\'rovlarni tasdiqlash', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:mark_debt', 
+      description: 'Qarzdorlik belgilash (Excel, rasm yoki summa kiritish)', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:view_statistics', 
+      description: 'Qarzdorlik statistikasini ko\'rish', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:export', 
+      description: 'Qarzdorlik ma\'lumotlarini eksport qilish', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:view_bindings', 
+      description: 'Qarzdorlik bog\'lanishlarini ko\'rish (brendlar, filiallar, SVR\'lar)', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:manage_bindings', 
+      description: 'Qarzdorlik bog\'lanishlarini boshqarish (yaratish/o\'zgartirish/o\'chirish)', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:admin', 
+      description: 'Qarzdorlik tizimini to\'liq boshqarish (admin huquqlari)', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:block', 
+      description: 'Elementlarni bloklash (brendlar, filiallar, SVR\'lar)', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:unblock', 
+      description: 'Bloklashni bekor qilish (brendlar, filiallar, SVR\'lar)', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:bot_activity', 
+      description: 'Telegram bot faoliyatini ko\'rish (xabarlar, tasdiqlashlar)', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
+    { 
+      permission_key: 'debt:bot_manage', 
+      description: 'Telegram bot jarayonlarini boshqarish', 
+      category: 'Qarzdorlik Tasdiqlash' 
+    },
   ];
 
   // Har bir permission uchun insert or update

@@ -72,6 +72,10 @@
     animation: slideDown 0.3s ease;
 }
 
+.month-dropdown.hidden {
+    display: none !important;
+}
+
 @keyframes slideDown {
     from {
         opacity: 0;

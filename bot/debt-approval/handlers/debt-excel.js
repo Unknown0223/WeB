@@ -98,35 +98,43 @@ async function handleExcelFile(msg, bot) {
         }
         
         // Faqat DEBT_APPROVAL context uchun tekshirish (HISOBOT uchun tekshirish yo'q)
-        if (state.context === stateManager.CONTEXTS.DEBT_APPROVAL && state.state === STATES.UPLOAD_DEBT_EXCEL) {
-            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] DEBT_APPROVAL context va UPLOAD_DEBT_EXCEL state: requestId=${state.data?.request_id}, brandId=${state.data?.brand_id}, branchId=${state.data?.branch_id}`);
-            
-            // Database user_id ni olish (tekshirishlar uchun)
-            const user = await userHelper.getUserByTelegram(chatId, userId);
-            if (!user) {
-                log.warn(`[DEBT_EXCEL] ❌ Foydalanuvchi topilmadi: userId=${userId}`);
-                await bot.sendMessage(chatId, '❌ Foydalanuvchi topilmadi.');
+        if (state.context === stateManager.CONTEXTS.DEBT_APPROVAL) {
+            // SET so'rov uchun Excel fayl faqat set_extra_info state'da qabul qilinadi
+            if (state.data?.type === 'SET' && state.state !== 'set_extra_info') {
+                // SET so'rov uchun Excel fayl faqat set_extra_info state'da qabul qilinadi
+                log.warn(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] ❌ SET so'rov uchun Excel fayl noto'g'ri state'da qabul qilinmoqda: state=${state.state}, userId=${userId}`);
+                await bot.sendMessage(chatId, '❌ Excel fayl yuborishdan oldin avval SVR tanlash shart!\n\nIltimos, avval SVR tanlang va keyin Excel fayl yuboring.');
                 return true;
-            }
-            
-            // Faqat tegishli foydalanuvchidan qabul qilish
-            if (state.data.allowed_user_id) {
-                // Database user_id larni solishtirish
-                if (state.data.allowed_user_id !== user.id) {
-                    log.warn(`[DEBT_EXCEL] ❌ Noto'g'ri foydalanuvchi qarzdorlik faylini yubormoqda: telegramUserId=${userId}, databaseUserId=${user.id}, allowedUserId=${state.data.allowed_user_id}, requestId=${state.data.request_id}`);
-                    await bot.sendMessage(chatId, '❌ Bu so\'rov sizga tegishli emas. Qarzdorlik faylini faqat tegishli foydalanuvchi yuborishi mumkin.');
+            } else if (state.state === STATES.UPLOAD_DEBT_EXCEL) {
+                // Qarzi bor uchun UPLOAD_DEBT_EXCEL state
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] DEBT_APPROVAL context va UPLOAD_DEBT_EXCEL state: requestId=${state.data?.request_id}, brandId=${state.data?.brand_id}, branchId=${state.data?.branch_id}`);
+                
+                // Database user_id ni olish (tekshirishlar uchun)
+                const user = await userHelper.getUserByTelegram(chatId, userId);
+                if (!user) {
+                    log.warn(`[DEBT_EXCEL] ❌ Foydalanuvchi topilmadi: userId=${userId}`);
+                    await bot.sendMessage(chatId, '❌ Foydalanuvchi topilmadi.');
                     return true;
                 }
-            }
-            
-            // Filial va brend tekshirish
-            if (state.data.branch_id && state.data.brand_id && state.data.request_id) {
-                // So'rovni olish va current_approver_id ni tekshirish
-                const request = await db('debt_requests')
-                    .where('id', state.data.request_id)
-                    .first();
                 
-                if (request) {
+                // Faqat tegishli foydalanuvchidan qabul qilish
+                if (state.data.allowed_user_id) {
+                    // Database user_id larni solishtirish
+                    if (state.data.allowed_user_id !== user.id) {
+                        log.warn(`[DEBT_EXCEL] ❌ Noto'g'ri foydalanuvchi qarzdorlik faylini yubormoqda: telegramUserId=${userId}, databaseUserId=${user.id}, allowedUserId=${state.data.allowed_user_id}, requestId=${state.data.request_id}`);
+                        await bot.sendMessage(chatId, '❌ Bu so\'rov sizga tegishli emas. Qarzdorlik faylini faqat tegishli foydalanuvchi yuborishi mumkin.');
+                        return true;
+                    }
+                }
+                
+                // Filial va brend tekshirish
+                if (state.data.branch_id && state.data.brand_id && state.data.request_id) {
+                    // So'rovni olish va current_approver_id ni tekshirish
+                    const request = await db('debt_requests')
+                        .where('id', state.data.request_id)
+                        .first();
+                    
+                    if (request) {
                     // Avval current_approver_type ni tekshirish - agar operator bo'lsa, kassir tekshiruvini o'tkazib yuborish
                     if (request.current_approver_id === user.id && request.current_approver_type === 'operator') {
                         log.info(`[DEBT_EXCEL] ✅ Operator so'rovga tayinlangan (current_approver_id): requestId=${state.data.request_id}, userId=${user.id}`);
@@ -263,6 +271,7 @@ async function handleExcelFile(msg, bot) {
                         }
                     }
                 }
+                }
                 
                 log.info(`[DEBT_EXCEL] ✅ Foydalanuvchi tekshiruvi o'tdi: userId=${userId}, role=${user.role}, branchId=${state.data.branch_id}, brandId=${state.data.brand_id}`);
             }
@@ -316,81 +325,197 @@ async function handleExcelFile(msg, bot) {
             writer.on('error', reject);
         });
         
-        // Excel faylni o'qish
+        // Excel faylni o'qish - parseExcelFile funksiyasini ishlatish (to'g'ri format)
         log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel faylni o'qish boshlanmoqda: filePath=${filePath}`);
-        const workbook = XLSX.readFile(filePath);
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null });
         
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl o'qildi: totalRows=${data.length}, sheetName=${sheetName}`);
+        // Request ma'lumotlarini olish (validatsiya uchun)
+        const requestData = await getRequestDataForValidation(state, userId);
         
-        if (data.length < 2) {
-            log.warn(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl bo'sh yoki noto'g'ri formatda: rows=${data.length}`);
+        // parseExcelFile funksiyasini ishlatish (to'g'ri formatda o'qadi)
+        const parseResult = await parseExcelFile(filePath, requestData);
+        
+        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl o'qildi: totalRows=${parseResult.data.length}, filteredRows=${parseResult.filteredData.length}`);
+        
+        // Excel faylni o'chirish (ma'lumotlar o'qildi, endi fayl kerak emas)
+        try {
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl o'chirildi: filePath=${filePath}`);
+            }
+        } catch (unlinkError) {
+            log.warn(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel faylni o'chirishda xatolik (keraksiz): filePath=${filePath}, error=${unlinkError.message}`);
+        }
+        
+        if (!parseResult.data || parseResult.data.length === 0) {
+            log.warn(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl bo'sh yoki noto'g'ri formatda`);
             await bot.sendMessage(chatId, '❌ Excel fayl bo\'sh yoki noto\'g\'ri formatda.');
-            fs.unlinkSync(filePath);
             return true;
         }
         
-        // Headers va data ajratish
-        const headers = data[0].map(h => h ? String(h).trim() : '');
-        const rows = data.slice(1).filter(row => row.some(cell => cell !== null && cell !== ''));
+        const headers = parseResult.headers;
+        const detectedColumns = parseResult.columns;
+        const filteredData = parseResult.filteredData;
         
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Headers va qatorlar ajratildi: headersCount=${headers.length}, rowsCount=${rows.length}`);
+        // excel_raw_data ni array formatida saqlash (manual ustun tanlash uchun)
+        // parseResult.data object formatida, uni array formatiga o'tkazish kerak
+        const rawDataAsArrays = parseResult.data.map(row => {
+            return headers.map(header => row[header] !== undefined ? row[header] : null);
+        });
         
-        // Ustunlarni aniqlash
-        const detectedColumns = detectColumns(headers);
+        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Headers va qatorlar ajratildi: headersCount=${headers.length}, rowsCount=${parseResult.data.length}, filteredRows=${filteredData.length}`);
         log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Ustunlar aniqlandi: detectedColumns=${JSON.stringify(detectedColumns)}`);
         
+        // SET so'rov uchun tekshirish: agar filtrlangan ma'lumotlar bo'sh bo'lsa yoki summa 0 bo'lsa, NORMAL ga o'zgartirish
+        let requestType = state.data.type || 'NORMAL';
+        let typeChanged = false;
+        
+        if (requestType === 'SET' && detectedColumns.id !== null && detectedColumns.name !== null && detectedColumns.summa !== null) {
+            const isEmpty = !filteredData || filteredData.length === 0;
+            const isZero = parseResult.total === 0 || parseResult.total === null || parseResult.total === undefined;
+            
+            if (isEmpty || isZero) {
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] SET so'rovda qarzdorlik ma'lumotlari topilmadi (filteredRows=${filteredData.length}, total=${parseResult.total}), so'rov turi NORMAL ga o'zgartirilmoqda`);
+                requestType = 'NORMAL';
+                typeChanged = true;
+                
+                // Ogohlantirish xabari yuborish
+                const branch = state.data.branch_id ? await db('debt_branches').where('id', state.data.branch_id).first() : null;
+                const svr = state.data.svr_id ? await db('debt_svrs').where('id', state.data.svr_id).first() : null;
+                
+                let warningMessage = `⚠️ <b>Ogohlantirish</b>\n\n`;
+                warningMessage += `Tanlangan SVR va yuborilgan faylda qarzdorlik ma'lumotlari topilmadi.\n\n`;
+                if (branch) warningMessage += `📍 Filial: ${branch.name}\n`;
+                if (svr) warningMessage += `👤 SVR: ${svr.name}\n`;
+                warningMessage += `\n📋 So'rov turi avtomatik ravishda <b>ODDIY</b> ga o'zgartirildi.\n`;
+                warningMessage += `So'rov oddiy so'rov sifatida davom etadi (kassirga yuboriladi).`;
+                
+                await bot.sendMessage(chatId, warningMessage, { parse_mode: 'HTML' });
+            }
+        }
+        
         // State'ni yangilash (bir nechta marta fayl yuborilganda, eski ma'lumotlar yangilanadi)
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] State yangilanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
+        // excel_file_path o'rniga null (fayl saqlanmaydi)
+        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] State yangilanmoqda: userId=${userId}, requestId=${state.data?.request_id}, type=${requestType}${typeChanged ? ' (o\'zgartirildi)' : ''}`);
         stateManager.updateUserState(userId, state.state, {
             ...state.data,
-            excel_file_path: filePath,
+            type: requestType, // Type'ni yangilash (agar o'zgartirilgan bo'lsa)
+            excel_file_path: null, // Fayl saqlanmaydi, faqat ma'lumotlar database'ga saqlanadi
             excel_headers: headers,
-            excel_raw_data: rows,
+            excel_raw_data: rawDataAsArrays, // Array formatida saqlash (manual ustun tanlash uchun)
             excel_columns: detectedColumns,
             excel_detected: detectedColumns,
+            excel_data: filteredData, // Filtrlangan ma'lumotlar
+            excel_total: parseResult.total, // Jami summa
             last_file_upload_time: Date.now() // Bir nechta marta fayl yuborilganda tracking uchun
         });
         
-        // Agar barcha kerakli ustunlar topilgan bo'lsa, to'g'ridan-to'g'ri validatsiya
+        // Agar barcha kerakli ustunlar topilgan bo'lsa
         if (detectedColumns.id !== null && detectedColumns.name !== null && detectedColumns.summa !== null) {
-            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Barcha kerakli ustunlar topildi, validatsiya boshlanmoqda`);
-            // Request ma'lumotlarini olish
-            const requestData = await getRequestDataForValidation(state, userId);
+            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Barcha kerakli ustunlar topildi (type=${requestType}, state=${state.state}, requestId=${state.data?.request_id})`);
             
-            // Validatsiya va filtrlash
-            const validationResult = validateAndFilterRows(
-                rows.map(row => {
-                    const rowObj = {};
-                    headers.forEach((header, index) => {
-                        rowObj[header] = row[index];
-                    });
-                    return rowObj;
-                }),
-                detectedColumns,
-                requestData,
-                headers
-            );
+            // ✅ MUHIM: Agar UPLOAD_DEBT_EXCEL state'da va request_id mavjud bo'lsa (qarzi bor holati),
+            // preview ko'rsatish kerak (Telegraph link bilan)
+            if (state.state === STATES.UPLOAD_DEBT_EXCEL && state.data?.request_id) {
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Qarzi bor holati: preview ko'rsatilmoqda: requestId=${state.data.request_id}, userId=${userId}`);
+                
+                // So'rovni olish (solishtirish uchun) - TO'LIQ ma'lumotlar bilan
+                const request = await db('debt_requests')
+                    .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+                    .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+                    .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+                    .select(
+                        'debt_requests.*',
+                        'debt_brands.name as brand_name',
+                        'debt_branches.name as filial_name',
+                        'debt_svrs.name as svr_name'
+                    )
+                    .where('debt_requests.id', state.data.request_id)
+                    .first();
+                
+                // Solishtirish natijasini olish (agar SET so'rov bo'lsa)
+                let comparisonResult = null;
+                if (request && request.type === 'SET' && request.excel_data) {
+                    try {
+                        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Solishtirish boshlanmoqda: requestId=${state.data.request_id}`);
+                        
+                        const originalExcelData = JSON.parse(request.excel_data);
+                        const originalHeaders = request.excel_headers ? JSON.parse(request.excel_headers) : null;
+                        const originalColumns = request.excel_columns ? JSON.parse(request.excel_columns) : null;
+                        
+                        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Original data: ${originalExcelData.length} qator, Headers: ${originalHeaders?.length || 0}, Columns: ${JSON.stringify(originalColumns)}`);
+                        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] New data: ${filteredData.length} qator, Headers: ${headers?.length || 0}, Columns: ${JSON.stringify(detectedColumns)}`);
+                        
+                        // ✅ LOG: Birinchi 3 ta qatorni ko'rsatish
+                        if (originalExcelData.length > 0) {
+                            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Original birinchi qator:`, originalExcelData[0]);
+                        }
+                        if (filteredData.length > 0) {
+                            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] New birinchi qator:`, filteredData[0]);
+                        }
+                        
+                        comparisonResult = compareExcelData(
+                            originalExcelData,
+                            originalHeaders,
+                            originalColumns,
+                            filteredData,
+                            headers,
+                            detectedColumns
+                        );
+                        
+                        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Solishtirish natijasi: isIdentical=${comparisonResult.isIdentical}, differences=${comparisonResult.differences?.length || 0}, totalDifference=${comparisonResult.totalDifference}`);
+                        
+                        // ✅ LOG: Birinchi 5 ta farqni ko'rsatish
+                        if (comparisonResult.differences && comparisonResult.differences.length > 0) {
+                            const first5Differences = comparisonResult.differences.slice(0, 5);
+                            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Birinchi 5 ta farq:`, first5Differences.map(diff => ({
+                                type: diff.type,
+                                id: diff.id,
+                                name: diff.name,
+                                original_summa: diff.original_summa,
+                                new_summa: diff.new_summa,
+                                difference: diff.difference
+                            })));
+                        }
+                        
+                        // Solishtirish natijasini state'ga saqlash
+                        stateManager.updateUserState(userId, state.state, {
+                            ...state.data,
+                            comparison_result: comparisonResult
+                        });
+                    } catch (compareError) {
+                        log.error(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Solishtirishda xatolik: ${compareError.message}`);
+                    }
+                }
+                
+                // Preview ko'rsatish (Telegraph link bilan)
+                await showDebtPreviewWithComparison(userId, chatId, bot, stateManager.getUserState(userId), request, comparisonResult);
+                
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] ✅ Preview ko'rsatildi: requestId=${state.data.request_id}, userId=${userId}`);
+                return true;
+            }
             
-            // State'ni yangilash
-            stateManager.updateUserState(userId, state.state, {
-                ...state.data,
-                excel_data: validationResult.filtered,
-                excel_total: validationResult.filtered.reduce((sum, row) => {
-                    const summaHeader = headers[detectedColumns.summa];
-                    const summaValue = row[summaHeader];
-                    const summa = summaValue !== undefined && summaValue !== null
-                        ? parseFloat(String(summaValue).replace(/\s/g, '').replace(/,/g, '.'))
-                        : 0;
-                    return sum + (isNaN(summa) ? 0 : summa);
-                }, 0)
-            });
+            // Preview ko'rsatish (faqat yangi so'rov yaratish holatida)
+            // Agar type NORMAL ga o'zgartirilgan bo'lsa, SET state'ni NORMAL state'ga o'zgartirish
+            if (state.state === 'set_extra_info' && requestType === 'NORMAL') {
+                // State'ni PREVIEW ga o'zgartirish (NORMAL so'rov uchun)
+                stateManager.updateUserState(userId, 'preview', stateManager.getUserState(userId).data);
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] State set_extra_info dan preview ga o'zgartirildi (NORMAL so'rov)`);
+            }
             
-            // Preview ko'rsatish
-            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Preview ko'rsatish boshlanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
-            await showExcelPreview(userId, chatId, bot, state);
+            // SET so'rov uchun (state.state === 'set_extra_info' va type hali ham SET) showPreview ko'rsatish, aks holda showExcelPreview yoki NORMAL preview
+            if (state.state === 'set_extra_info' && requestType === 'SET') {
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] SET so'rov uchun showPreview ko'rsatish: userId=${userId}`);
+                const { showPreview } = require('./manager.js');
+                await showPreview(chatId, userId, null, bot);
+            } else if (requestType === 'NORMAL') {
+                // NORMAL so'rov uchun preview ko'rsatish
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] NORMAL so'rov uchun showPreview ko'rsatish: userId=${userId}`);
+                const { showPreview } = require('./manager.js');
+                await showPreview(chatId, userId, null, bot);
+            } else {
+                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Preview ko'rsatish boshlanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
+                await showExcelPreview(userId, chatId, bot, stateManager.getUserState(userId));
+            }
         } else {
             // Manual ustun tanlash
             log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Manual ustun tanlash boshlanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
@@ -423,14 +548,40 @@ async function getRequestDataForValidation(state, userId) {
                 )
                 .first();
             
+            if (request) {
+                log.debug(`[VALIDATION] Request data from DB: svr_name="${request.svr_name}", brand_name="${request.brand_name}"`);
+            }
             return request || {};
         }
         
-        // Agar request_id yo'q bo'lsa, state'dan olish
-        return {
-            brand_name: state.data.brand_name,
-            svr_name: state.data.svr_name
-        };
+        // Agar request_id yo'q bo'lsa, state'dan svr_id va brand_id ni olish va database'dan nomlarini olish
+        const requestData = {};
+        
+        if (state.data.svr_id) {
+            const svr = await db('debt_svrs').where('id', state.data.svr_id).select('name').first();
+            if (svr) {
+                requestData.svr_name = svr.name;
+                log.debug(`[VALIDATION] SVR from DB: svr_id=${state.data.svr_id}, svr_name="${svr.name}"`);
+            } else {
+                log.warn(`[VALIDATION] SVR topilmadi: svr_id=${state.data.svr_id}`);
+            }
+        } else {
+            log.warn(`[VALIDATION] State'da svr_id yo'q`);
+        }
+        
+        if (state.data.brand_id) {
+            const brand = await db('debt_brands').where('id', state.data.brand_id).select('name').first();
+            if (brand) {
+                requestData.brand_name = brand.name;
+                log.debug(`[VALIDATION] Brand from DB: brand_id=${state.data.brand_id}, brand_name="${brand.name}"`);
+            } else {
+                log.warn(`[VALIDATION] Brand topilmadi: brand_id=${state.data.brand_id}`);
+            }
+        } else {
+            log.warn(`[VALIDATION] State'da brand_id yo'q`);
+        }
+        
+        return requestData;
     } catch (error) {
         log.error('Error getting request data for validation:', error);
         return {};
@@ -479,8 +630,10 @@ async function showColumnSelection(userId, chatId, bot, headers, detectedColumns
             keyboard.inline_keyboard.push([{ text: '5️⃣ Brend ustuni tanlash (ixtiyoriy)', callback_data: 'debt_select_column:brand' }]);
         }
         
-        keyboard.inline_keyboard.push([{ text: '✅ Tasdiqlash', callback_data: 'debt_confirm_columns' }]);
-        keyboard.inline_keyboard.push([{ text: '❌ Bekor qilish', callback_data: 'debt_cancel_excel' }]);
+        keyboard.inline_keyboard.push([
+            { text: '✅ Tasdiqlash', callback_data: 'debt_confirm_columns' },
+            { text: '❌ Bekor qilish', callback_data: 'debt_cancel_excel' }
+        ]);
         
         await bot.sendMessage(chatId, message, { reply_markup: keyboard });
     } catch (error) {
@@ -641,6 +794,194 @@ async function handleConfirmColumns(query, bot) {
 }
 
 /**
+ * Qarzi bor holatida preview ko'rsatish (solishtirish bilan)
+ */
+async function showDebtPreviewWithComparison(userId, chatId, bot, state, request, comparisonResult) {
+    try {
+        const { excel_data, excel_headers, excel_columns, excel_total, request_id } = state.data;
+        
+        if (!excel_data || excel_data.length === 0) {
+            await bot.sendMessage(chatId, '❌ Excel faylda ma\'lumotlar topilmadi yoki mos kelmadi.');
+            return;
+        }
+        
+        // So'rov ma'lumotlarini olish
+        // Agar request mavjud bo'lsa, lekin brand_name, filial_name, svr_name yo'q bo'lsa, database'dan qidirish
+        let requestData = request;
+        if (!requestData || !requestData.brand_name || !requestData.filial_name || !requestData.svr_name) {
+            requestData = await db('debt_requests')
+                .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+                .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+                .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+                .select(
+                    'debt_requests.*',
+                    'debt_brands.name as brand_name',
+                    'debt_branches.name as filial_name',
+                    'debt_svrs.name as svr_name'
+                )
+                .where('debt_requests.id', request_id)
+                .first();
+        }
+        
+        if (!requestData) {
+            await bot.sendMessage(chatId, '❌ So\'rov topilmadi.');
+            return;
+        }
+        
+        // SET so'rov ekanligini aniqlash (Telegraph sahifa yaratishdan oldin)
+        const isSetRequest = requestData.type === 'SET';
+        
+        // Telegraph sahifa yaratish
+        // ✅ MUHIM: Agar farq bo'lsa, faqat farqlarni ko'rsatish (ID, nomi, original summa, yangi summa, farq)
+        let telegraphUrl = null;
+        
+        // Agar SET so'rov bo'lsa va farq bo'lsa, farqlar sahifasini yaratish
+        if (isSetRequest && comparisonResult && comparisonResult.canCompare && !comparisonResult.isIdentical && comparisonResult.differences && comparisonResult.differences.length > 0) {
+            try {
+                const { createDifferencesPage } = require('../../../utils/telegraph.js');
+                telegraphUrl = await createDifferencesPage({
+                    differences: comparisonResult.differences,
+                    request_uid: requestData.request_uid,
+                    brand_name: requestData.brand_name,
+                    filial_name: requestData.filial_name,
+                    svr_name: requestData.svr_name,
+                    month_name: require('../../../utils/dateHelper.js').getPreviousMonthName()
+                });
+                log.info(`[DEBT_EXCEL] Farqlar sahifasi yaratildi: ${telegraphUrl}, differencesCount=${comparisonResult.differences.length}`);
+            } catch (telegraphError) {
+                log.error(`[DEBT_EXCEL] Farqlar sahifasini yaratishda xatolik: ${telegraphError.message}`);
+            }
+        } else {
+            // Oddiy holatda yoki farq bo'lmasa, oddiy qarzdorlik sahifasini yaratish
+            try {
+                const { createDebtDataPage } = require('../../../utils/telegraph.js');
+                telegraphUrl = await createDebtDataPage({
+                    request_uid: requestData.request_uid,
+                    brand_name: requestData.brand_name,
+                    filial_name: requestData.filial_name,
+                    svr_name: requestData.svr_name,
+                    month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
+                    extra_info: requestData.extra_info,
+                    excel_data: excel_data,
+                    excel_headers: excel_headers,
+                    excel_columns: excel_columns,
+                    total_amount: excel_total
+                });
+            } catch (telegraphError) {
+                log.error(`[DEBT_EXCEL] Telegraph sahifa yaratishda xatolik: ${telegraphError.message}`);
+            }
+        }
+        
+        // Xabar matnini tayyorlash
+        let messageText = `⚠️ <b>Qarzdorlik ma'lumotlari</b>\n\n`;
+        messageText += `So'rov ID: ${requestData.request_uid}\n`;
+        messageText += `Brend: ${requestData.brand_name}\n`;
+        messageText += `Filial: ${requestData.filial_name}\n`;
+        messageText += `SVR: ${requestData.svr_name}\n\n`;
+        
+        // SET so'rov uchun solishtirish natijasini ko'rsatish
+        // isSetRequest allaqachon aniqlangan (yuqorida)
+        if (isSetRequest && comparisonResult && comparisonResult.canCompare) {
+            if (comparisonResult.isIdentical) {
+                messageText += `✅ <b>Ma'lumotlar bir xil</b>\n\n`;
+            } else if (comparisonResult.differences && comparisonResult.differences.length > 0) {
+                messageText += `⚠️ <b>Farq topildi</b>\n`;
+                messageText += `Farqlar soni: ${comparisonResult.differences.length}\n`;
+                if (comparisonResult.totalDifference !== undefined) {
+                    messageText += `Jami farq: ${comparisonResult.totalDifference.toLocaleString('ru-RU')} so'm\n`;
+                }
+                messageText += `\n`;
+            }
+        }
+        
+        // Telegraph link
+        if (telegraphUrl) {
+            // Agar farq bo'lsa, "Farqlar" deb ko'rsatish, aks holda "Qarzdorlik klientlar"
+            if (isSetRequest && comparisonResult && comparisonResult.canCompare && !comparisonResult.isIdentical && comparisonResult.differences && comparisonResult.differences.length > 0) {
+                messageText += `🔗 <a href="${telegraphUrl}">📊 Farqlar:</a>\n`;
+            } else {
+                messageText += `🔗 <a href="${telegraphUrl}">📊 Qarzdorlik klientlar:</a>\n`;
+            }
+        } else {
+            messageText += `📊 Qarzdorlik klientlar: ${excel_data.length} ta\n`;
+        }
+        
+        if (excel_total !== null && excel_total !== undefined) {
+            messageText += `\n💰 TOTAL: ${Math.abs(excel_total).toLocaleString('ru-RU')} so'm`;
+        }
+        
+        // Foydalanuvchi roli va current_approver_type ni aniqlash (knopkalar uchun)
+        const userHelper = require('../../unified/userHelper.js');
+        const user = await userHelper.getUserByTelegram(chatId, userId);
+        let isOperator = false;
+        if (requestData.current_approver_type === 'operator' && requestData.current_approver_id === user?.id) {
+            isOperator = true;
+        } else if (requestData.current_approver_type === 'cashier' && requestData.current_approver_id === user?.id) {
+            isOperator = false;
+        } else {
+            if (user?.role === 'operator') {
+                isOperator = true;
+            } else {
+                const operatorTask = await db('debt_user_tasks')
+                    .where('user_id', user?.id)
+                    .where(function() {
+                        this.where('task_type', 'approve_operator')
+                            .orWhere('task_type', 'debt:approve_operator');
+                    })
+                    .first();
+                
+                if (operatorTask) {
+                    isOperator = true;
+                }
+            }
+        }
+        
+        // Knopkalar
+        let keyboard = { inline_keyboard: [] };
+        
+        // SET so'rov uchun solishtirish natijasiga qarab knopkalar
+        if (isSetRequest && comparisonResult && comparisonResult.canCompare) {
+            log.info(`[DEBT_EXCEL] [PREVIEW] Knopkalar uchun tekshiruv: isIdentical=${comparisonResult.isIdentical}, totalDifference=${comparisonResult.totalDifference}, differences=${comparisonResult.differences?.length || 0}`);
+            
+            if (comparisonResult.isIdentical || (comparisonResult.totalDifference !== undefined && comparisonResult.totalDifference <= 0)) {
+                // Bir xil yoki kichik farq → faqat "Tasdiqlash" knopkasi
+                const approveCallback = isOperator 
+                    ? `operator_approve_${request_id}_${requestData.current_approver_id || user?.id}` 
+                    : `cashier_approve_${request_id}`;
+                keyboard.inline_keyboard.push([
+                    { text: '✅ Tasdiqlash', callback_data: approveCallback }
+                ]);
+                log.info(`[DEBT_EXCEL] [PREVIEW] ✅ Tasdiqlash knopkasi qo'shildi: callback=${approveCallback}`);
+            } else {
+                // Katta farq → "Yuborish" va "Bekor qilish" knopkalari
+                keyboard.inline_keyboard.push([
+                    { text: '✅ Yuborish', callback_data: `debt_confirm_excel_${request_id}` },
+                    { text: '❌ Bekor qilish', callback_data: `debt_cancel_excel_${request_id}` }
+                ]);
+                log.info(`[DEBT_EXCEL] [PREVIEW] ✅ Yuborish va Bekor qilish knopkalari qo'shildi: requestId=${request_id}`);
+            }
+        } else {
+            // ODDIY so'rov yoki solishtirish yo'q → "Yuborish" va "Bekor qilish" knopkalari
+            keyboard.inline_keyboard.push([
+                { text: '✅ Yuborish', callback_data: `debt_confirm_excel_${request_id}` },
+                { text: '❌ Bekor qilish', callback_data: `debt_cancel_excel_${request_id}` }
+            ]);
+            log.info(`[DEBT_EXCEL] [PREVIEW] ✅ ODDIY so'rov uchun Yuborish va Bekor qilish knopkalari qo'shildi: requestId=${request_id}, isSetRequest=${isSetRequest}, hasComparison=${!!comparisonResult}`);
+        }
+        
+        await bot.sendMessage(chatId, messageText, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard
+        });
+        
+        log.info(`[DEBT_EXCEL] Preview ko'rsatildi: requestId=${request_id}, isSetRequest=${isSetRequest}, hasComparison=${!!comparisonResult}`);
+    } catch (error) {
+        log.error('Error showing debt preview with comparison:', error);
+        await bot.sendMessage(chatId, '❌ Preview ko\'rsatishda xatolik yuz berdi.');
+    }
+}
+
+/**
  * Excel preview ko'rsatish
  */
 async function showExcelPreview(userId, chatId, bot, state) {
@@ -792,8 +1133,13 @@ async function handleConfirmExcel(query, bot) {
             .where('id', actualRequestId)
             .first();
         
+        // ✅ MUHIM: SET so'rov uchun solishtirish natijasini state'dan olish (agar mavjud bo'lsa)
         let comparisonResult = null;
-        if (request && request.excel_data) {
+        if (request && request.type === 'SET' && state.data.comparison_result) {
+            comparisonResult = state.data.comparison_result;
+            log.info(`[DEBT_EXCEL] [CONFIRM] State'dan solishtirish natijasi olingan: isIdentical=${comparisonResult.isIdentical}, totalDifference=${comparisonResult.totalDifference}`);
+        } else if (request && request.excel_data) {
+            // Agar state'da solishtirish natijasi yo'q bo'lsa, yangi solishtirish qilish
             try {
                 log.info(`[DEBT_EXCEL] Solishtirish boshlanmoqda: requestId=${actualRequestId}`);
                 
@@ -814,39 +1160,6 @@ async function handleConfirmExcel(query, bot) {
                 );
                 
                 log.info(`[DEBT_EXCEL] Solishtirish natijasi: isIdentical=${comparisonResult.isIdentical}, differences=${comparisonResult.differences?.length || 0}, canCompare=${comparisonResult.canCompare}`);
-                
-                // Agar bir xil bo'lsa, xabar berish (lekin jarayon davom etadi - operatorga yuboriladi)
-                if (comparisonResult.isIdentical) {
-                    log.info(`[DEBT_EXCEL] ⚠️ Ma'lumotlar bir xil, lekin operatorga yuboriladi`);
-                    
-                    // Menejerga ham xabar yuborish (web orqali)
-                    await sendComparisonNotificationToManager(actualRequestId, comparisonResult, user);
-                    
-                    // Xabarni yangilash - tasdiqlash xabari (lekin jarayon davom etadi)
-                    try {
-                        await bot.editMessageText(
-                            '✅ <b>Qardorlik o\'xshash ekanligi aniqlandi</b>\n\n' +
-                            'Yuborilgan Excel fayldagi ma\'lumotlar so\'rovdagi ma\'lumotlar bilan bir xil.\n\n' +
-                            'Ma\'lumotlar operatorga yuborilmoqda...',
-                            {
-                                chat_id: chatId,
-                                message_id: query.message.message_id,
-                                parse_mode: 'HTML'
-                            }
-                        );
-                    } catch (error) {
-                        // Agar xabarni yangilab bo'lmasa, yangi xabar yuborish
-                        log.warn('Could not edit message, sending new message:', error.message);
-                        await bot.sendMessage(
-                            chatId,
-                            '✅ <b>Qardorlik o\'xshash ekanligi aniqlandi</b>\n\n' +
-                            'Yuborilgan Excel fayldagi ma\'lumotlar so\'rovdagi ma\'lumotlar bilan bir xil.\n\n' +
-                            'Ma\'lumotlar operatorga yuborilmoqda...',
-                            { parse_mode: 'HTML' }
-                        );
-                    }
-                    // return qilinmaydi - jarayon davom etadi va operatorga yuboriladi
-                }
             } catch (error) {
                 log.error('Error comparing Excel data:', error);
             }
@@ -866,7 +1179,7 @@ async function handleConfirmExcel(query, bot) {
             comparison_result: comparisonResult // Solishtirish natijasini qo'shish
         };
         
-        // Foydalanuvchi roliga qarab to'g'ri sendDebtResponse funksiyasini chaqirish
+        // Foydalanuvchi roliga qarab to'g'ri funksiyani chaqirish
         // Avval current_approver_type ni tekshirish (so'rovga tayinlangan rolni aniqlash)
         let isOperator = false;
         if (request && request.current_approver_type === 'operator' && request.current_approver_id === user.id) {
@@ -897,6 +1210,54 @@ async function handleConfirmExcel(query, bot) {
             }
         }
         
+        // Agar bir xil bo'lsa, tasdiqlash jarayonini davom ettirish (sendDebtResponse emas)
+        const isIdentical = comparisonResult && comparisonResult.canCompare && comparisonResult.isIdentical;
+        
+        if (isIdentical && request && request.type === 'SET') {
+            // Bir xil bo'lsa, Excel ma'lumotlarini yangilab, tasdiqlash jarayonini davom ettirish
+            log.info(`[DEBT_EXCEL] [CONFIRM] Ma'lumotlar bir xil, Excel ma'lumotlarini yangilab, tasdiqlash jarayonini davom ettirish: requestId=${actualRequestId}`);
+            
+            // Excel ma'lumotlarini yangilash
+            if (debtData.excel_data) {
+                await db('debt_requests')
+                    .where('id', actualRequestId)
+                    .update({
+                        excel_data: JSON.stringify(debtData.excel_data),
+                        excel_headers: debtData.excel_headers ? JSON.stringify(debtData.excel_headers) : null,
+                        excel_columns: debtData.excel_columns ? JSON.stringify(debtData.excel_columns) : null,
+                        excel_total: debtData.total_amount
+                    });
+            }
+            
+            // Callback_data'ni o'zgartirib, tasdiqlash funksiyasini chaqirish
+            if (isOperator) {
+                const operatorHandlers = require('./operator.js');
+                // Callback query'ni o'zgartirish (operator_approve formatiga)
+                const modifiedQuery = {
+                    ...query,
+                    data: `operator_approve_${actualRequestId}_${request.current_approver_id || user.id}`
+                };
+                await operatorHandlers.handleOperatorApproval(modifiedQuery, bot);
+            } else if (userHelper.hasRole(user, ['kassir', 'cashier']) || (request && request.current_approver_type === 'cashier')) {
+                const cashierHandlers = require('./cashier.js');
+                // Callback query'ni o'zgartirish (cashier_approve formatiga)
+                const modifiedQuery = {
+                    ...query,
+                    data: `cashier_approve_${actualRequestId}`
+                };
+                await cashierHandlers.handleCashierApproval(modifiedQuery, bot);
+            } else {
+                log.warn(`Unknown role for approval: userId=${userId}, role=${user.role}, current_approver_type=${request?.current_approver_type}`);
+                await bot.sendMessage(chatId, '❌ Bu funksiya faqat kassir va operatorlar uchun.');
+                return;
+            }
+            
+            // State'ni tozalash
+            stateManager.clearUserState(userId);
+            return;
+        }
+        
+        // Agar farq bo'lsa yoki NORMAL so'rov bo'lsa, sendDebtResponse chaqirish
         if (isOperator) {
             // Operator uchun sendDebtResponse
             const operatorHandlers = require('./operator.js');
@@ -911,13 +1272,33 @@ async function handleConfirmExcel(query, bot) {
             return;
         }
         
-        // Agar farq bo'lsa, farqlarni ko'rsatish
+        // ✅ Farqlar Telegraph link orqali ko'rsatiladi, Telegram xabarida ko'rsatilmaydi
+        // Menejerga ham xabar yuborish (web orqali)
         if (comparisonResult && !comparisonResult.isIdentical && comparisonResult.differences.length > 0) {
-            const differencesMessage = formatDifferencesMessage(comparisonResult);
-            await bot.sendMessage(chatId, differencesMessage, { parse_mode: 'HTML' });
-            
-            // Menejerga ham xabar yuborish (web orqali)
             await sendComparisonNotificationToManager(actualRequestId, comparisonResult, user);
+        }
+        
+        // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
+        let telegraphUrl = null;
+        if (state.data.excel_data && Array.isArray(state.data.excel_data) && state.data.excel_data.length > 0 && state.data.excel_columns) {
+            try {
+                const { createDebtDataPage } = require('../../../utils/telegraph.js');
+                telegraphUrl = await createDebtDataPage({
+                    request_uid: state.data.request_uid || `REQ-${actualRequestId}`,
+                    brand_name: state.data.brand_name || null,
+                    filial_name: state.data.filial_name || null,
+                    svr_name: state.data.svr_name || null,
+                    month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
+                    extra_info: null,
+                    excel_data: state.data.excel_data,
+                    excel_headers: state.data.excel_headers,
+                    excel_columns: state.data.excel_columns,
+                    total_amount: state.data.excel_total
+                });
+            } catch (telegraphError) {
+                // Telegraph xatolari silent qilinadi (ixtiyoriy xizmat)
+                log.debug(`[DEBT_EXCEL] [CONFIRM_EXCEL] Telegraph xatolik (ixtiyoriy xizmat): requestId=${actualRequestId}`);
+            }
         }
         
         // Excel ma'lumotlarini formatlash (xabar ko'rsatish uchun)
@@ -930,7 +1311,8 @@ async function handleConfirmExcel(query, bot) {
             total_amount: state.data.excel_total,
             excel_data: state.data.excel_data,
             excel_headers: state.data.excel_headers,
-            excel_columns: state.data.excel_columns
+            excel_columns: state.data.excel_columns,
+            telegraph_url: telegraphUrl
         });
         
         // Xabarni tayyorlash - agar bir xil bo'lsa, bir xil ekanligi haqida ma'lumot qo'shish
@@ -1040,12 +1422,18 @@ function compareExcelData(originalData, originalHeaders, originalColumns, newDat
             const idKey = getRowId(row, originalHeaders, originalColumns);
             const summa = getRowSumma(row, originalHeaders, originalColumns);
             if (idKey) {
+                const name = getRowName(row, originalHeaders, originalColumns);
                 originalMap.set(idKey, {
                     id: idKey,
-                    name: getRowName(row, originalHeaders, originalColumns),
+                    name: name,
                     summa: summa
                 });
                 originalMappedCount++;
+                
+                // ✅ LOG: Birinchi 5 ta qatorni log qilish
+                if (index < 5) {
+                    log.info(`[COMPARE] [ORIGINAL] Row ${index + 1}: id=${idKey}, name=${name}, summa=${summa}`);
+                }
             } else if (index < 3) {
                 log.debug(`[COMPARE] Original row ${index} ID topilmadi, row keys:`, Object.keys(row || {}));
             }
@@ -1057,18 +1445,24 @@ function compareExcelData(originalData, originalHeaders, originalColumns, newDat
             const idKey = getRowId(row, newHeaders, newColumns);
             const summa = getRowSumma(row, newHeaders, newColumns);
             if (idKey) {
+                const name = getRowName(row, newHeaders, newColumns);
                 newMap.set(idKey, {
                     id: idKey,
-                    name: getRowName(row, newHeaders, newColumns),
+                    name: name,
                     summa: summa
                 });
                 newMappedCount++;
+                
+                // ✅ LOG: Birinchi 5 ta qatorni log qilish
+                if (index < 5) {
+                    log.info(`[COMPARE] [NEW] Row ${index + 1}: id=${idKey}, name=${name}, summa=${summa}`);
+                }
             } else if (index < 3) {
                 log.debug(`[COMPARE] New row ${index} ID topilmadi, row keys:`, Object.keys(row || {}));
             }
         });
         
-        log.debug(`[COMPARE] Mapped: Original=${originalMappedCount}/${originalData.length}, New=${newMappedCount}/${newData.length}`);
+        log.info(`[COMPARE] Mapped: Original=${originalMappedCount}/${originalData.length}, New=${newMappedCount}/${newData.length}`);
         
         // Farqlarni topish
         const differences = [];
@@ -1086,17 +1480,27 @@ function compareExcelData(originalData, originalHeaders, originalColumns, newDat
                     summa: newRow.summa
                 });
                 totalDifference += Math.abs(newRow.summa || 0);
+                
+                // ✅ LOG: Yangi qatorlar
+                log.debug(`[COMPARE] [NEW] id=${id}, name=${newRow.name}, summa=${newRow.summa}`);
             } else if (Math.abs((originalRow.summa || 0) - (newRow.summa || 0)) > 0.01) {
                 // Summa o'zgardi
+                const difference = newRow.summa - originalRow.summa;
                 differences.push({
                     type: 'changed',
                     id: id,
                     name: newRow.name,
                     original_summa: originalRow.summa,
                     new_summa: newRow.summa,
-                    difference: newRow.summa - originalRow.summa
+                    difference: difference
                 });
                 totalDifference += Math.abs((newRow.summa || 0) - (originalRow.summa || 0));
+                
+                // ✅ LOG: O'zgargan qatorlar
+                log.debug(`[COMPARE] [CHANGED] id=${id}, name=${newRow.name}, original=${originalRow.summa}, new=${newRow.summa}, difference=${difference}`);
+            } else {
+                // Bir xil - log qilmaymiz
+                log.debug(`[COMPARE] [IDENTICAL] id=${id}, name=${newRow.name}, summa=${newRow.summa} (bir xil)`);
             }
         });
         
@@ -1115,6 +1519,18 @@ function compareExcelData(originalData, originalHeaders, originalColumns, newDat
         
         // Agar farq yo'q bo'lsa, bir xil
         const isIdentical = differences.length === 0;
+        
+        // ✅ LOG: Solishtirish natijasi
+        log.info(`[COMPARE] Solishtirish yakunlandi: isIdentical=${isIdentical}, differences=${differences.length}, totalDifference=${Math.abs(totalDifference)}`);
+        log.info(`[COMPARE] Original count: ${originalData.length}, New count: ${newData.length}, Mapped: Original=${originalMappedCount}, New=${newMappedCount}`);
+        
+        // ✅ LOG: Farqlar tafsiloti
+        if (differences.length > 0) {
+            const changedCount = differences.filter(d => d.type === 'changed').length;
+            const newCount = differences.filter(d => d.type === 'new').length;
+            const removedCount = differences.filter(d => d.type === 'removed').length;
+            log.info(`[COMPARE] Farqlar tafsiloti: changed=${changedCount}, new=${newCount}, removed=${removedCount}`);
+        }
         
         return {
             isIdentical,
@@ -1138,7 +1554,14 @@ function getRowId(row, headers, columns) {
     if (!headers || !headers[columns.id]) return null;
     const header = headers[columns.id];
     const value = row[header];
-    return value ? String(value).trim() : null;
+    const result = value ? String(value).trim() : null;
+    
+    // ✅ LOG: ID olish jarayoni
+    if (!result) {
+        log.debug(`[COMPARE] [GET_ROW_ID] ID topilmadi: header=${header}, value=${value}, row keys:`, Object.keys(row || {}));
+    }
+    
+    return result;
 }
 
 /**
@@ -1162,11 +1585,19 @@ function getRowSumma(row, headers, columns) {
     const value = row[header];
     if (value === null || value === undefined || value === '') return 0;
     const num = parseFloat(String(value).replace(/\s/g, '').replace(/,/g, '.'));
-    return isNaN(num) ? 0 : num;
+    const result = isNaN(num) ? 0 : num;
+    
+    // ✅ LOG: Summa olish jarayoni (faqat xatolik bo'lsa)
+    if (isNaN(num) && value !== null && value !== undefined && value !== '') {
+        log.debug(`[COMPARE] [GET_ROW_SUMMA] Summa parse qilinmadi: header=${header}, value=${value}, row keys:`, Object.keys(row || {}));
+    }
+    
+    return result;
 }
 
 /**
  * Farqlarni formatlash
+ * ✅ Format: Bitta qatorda barcha ma'lumotlar, faqat kattaroq yoki yangi bo'lganlar
  */
 function formatDifferencesMessage(comparisonResult) {
     if (!comparisonResult || !comparisonResult.canCompare) {
@@ -1177,27 +1608,49 @@ function formatDifferencesMessage(comparisonResult) {
         return '✅ Ma\'lumotlar bir xil';
     }
     
+    // ✅ Filtrlash: Faqat kattaroq yoki yangi bo'lganlar
+    const filteredDifferences = comparisonResult.differences.filter(diff => {
+        if (diff.type === 'new') {
+            return true; // Yangilar hammasi ko'rsatiladi
+        } else if (diff.type === 'changed') {
+            // Faqat agar yangi summa mutlaq qiymat bo'yicha kattaroq bo'lsa
+            const originalSumma = Math.abs(diff.original_summa || 0);
+            const newSumma = Math.abs(diff.new_summa || 0);
+            return newSumma > originalSumma;
+        }
+        // O'chirilganlar ko'rsatilmaydi
+        return false;
+    });
+    
+    // Tartib: avval o'zgarganlar, keyin yangilar
+    const changedDiffs = filteredDifferences.filter(diff => diff.type === 'changed');
+    const newDiffs = filteredDifferences.filter(diff => diff.type === 'new');
+    const sortedDifferences = [...changedDiffs, ...newDiffs];
+    
     let message = '📊 <b>Farqlar topildi:</b>\n\n';
     
-    if (comparisonResult.differences.length > 0) {
-        // Faqat birinchi 10 ta farqni ko'rsatish
-        const shownDifferences = comparisonResult.differences.slice(0, 10);
+    if (sortedDifferences.length > 0) {
+        // Faqat birinchi 20 ta farqni ko'rsatish (Telegram xabarida)
+        const shownDifferences = sortedDifferences.slice(0, 20);
         
-        shownDifferences.forEach((diff, index) => {
+        let currentIndex = 0;
+        shownDifferences.forEach((diff) => {
+            currentIndex++;
             if (diff.type === 'new') {
-                message += `${index + 1}. ➕ <b>Yangi:</b> ${diff.name || diff.id} - ${diff.summa?.toLocaleString('ru-RU') || 0} so'm\n`;
-            } else if (diff.type === 'removed') {
-                message += `${index + 1}. ➖ <b>O'chirilgan:</b> ${diff.name || diff.id} - ${diff.summa?.toLocaleString('ru-RU') || 0} so'm\n`;
+                // Yangilar: ➕ ID - Nomi || Summa
+                const summa = Math.abs(diff.summa || 0);
+                message += `${currentIndex}. ➕ ${diff.id || 'N/A'} - ${diff.name || 'N/A'} || ${summa.toLocaleString('ru-RU')}\n`;
             } else if (diff.type === 'changed') {
-                message += `${index + 1}. 🔄 <b>O'zgargan:</b> ${diff.name || diff.id}\n`;
-                message += `   Eski: ${diff.original_summa?.toLocaleString('ru-RU') || 0} so'm\n`;
-                message += `   Yangi: ${diff.new_summa?.toLocaleString('ru-RU') || 0} so'm\n`;
-                message += `   Farq: ${diff.difference > 0 ? '+' : ''}${diff.difference.toLocaleString('ru-RU')} so'm\n`;
+                // O'zgarganlar: 🔄 ID - Nomi || Menejer summa || Kassir/Operator summa || Farq: farq
+                const originalSumma = Math.abs(diff.original_summa || 0);
+                const newSumma = Math.abs(diff.new_summa || 0);
+                const difference = diff.difference || 0;
+                message += `${currentIndex}. 🔄 ${diff.id || 'N/A'} - ${diff.name || 'N/A'} || ${originalSumma.toLocaleString('ru-RU')} || ${newSumma.toLocaleString('ru-RU')} || Farq: ${difference > 0 ? '+' : ''}${difference.toLocaleString('ru-RU')}\n`;
             }
         });
         
-        if (comparisonResult.differences.length > 10) {
-            message += `\n... va yana ${comparisonResult.differences.length - 10} ta farq\n`;
+        if (sortedDifferences.length > 20) {
+            message += `\n... va yana ${sortedDifferences.length - 20} ta farq\n`;
         }
     }
     
@@ -1266,6 +1719,8 @@ module.exports = {
     handleConfirmColumns,
     handleConfirmExcel,
     handleEditExcel,
-    showExcelPreview
+    showExcelPreview,
+    showDebtPreviewWithComparison,
+    formatDifferencesMessage
 };
 

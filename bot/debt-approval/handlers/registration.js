@@ -99,6 +99,11 @@ async function handleRegistrationStart(msg, bot) {
                     }
                 }
                 
+                // Active foydalanuvchilar uchun xabar yubormaslik kerak
+                // Chunki /start handler allaqachon welcome xabarini yuboradi
+                // Faqat /register buyrug'i bilan kelganda xabar yuboramiz
+                const text = msg.text?.trim() || '';
+                if (text === '/register' || text.toLowerCase().includes('register') || text.toLowerCase().includes('ro\'yxatdan o\'tish')) {
                 const activeMessage = `✅ <b>Siz allaqachon ro'yxatdan o'tgansiz!</b>\n\n` +
                     `━━━━━━━━━━━━━━━━━━━━\n\n` +
                     `👤 <b>To'liq ism:</b> ${existingUser.fullname || 'Noma\'lum'}\n` +
@@ -106,6 +111,7 @@ async function handleRegistrationStart(msg, bot) {
                     `📊 <b>Holat:</b> <b>Faol</b>${bindingsText}\n\n` +
                     `💡 Tizimdan foydalanish uchun /start buyrug'ini yuboring.`;
                 await bot.sendMessage(chatId, activeMessage, { parse_mode: 'HTML' });
+                }
                 return true;
             } else if (existingUser.status === 'pending_approval' || existingUser.status === 'pending_telegram_subscription') {
                     // Eski xabarlarni tozalash (xavfsizlik uchun)
@@ -523,18 +529,37 @@ async function handleConfirmRegistration(query, bot) {
         ]);
         
         // Foydalanuvchini database'ga saqlash
-        const [newUserId] = await db('users').insert({
-            username: username,
-            password: hashedPassword,
-            secret_word: hashedSecretWord,
-            fullname: fullname,
-            telegram_chat_id: chatId,
-            telegram_username: query.from.username || null,
-            role: 'pending',
-            status: 'pending_approval',
-            created_at: db.fn.now(),
-            updated_at: db.fn.now()
-        });
+        const { isSqlite, isPostgres } = require('../../../db.js');
+        let newUserId;
+        if (isSqlite) {
+            const insertedIds = await db('users').insert({
+                username: username,
+                password: hashedPassword,
+                secret_word: hashedSecretWord,
+                fullname: fullname,
+                telegram_chat_id: chatId,
+                telegram_username: query.from.username || null,
+                role: 'pending',
+                status: 'pending_approval',
+                created_at: db.fn.now(),
+                updated_at: db.fn.now()
+            });
+            newUserId = Array.isArray(insertedIds) ? insertedIds[0] : insertedIds;
+        } else {
+            const result = await db('users').insert({
+                username: username,
+                password: hashedPassword,
+                secret_word: hashedSecretWord,
+                fullname: fullname,
+                telegram_chat_id: chatId,
+                telegram_username: query.from.username || null,
+                role: 'pending',
+                status: 'pending_approval',
+                created_at: db.fn.now(),
+                updated_at: db.fn.now()
+            }).returning('id');
+            newUserId = result[0]?.id || result[0];
+        }
         
         // Barcha eski xabarlarni o'chirish
         if (userMessages[userId]) {

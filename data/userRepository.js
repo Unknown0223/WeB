@@ -1,4 +1,4 @@
-const { db, logAction } = require('../db.js');
+const { db, logAction, isPostgres } = require('../db.js');
 const bcrypt = require('bcrypt');
 const cacheManager = require('../utils/cacheManager.js');
 const { createLogger } = require('../utils/logger.js');
@@ -66,7 +66,7 @@ async function getAllUsersWithDetails() {
             )
             .groupBy('u.id')
             .orderBy('u.username')
-            .select(db.raw("GROUP_CONCAT(ul.location_name) as locations")),
+            .select(db.raw(isPostgres ? "STRING_AGG(ul.location_name, ',') as locations" : "GROUP_CONCAT(ul.location_name) as locations")),
         db('roles').select('role_name', 'requires_locations', 'requires_brands'),
         db('user_locations').select('user_id', 'location_name'),
         db('user_brands').select('user_id', 'brand_id'),

@@ -142,8 +142,8 @@ router.post('/roles/:role_name', isAuthenticated, hasPermission('debt:manage_bin
             user_id: adminId,
             action: 'update_debt_role_bindings',
             target_type: 'role',
-            target_id: role_name,
-            details: JSON.stringify({ brands: brands.length, branches: branches.length, svrs: svrs.length }),
+            target_id: null, // target_id integer, rol nomi string bo'lgani uchun null qilamiz (rol nomi details'da mavjud)
+            details: JSON.stringify({ role_name, brands: brands.length, branches: branches.length, svrs: svrs.length }),
             ip_address: req.session.ip_address,
             user_agent: req.session.user_agent
         });

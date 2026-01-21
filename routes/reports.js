@@ -1,5 +1,5 @@
 const express = require('express');
-const { db, logAction } = require('../db.js');
+const { db, logAction, isPostgres } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { sendToTelegram } = require('../utils/bot.js');
 const { filterReportsByRole, getVisibleLocations, getVisibleBrands } = require('../utils/roleFiltering.js');
@@ -230,6 +230,26 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
         return res.status(400).json({ message: "Sana va filial tanlanishi shart." });
     }
 
+    // Data validatsiyasi
+    if (!data || typeof data !== 'object') {
+        return res.status(400).json({ message: "Hisobot ma'lumotlari noto'g'ri formatda." });
+    }
+
+    // Settings validatsiyasi
+    if (!settings || typeof settings !== 'object') {
+        return res.status(400).json({ message: "Hisobot sozlamalari noto'g'ri formatda." });
+    }
+
+    // User permissions va locations validatsiyasi
+    if (!Array.isArray(user.permissions)) {
+        log.warn(`[REPORTS] User permissions array emas: ${typeof user.permissions}`, { userId: user.id });
+        user.permissions = [];
+    }
+    if (!Array.isArray(user.locations)) {
+        log.warn(`[REPORTS] User locations array emas: ${typeof user.locations}`, { userId: user.id });
+        user.locations = [];
+    }
+
     const totalSum = Object.values(data).reduce((sum, value) => sum + (Number(value) || 0), 0);
     if (totalSum === 0) {
         return res.status(400).json({ message: "Bo'sh hisobotni saqlab bo'lmaydi. Iltimos, ma'lumot kiriting." });
@@ -241,10 +261,36 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
     }
 
     try {
-        const existingReport = await db('reports').where({ report_date: date, location: location }).first();
-        if (existingReport) {
-            return res.status(409).json({ message: `Ushbu sana (${date}) uchun "${location}" filialida hisobot allaqachon mavjud. Sahifani yangilang.` });
-        }
+        // ✅ Duplicate tekshirish: bir xil sana, filial va brend uchun hisobot mavjudligini tekshirish
+        // Transaction ishlatish - race condition'ni oldini olish uchun
+        const trx = await db.transaction();
+        
+        try {
+            let existingReportQuery = trx('reports')
+                .where({ report_date: date, location: location });
+            
+            // PostgreSQL uchun row-level lock
+            if (isPostgres) {
+                existingReportQuery = existingReportQuery.forUpdate();
+            }
+            
+            // Agar brand_id mavjud bo'lsa, uni ham tekshirish
+            if (brand_id) {
+                existingReportQuery = existingReportQuery.where({ brand_id: brand_id });
+            } else {
+                // Agar brand_id null bo'lsa, faqat brand_id null bo'lgan hisobotlarni tekshirish
+                existingReportQuery = existingReportQuery.whereNull('brand_id');
+            }
+            
+            const existingReport = await existingReportQuery.first();
+            if (existingReport) {
+                await trx.rollback();
+                const brandInfo = brand_id ? ` va brend ID: ${brand_id}` : '';
+                return res.status(409).json({ 
+                    message: `Ushbu sana (${date}) uchun "${location}" filialida${brandInfo} hisobot allaqachon mavjud. Sahifani yangilang yoki mavjud hisobotni tahrirlang.`,
+                    existingReportId: existingReport.id
+                });
+            }
 
         // Получаем название бренда для Telegram сообщения
         let brandName = null;
@@ -253,59 +299,103 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
             brandName = brand ? brand.name : null;
         }
 
-        const [reportId] = await db('reports').insert({
-            report_date: date,
-            location: location,
-            brand_id: brand_id || null,
-            data: JSON.stringify(data),
-            settings: JSON.stringify(settings),
-            created_by: user.id,
-            late_comment: late_comment,
-            currency: currency || null
-        });
-        
-        await logAction(user.id, 'create_report', 'report', reportId, { date, location, brand_id, ip: req.session.ip_address, userAgent: req.session.user_agent });
-        
-        sendToTelegram({ 
-            type: 'new', 
-            report_id: reportId, 
-            location, 
-            date, 
-            author: user.username,
-            author_id: user.id,
-            data, 
-            settings, 
-            late_comment,
-            brand_name: brandName,
-            currency: currency || null
-        });
-        
-        // WebSocket orqali realtime yuborish
-        if (global.broadcastWebSocket) {
-            global.broadcastWebSocket('new_report', {
-                reportId: reportId,
-                date: date,
-                location: location,
-                brand_id: brand_id,
+            let reportId;
+            if (isPostgres) {
+                // PostgreSQL uchun returning('id') ishlatish
+                const result = await trx('reports').insert({
+                    report_date: date,
+                    location: location,
+                    brand_id: brand_id || null,
+                    data: JSON.stringify(data),
+                    settings: JSON.stringify(settings),
+                    created_by: user.id,
+                    late_comment: late_comment || null,
+                    currency: currency || null
+                }).returning('id');
+                reportId = result[0]?.id || result[0];
+            } else {
+                // SQLite uchun odatiy insert
+                const insertResult = await trx('reports').insert({
+                    report_date: date,
+                    location: location,
+                    brand_id: brand_id || null,
+                    data: JSON.stringify(data),
+                    settings: JSON.stringify(settings),
+                    created_by: user.id,
+                    late_comment: late_comment || null,
+                    currency: currency || null
+                });
+                reportId = Array.isArray(insertResult) && insertResult.length > 0 
+                    ? insertResult[0] 
+                    : insertResult;
+            }
+            
+            if (!reportId) {
+                await trx.rollback();
+                log.error("[REPORTS] Report ID olinmadi", { isPostgres });
+                return res.status(500).json({ message: "Hisobot saqlanmadi. ID olinmadi." });
+            }
+            
+            // Transaction commit qilish
+            await trx.commit();
+            
+            await logAction(user.id, 'create_report', 'report', reportId, { date, location, brand_id, ip: req.session.ip_address, userAgent: req.session.user_agent });
+            
+            sendToTelegram({ 
+                type: 'new', 
+                report_id: reportId, 
+                location, 
+                date, 
+                author: user.username,
+                author_id: user.id,
+                data, 
+                settings, 
+                late_comment,
                 brand_name: brandName,
-                created_by: user.id,
-                created_by_username: user.username
+                currency: currency || null
+            });
+            
+            // WebSocket orqali realtime yuborish
+            if (global.broadcastWebSocket) {
+                global.broadcastWebSocket('new_report', {
+                    reportId: reportId,
+                    date: date,
+                    location: location,
+                    brand_id: brand_id,
+                    brand_name: brandName,
+                    created_by: user.id,
+                    created_by_username: user.username
+                });
+            }
+            
+            res.status(201).json({ message: "Hisobot muvaffaqiyatli saqlandi.", reportId: reportId });
+        } catch (trxError) {
+            await trx.rollback();
+            // Transaction xatoligini asosiy catch'ga tashlaymiz
+            throw trxError;
+        }
+    } catch (error) {
+        // ✅ Duplicate xatolikni tekshirish (database constraint yoki application level)
+        if (error.code === 'SQLITE_CONSTRAINT' || 
+            error.code === '23505' || // PostgreSQL unique violation
+            (error.message && (
+                error.message.includes('UNIQUE constraint failed') ||
+                error.message.includes('duplicate key value') ||
+                error.message.includes('unique constraint')
+            ))) {
+            log.warn(`[REPORTS] Duplicate hisobot yaratishga urinish: date=${date}, location=${location}, brand_id=${brand_id}`, { userId: user.id });
+            return res.status(409).json({ 
+                message: `Ushbu sana (${date}) uchun "${location}" filialida hisobot allaqachon mavjud. Sahifani yangilang yoki mavjud hisobotni tahrirlang.` 
             });
         }
-        
-        res.status(201).json({ message: "Hisobot muvaffaqiyatli saqlandi.", reportId: reportId });
-    } catch (error) {
-        if (error.code === 'SQLITE_CONSTRAINT' || (error.message && error.message.includes('UNIQUE constraint failed'))) {
-            return res.status(409).json({ message: `Ushbu sana (${date}) uchun "${location}" filialida hisobot allaqachon mavjud.` });
-        }
-        log.error("/api/reports POST xatoligi:", error.message);
+        log.error("/api/reports POST xatoligi:", error.message, { stack: error.stack });
         res.status(500).json({ message: "Hisobotni saqlashda kutilmagan xatolik" });
     }
 });
 
 router.put('/:id', isAuthenticated, async (req, res) => {
     const reportId = req.params.id;
-    const { date, location, data, settings, brand_id, currency } = req.body;
+    const { date, location, data, settings, brand_id, currency, late_comment } = req.body;
     const user = req.session.user;
 
     const totalSum = Object.values(data).reduce((sum, value) => sum + (Number(value) || 0), 0);
@@ -372,7 +462,8 @@ router.put('/:id', isAuthenticated, async (req, res) => {
             settings: JSON.stringify(settings),
             updated_by: user.id,
             updated_at: db.fn.now(),
-            currency: currency || oldReport.currency || null
+            currency: currency || oldReport.currency || null,
+            late_comment: late_comment || null
         });
 
         await logAction(user.id, 'edit_report', 'report', reportId, { date, location, brand_id, ip: req.session.ip_address, userAgent: req.session.user_agent });
@@ -394,7 +485,8 @@ router.put('/:id', isAuthenticated, async (req, res) => {
                 old_location: oldReport.location,
                 brand_name: brandName,
                 currency: currency || oldReport.currency || null,
-                old_brand_name: oldBrandName
+                old_brand_name: oldBrandName,
+                late_comment: late_comment || oldReport.late_comment || null
             });
             
             // WebSocket orqali realtime yuborish

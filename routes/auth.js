@@ -532,12 +532,25 @@ router.post('/login', async (req, res) => {
         
         // =======================================================
 
-        // Super admin yoki admin uchun admin paneliga redirect
-        // Yoki kerakli permissions'ga ega foydalanuvchilar uchun
+        // Barcha foydalanuvchilar uchun admin paneliga redirect
+        // Menejer, kassir, operator, rahbar ham web interfeysdan foydalana oladi
         let redirectUrl = '/';
+        
+        // Super admin yoki admin uchun admin paneliga redirect
         if (user.role === 'super_admin' || user.role === 'admin') {
             redirectUrl = '/admin';
-        } else if (finalPermissions.includes('dashboard:view') || finalPermissions.includes('users:view')) {
+        } 
+        // Qarzdorlik tasdiqlash tizimi uchun permission'ga ega foydalanuvchilar uchun
+        else if (finalPermissions.includes('debt:create') || 
+                 finalPermissions.includes('debt:approve_cashier') || 
+                 finalPermissions.includes('debt:approve_operator') || 
+                 finalPermissions.includes('debt:approve_leader') ||
+                 finalPermissions.includes('debt:view_statistics') ||
+                 finalPermissions.includes('debt:view_own')) {
+            redirectUrl = '/admin';
+        }
+        // Dashboard yoki boshqa permission'ga ega foydalanuvchilar uchun
+        else if (finalPermissions.includes('dashboard:view') || finalPermissions.includes('users:view')) {
             redirectUrl = '/admin';
         }
         
@@ -592,41 +605,24 @@ router.get('/verify-session/:token', async (req, res) => {
             return res.status(404).send("<h1>Foydalanuvchi topilmadi</h1>");
         }
 
-        // Sessiya limit logikasi: bir xil qurilma+brauzer bo'lsa, eski sessiyani o'chirish
+        // Magic link orqali kirilganda BARCHA eski sessiyalarni o'chirish
+        // Bu xavfsizlik uchun muhim - faqat bitta aktiv sessiya bo'lishi kerak
         const sessions = await db('sessions').select('sid', 'sess');
-        const userSessions = sessions
-            .map(s => {
+        const userSessionSids = sessions
+            .filter(s => {
                 try { 
                     const sessData = JSON.parse(s.sess);
-                    if (sessData.user && sessData.user.id === link.user_id) {
-                        return {
-                            sid: s.sid,
-                            user_agent: sessData.user_agent || ''
-                        };
-                    }
+                    return sessData.user && sessData.user.id === link.user_id;
                 } catch { 
-                    return null; 
+                    return false; 
                 }
-                return null;
             })
-            .filter(Boolean);
+            .map(s => s.sid);
 
-        // Unique device/browser'larni aniqlash
-        const uniqueDevices = new Map();
-        userSessions.forEach(session => {
-            const deviceKey = session.user_agent || 'unknown';
-            if (uniqueDevices.has(deviceKey)) {
-                db('sessions').where({ sid: uniqueDevices.get(deviceKey).sid }).del().catch(() => {});
-            }
-            uniqueDevices.set(deviceKey, session);
-        });
-
-        // Joriy qurilma+brauzer bilan kirilayotgan bo'lsa, eski sessiyani o'chirish
-        const currentDeviceKey = userAgent || 'unknown';
-        const existingSession = uniqueDevices.get(currentDeviceKey);
-        
-        if (existingSession) {
-            await db('sessions').where({ sid: existingSession.sid }).del();
+        // Barcha eski sessiyalarni o'chirish
+        if (userSessionSids.length > 0) {
+            await db('sessions').whereIn('sid', userSessionSids).del();
+            log.info(`[VERIFY_SESSION] ${userSessionSids.length} ta eski sessiya o'chirildi - User ID: ${user.id}`);
         }
 
 
@@ -909,6 +905,84 @@ router.post('/verify-secret', async (req, res) => {
     } catch (error) {
         log.error("Maxfiy so'zni tekshirish xatoligi:", error.message);
         res.status(500).json({ message: "Tekshirishda xatolik yuz berdi." });
+    }
+});
+
+// Parol tiklash so'rovini yuborish (autentifikatsiya qilinmagan foydalanuvchilar uchun)
+router.post('/reset-password-request', async (req, res) => {
+    const { username, secretWord, newPassword, confirmPassword } = req.body;
+    
+    // Validatsiya
+    if (!username || !secretWord || !newPassword || !confirmPassword) {
+        return res.status(400).json({ message: "Barcha maydonlarni to'ldiring." });
+    }
+    
+    if (newPassword.length < 8) {
+        return res.status(400).json({ message: "Yangi parol kamida 8 belgidan iborat bo'lishi kerak." });
+    }
+    
+    if (newPassword !== confirmPassword) {
+        return res.status(400).json({ message: "Parol va tasdiqlash mos kelmaydi." });
+    }
+    
+    try {
+        // Foydalanuvchini topish
+        const user = await db('users').where({ username }).first();
+        
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+        
+        // Maxfiy so'zni tekshirish
+        if (!user.secret_word) {
+            return res.status(400).json({ message: "Maxfiy so'z o'rnatilmagan." });
+        }
+        
+        const isSecretValid = await bcrypt.compare(secretWord, user.secret_word);
+        if (!isSecretValid) {
+            return res.status(401).json({ message: "Maxfiy so'z noto'g'ri." });
+        }
+        
+        // Yangi parolni hash qilish
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        // So'rovni saqlash
+        await db('password_change_requests').insert({
+            user_id: user.id,
+            new_password_hash: hashedPassword,
+            status: 'pending',
+            requested_at: db.fn.now(),
+            ip_address: req.ip || req.connection.remoteAddress,
+            user_agent: req.get('user-agent') || 'Unknown'
+        });
+        
+        // Adminlarni xabardor qilish
+        const admins = await db('users')
+            .join('user_permissions', 'users.id', 'user_permissions.user_id')
+            .where('user_permissions.permission_key', 'users:change_password')
+            .where('user_permissions.type', 'additional')
+            .select('users.telegram_chat_id', 'users.username');
+        
+        // Telegram orqali xabar yuborish
+        for (const admin of admins) {
+            if (admin.telegram_chat_id) {
+                await sendToTelegram({
+                    type: 'password_change_request',
+                    chat_id: admin.telegram_chat_id,
+                    requester: user.username,
+                    requester_fullname: user.fullname,
+                    user_id: user.id
+                });
+            }
+        }
+        
+        res.json({ 
+            message: "So'rov muvaffaqiyatli yuborildi. Admin tasdiqini kuting.",
+            success: true 
+        });
+    } catch (error) {
+        log.error("Parol tiklash so'rovi xatoligi:", error.message);
+        res.status(500).json({ message: "So'rov yuborishda xatolik yuz berdi." });
     }
 });
 

@@ -1,6 +1,6 @@
 // bot/debt-approval/handlers/manager.js
 
-const { db } = require('../../../db.js');
+const { db, isPostgres } = require('../../../db.js');
 const { createLogger } = require('../../../utils/logger.js');
 const { getBot } = require('../../../utils/bot.js');
 const { mainMenuKeyboard, previewKeyboard } = require('../keyboards.js');
@@ -83,6 +83,37 @@ async function safeEditMessageText(bot, text, options) {
     }
 }
 
+/**
+ * Xabar yuborish va message_id ni state'ga qo'shish
+ */
+async function sendMessageAndTrack(bot, chatId, text, options, userId) {
+    const sentMessage = await bot.sendMessage(chatId, text, options);
+    
+    // Message ID ni state'ga qo'shish
+    if (sentMessage && sentMessage.message_id && userId) {
+        const state = stateManager.getUserState(userId);
+        if (state && state.data) {
+            if (!state.data.message_ids) {
+                state.data.message_ids = [];
+            }
+            state.data.message_ids.push(sentMessage.message_id);
+            // State'ni yangilash
+            stateManager.updateUserState(userId, state.state, state.data);
+            log.debug(`[SEND_MESSAGE_TRACK] Message ID state'ga qo'shildi: userId=${userId}, messageId=${sentMessage.message_id}, total=${state.data.message_ids.length}`);
+        }
+        
+        // Yangi messageTracker ga ham qo'shish (tozalash uchun)
+        try {
+            const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
+            trackMessage(chatId, sentMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, true);
+        } catch (error) {
+            log.debug(`[SEND_MESSAGE_TRACK] MessageTracker ga qo'shishda xatolik (ignored): ${error.message}`);
+        }
+    }
+    
+    return sentMessage;
+}
+
 // So'rov yaratish jarayonini boshlash
 async function handleNewRequest(msg, bot, requestType = 'NORMAL') {
     const chatId = msg.chat.id;
@@ -114,7 +145,8 @@ async function handleNewRequest(msg, bot, requestType = 'NORMAL') {
             branch_id: null,
             svr_id: null,
             type: requestType,
-            extra_info: null
+            extra_info: null,
+            message_ids: [] // Xabarlarni saqlash uchun array
         };
         
         stateManager.setUserState(userId, stateManager.CONTEXTS.DEBT_APPROVAL, STATES.SELECT_BRAND, initialState);
@@ -375,22 +407,40 @@ async function handleNewRequest(msg, bot, requestType = 'NORMAL') {
             );
             
         } else {
-            // Agar bir nechta brend bo'lsa, tanlash knopkasini ko'rsatish
-            const keyboard = {
-                inline_keyboard: [
-                    ...brands.map(brand => [{
+            // Agar bir nechta brend bo'lsa, grid formatda tanlash knopkasini ko'rsatish
+            const columns = brands.length > 10 ? 3 : brands.length > 5 ? 2 : 1;
+            const keyboardRows = [];
+            
+            for (let i = 0; i < brands.length; i += columns) {
+                const row = brands.slice(i, i + columns).map(brand => ({
                         text: brand.name,
                         callback_data: `debt_select_brand:${brand.id}`
-                    }]),
-                    [{ text: '⬅️ Ortga', callback_data: 'debt_back_to_menu' }]
-                ]
+                }));
+                keyboardRows.push(row);
+            }
+            
+            // Ortga tugmasi qo'shish
+            keyboardRows.push([{ text: '⬅️ Ortga', callback_data: 'debt_back_to_menu' }]);
+            
+            const keyboard = {
+                inline_keyboard: keyboardRows
             };
             
-            await bot.sendMessage(
+            const sentMessage = await bot.sendMessage(
                 chatId,
                 '📋 Brendni tanlang:',
                 { reply_markup: keyboard }
             );
+            // Message ID ni state'ga qo'shish
+            if (sentMessage && sentMessage.message_id) {
+                const currentState = stateManager.getUserState(userId);
+                if (currentState && currentState.data) {
+                    if (!currentState.data.message_ids) {
+                        currentState.data.message_ids = [];
+                    }
+                    currentState.data.message_ids.push(sentMessage.message_id);
+                }
+            }
         }
         
     } catch (error) {
@@ -568,13 +618,13 @@ async function handleBrandSelection(query, bot) {
                                 branch_id: selectedBranch.id,
                                 svr_id: selectedSvr.id
                             });
-                            await bot.sendMessage(
-                                chatId,
-                                `✅ Brend: ${brandForMsg.name}\n✅ Filial: ${branch.name}\n✅ SVR: ${selectedSvr.name}\n\n📝 Izoh kiriting (masalan: "5 kun muddat uzaytirish"):\n\n📊 Yoki Excel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz):`,
-                                { reply_markup: { inline_keyboard: [
+                            await sendMessageAndTrack(bot, chatId,
+                                `✅ Brend: ${brandForMsg.name}\n✅ Filial: ${branch.name}\n✅ SVR: ${selectedSvr.name}\n\n📊 <b>SET so'rov uchun Excel fayl yuborilishi shart!</b>\n\nExcel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz).\n\n📝 Qo'shimcha izoh (ixtiyoriy):`,
+                                { parse_mode: 'HTML', reply_markup: { inline_keyboard: [
                                     [{ text: "⬅️ Ortga", callback_data: 'debt_back_to_svr' }],
                                     [{ text: "❌ Bekor", callback_data: 'debt_cancel_request' }]
-                                ] } }
+                                ] } },
+                                userId
                             );
                         } else {
                             stateManager.updateUserState(userId, STATES.PREVIEW, { 
@@ -648,13 +698,13 @@ async function handleBrandSelection(query, bot) {
                                 branch_id: selectedBranch.id,
                                 svr_id: selectedSvr.id
                             });
-                            await bot.sendMessage(
-                                chatId,
-                                `✅ Brend: ${brandForMsg.name}\n✅ Filial: ${branch.name}\n✅ SVR: ${selectedSvr.name}\n\n📝 Izoh kiriting (masalan: "5 kun muddat uzaytirish"):\n\n📊 Yoki Excel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz):`,
-                                { reply_markup: { inline_keyboard: [
+                            await sendMessageAndTrack(bot, chatId,
+                                `✅ Brend: ${brandForMsg.name}\n✅ Filial: ${branch.name}\n✅ SVR: ${selectedSvr.name}\n\n📊 <b>SET so'rov uchun Excel fayl yuborilishi shart!</b>\n\nExcel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz).\n\n📝 Qo'shimcha izoh (ixtiyoriy):`,
+                                { parse_mode: 'HTML', reply_markup: { inline_keyboard: [
                                     [{ text: "⬅️ Ortga", callback_data: 'debt_back_to_svr' }],
                                     [{ text: "❌ Bekor", callback_data: 'debt_cancel_request' }]
-                                ] } }
+                                ] } },
+                                userId
                             );
                         } else {
                             stateManager.updateUserState(userId, STATES.PREVIEW, { 
@@ -886,11 +936,17 @@ async function handleBranchSelection(query, bot) {
                         ...state.data,
                         svr_id: selectedSvr.id
                     });
+                    
+                    // Xabarni kuzatishga qo'shish (tozalanadigan)
+                    const { trackMessage: trackMsg, MESSAGE_TYPES: MSG_TYPES } = require('../utils/messageTracker.js');
+                    trackMsg(chatId, query.message.message_id, MSG_TYPES.USER_MESSAGE, true);
+                    
                     await safeEditMessageText(bot,
-                        `✅ Brend: ${brand.name}\n✅ Filial: ${branch.name}\n✅ SVR: ${selectedSvr.name}\n\n📝 Izoh kiriting (masalan: "5 kun muddat uzaytirish"):`,
+                        `✅ Brend: ${brand.name}\n✅ Filial: ${branch.name}\n✅ SVR: ${selectedSvr.name}\n\n📊 <b>SET so'rov uchun Excel fayl yuborilishi shart!</b>\n\nExcel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz).\n\n📝 Qo'shimcha izoh (ixtiyoriy):`,
                         {
                             chat_id: chatId,
                             message_id: query.message.message_id,
+                            parse_mode: 'HTML',
                             reply_markup: { inline_keyboard: [
                                 [{ text: "⬅️ Ortga", callback_data: 'debt_back_to_svr' }],
                                 [{ text: "❌ Bekor", callback_data: 'debt_cancel_request' }]
@@ -990,6 +1046,102 @@ async function handleSVRSelection(query, bot) {
             return;
         }
         
+        // ✅ MUHIM: Jarayondagi so'rovlarni tekshirish (dublikat so'rovni oldini olish)
+        const inProcessStatuses = ['FINAL_APPROVED', 'CANCELLED', 'REJECTED'];
+        const existingRequest = await db('debt_requests')
+            .where('svr_id', svrId)
+            .whereNotIn('status', inProcessStatuses)
+            .first();
+        
+        if (existingRequest) {
+            log.warn(`[SVR_SELECT] Dublikat so'rov topildi: SVR ID=${svrId}, Existing Request ID=${existingRequest.id}, RequestUID=${existingRequest.request_uid}, Status=${existingRequest.status}`);
+            
+            // Foydalanuvchi ma'lumotlarini olish (SVR ro'yxatini qayta ko'rsatish uchun)
+            const user = await userHelper.getUserByTelegram(chatId, userId);
+            
+            if (user && state.data.branch_id) {
+                // SVR ro'yxatini qayta ko'rsatish (bu SVR'siz)
+                const allSvrs = await getAllowedDebtSVRsList(user, state.data.brand_id, state.data.branch_id);
+                
+                // Jarayondagi so'rovlardagi barcha SVR'larni olib tashlash
+                const inProcessRequests = await db('debt_requests')
+                    .where('branch_id', state.data.branch_id)
+                    .whereNotIn('status', inProcessStatuses)
+                    .select('svr_id')
+                    .distinct('svr_id');
+                
+                const usedSvrIds = new Set(inProcessRequests.map(r => r.svr_id));
+                const filteredSvrs = allSvrs.filter(svr => !usedSvrIds.has(svr.id));
+                
+                if (filteredSvrs.length === 0) {
+                    await safeEditMessageText(bot,
+                        `⚠️ <b>Bu SVR uchun jarayondagi so'rov mavjud</b>\n\n` +
+                        `So'rov ID: ${existingRequest.request_uid}\n` +
+                        `Holat: ${existingRequest.status}\n\n` +
+                        `Bu filialda boshqa mavjud SVR'lar yo'q.`,
+                        {
+                            chat_id: chatId,
+                            message_id: query.message.message_id,
+                            parse_mode: 'HTML',
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [{ text: '⬅️ Ortga', callback_data: 'debt_back_to_branch' }]
+                                ]
+                            }
+                        }
+                    );
+                    return;
+                }
+                
+                // SVR ro'yxatini qayta ko'rsatish (jarayondagi so'rovga ega SVR'siz)
+                const svrKeyboard = {
+                    inline_keyboard: [
+                        ...filteredSvrs.map(svr => [{
+                            text: svr.name,
+                            callback_data: `debt_select_svr:${svr.id}`
+                        }]),
+                        [{ text: '⬅️ Ortga', callback_data: 'debt_back_to_branch' }]
+                    ]
+                };
+                
+                const branch = await db('debt_branches').where('id', state.data.branch_id).first();
+                const brand = state.data.brand_id ? await db('debt_brands').where('id', state.data.brand_id).first() : null;
+                
+                await safeEditMessageText(bot,
+                    `⚠️ <b>Bu SVR uchun jarayondagi so'rov mavjud</b>\n\n` +
+                    `So'rov ID: ${existingRequest.request_uid}\n` +
+                    `Holat: ${existingRequest.status}\n\n` +
+                    `Boshqa SVR ni tanlang:`,
+                    {
+                        chat_id: chatId,
+                        message_id: query.message.message_id,
+                        parse_mode: 'HTML',
+                        reply_markup: svrKeyboard
+                    }
+                );
+                return;
+            } else {
+                // Agar user yoki branch_id topilmasa, oddiy xabar yuborish
+                await safeEditMessageText(bot,
+                    `⚠️ <b>Bu SVR uchun jarayondagi so'rov mavjud</b>\n\n` +
+                    `So'rov ID: ${existingRequest.request_uid}\n` +
+                    `Holat: ${existingRequest.status}\n\n` +
+                    `Yangi so'rov yaratish uchun avval mavjud so'rovni yakunlang.`,
+                    {
+                        chat_id: chatId,
+                        message_id: query.message.message_id,
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⬅️ Ortga', callback_data: 'debt_back_to_branch' }]
+                            ]
+                        }
+                    }
+                );
+                return;
+            }
+        }
+        
         // Brend va filial ma'lumotlarini olish (xabar uchun)
         const branch = await db('debt_branches').where('id', state.data.branch_id).first();
         const brand = state.data.brand_id ? await db('debt_brands').where('id', state.data.brand_id).first() : null;
@@ -1006,12 +1158,16 @@ async function handleSVRSelection(query, bot) {
                     svr_id: svrId
                 });
                 
+                // Xabarni kuzatishga qo'shish (tozalanadigan)
+                const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
+                trackMessage(chatId, query.message.message_id, MESSAGE_TYPES.USER_MESSAGE, true);
                 
                 await safeEditMessageText(bot,
-                    `✅ Brend: ${brand ? brand.name : ''}\n✅ Filial: ${branch.name}\n✅ SVR: ${svr.name}\n\n📝 Izoh kiriting (masalan: "5 kun muddat uzaytirish"):\n\n📊 Yoki Excel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz):`,
+                    `✅ Brend: ${brand ? brand.name : ''}\n✅ Filial: ${branch.name}\n✅ SVR: ${svr.name}\n\n📊 <b>SET so'rov uchun Excel fayl yuborilishi shart!</b>\n\nExcel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz).\n\n📝 Qo'shimcha izoh (ixtiyoriy):`,
                     {
                         chat_id: chatId,
                         message_id: query.message.message_id,
+                        parse_mode: 'HTML',
                         reply_markup: { 
                             inline_keyboard: [
                                 [{ text: "⬅️ Ortga", callback_data: 'debt_back_to_svr' }],
@@ -1107,12 +1263,16 @@ async function handleTypeSelection(query, bot) {
             if (brand) messageText += `✅ Brend: ${brand.name}\n`;
             if (branch) messageText += `✅ Filial: ${branch.name}\n`;
             if (svr) messageText += `✅ SVR: ${svr.name}\n`;
-            messageText += `\n📝 Izoh kiriting (masalan: "5 kun muddat uzaytirish"):\n\n📊 Yoki Excel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz):`;
+            messageText += `\n📊 <b>SET so'rov uchun Excel fayl yuborilishi shart!</b>\n\nExcel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz).\n\n📝 Qo'shimcha izoh (ixtiyoriy):`;
             
             // Ortga tugmasi - agar SVR tanlangan bo'lsa, SVR tanlashga qaytish, aks holda type tanlashga
             const backButton = svr ? 
                 [{ text: "⬅️ Ortga", callback_data: 'debt_back_to_svr' }] :
                 [{ text: "⬅️ Ortga", callback_data: 'debt_back_to_previous' }];
+            
+            // Xabarni kuzatishga qo'shish (tozalanadigan)
+            const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
+            trackMessage(chatId, query.message.message_id, MESSAGE_TYPES.USER_MESSAGE, true);
             
             await safeEditMessageText(bot,
                 messageText,
@@ -1158,24 +1318,69 @@ async function handleExtraInfo(msg, bot) {
             (msg.document.file_name.endsWith('.xlsx') || msg.document.file_name.endsWith('.xls'))) {
             log.info(`[SET_EXTRA_INFO] Excel fayl yuborildi: fileName=${msg.document.file_name}, userId=${userId}`);
             
+            // SVR tanlanganligini tekshirish
+            if (!state.data.svr_id) {
+                log.warn(`[SET_EXTRA_INFO] ❌ Excel fayl yuborilgan, lekin SVR tanlanmagan: userId=${userId}`);
+                
+                // Brend va filial ma'lumotlarini olish
+                const brand = state.data.brand_id ? await db('debt_brands').where('id', state.data.brand_id).first() : null;
+                const branch = state.data.branch_id ? await db('debt_branches').where('id', state.data.branch_id).first() : null;
+                
+                // SVR'lar ro'yxatini olish
+                const svrs = await db('debt_svrs')
+                    .where('branch_id', state.data.branch_id)
+                    .orderBy('name', 'asc');
+                
+                if (svrs.length === 0) {
+                    await bot.sendMessage(chatId, '❌ Bu filial uchun SVR topilmadi.');
+                    return true;
+                }
+                
+                // SVR tanlash keyboard yaratish
+                const columns = svrs.length > 10 ? 2 : svrs.length > 5 ? 2 : 1;
+                const keyboardRows = [];
+                
+                for (let i = 0; i < svrs.length; i += columns) {
+                    const row = svrs.slice(i, i + columns).map(svr => ({
+                        text: svr.name,
+                        callback_data: `debt_select_svr:${svr.id}`
+                    }));
+                    keyboardRows.push(row);
+                }
+                
+                keyboardRows.push([{ text: '⬅️ Ortga', callback_data: 'debt_back_to_branch' }]);
+                keyboardRows.push([{ text: '❌ Bekor', callback_data: 'debt_cancel_request' }]);
+                
+                const keyboard = {
+                    inline_keyboard: keyboardRows
+                };
+                
+                let messageText = '';
+                if (brand) messageText += `✅ Brend: ${brand.name}\n`;
+                if (branch) messageText += `✅ Filial: ${branch.name}\n`;
+                messageText += `\n❌ <b>SVR tanlanmagan!</b>\n\nSET so'rov yaratish uchun avval SVR tanlash shart.\n\n📋 SVR (FISH) ni tanlang:`;
+                
+                await bot.sendMessage(chatId, messageText, {
+                    parse_mode: 'HTML',
+                    reply_markup: keyboard
+                });
+                
+                // State'ni SVR tanlashga qaytarish
+                stateManager.updateUserState(userId, STATES.SELECT_SVR, {
+                    ...state.data
+                });
+                
+                return true;
+            }
+            
             // Excel fayl qabul qilish funksiyasini chaqirish
             const { handleExcelFile } = require('./debt-excel.js');
             const handled = await handleExcelFile(msg, bot);
             
             if (handled) {
                 // Excel fayl qabul qilingan, state'ni yangilash
-                const updatedState = stateManager.getUserState(userId);
-                if (updatedState && updatedState.data.excel_headers) {
-                    // Agar ustunlar to'liq aniqlangan bo'lsa, preview ko'rsatish
-                    if (updatedState.data.excel_columns && 
-                        updatedState.data.excel_columns.id !== null && 
-                        updatedState.data.excel_columns.name !== null && 
-                        updatedState.data.excel_columns.summa !== null) {
-                        // Preview ko'rsatish
-                        await showPreview(chatId, userId, null, bot);
-                    }
-                    // Agar ustunlar to'liq aniqlanmagan bo'lsa, ustun tanlash ko'rsatiladi (debt-excel.js da)
-                }
+                // handleExcelFile o'zi preview ko'rsatadi, shuning uchun bu yerdan ko'rsatishni olib tashlaymiz
+                // (handleExcelFile da SET so'rov uchun showPreview ko'rsatiladi)
                 return true;
             }
         }
@@ -1216,15 +1421,26 @@ async function showPreview(chatId, userId, messageId, bot) {
         }
         
         // Ma'lumotlarni olish
+
         const brand = await db('debt_brands').where('id', state.data.brand_id).first();
         const branch = await db('debt_branches').where('id', state.data.branch_id).first();
-        const svr = await db('debt_svrs').where('id', state.data.svr_id).first();
+        
+        // SVR ma'lumotlarini olish (agar svr_id mavjud bo'lsa)
+        let svr = null;
+        if (state.data.svr_id) {
+            try {
+                svr = await db('debt_svrs').where('id', state.data.svr_id).first();
+            } catch (svrError) {
+                log.error(`[PREVIEW] SVR ma'lumotlarini olishda xatolik: svr_id=${state.data.svr_id}, error=${svrError.message}`);
+                // SVR topilmasa, xatolikni e'tiborsiz qoldirish va davom etish
+            }
+        }
         
         // Preview matni
         let previewText = `🧾 SO'ROV PREVIEW\n\n`;
-        previewText += `📌 Brend: ${brand.name}\n`;
-        previewText += `📍 Filial: ${branch.name}\n`;
-        previewText += `👤 SVR (FISH): ${svr.name}\n`;
+        previewText += `📌 Brend: ${brand?.name || 'Noma\'lum'}\n`;
+        previewText += `📍 Filial: ${branch?.name || 'Noma\'lum'}\n`;
+        previewText += `👤 SVR (FISH): ${svr?.name || state.data.svr_name || 'Noma\'lum'}\n`;
         previewText += `📋 Turi: ${state.data.type === 'SET' ? 'SET' : 'ODDIY'}\n`;
         
         if (state.data.type === 'SET' && state.data.extra_info) {
@@ -1232,10 +1448,37 @@ async function showPreview(chatId, userId, messageId, bot) {
         }
         
         // Excel ma'lumotlarini ko'rsatish (agar mavjud bo'lsa)
+        let telegraphUrl = null;
         if (state.data.type === 'SET' && state.data.excel_data && Array.isArray(state.data.excel_data)) {
             previewText += `\n📊 Excel ma'lumotlari: ${state.data.excel_data.length} qator\n`;
             if (state.data.excel_total) {
                 previewText += `💰 Jami summa: ${state.data.excel_total.toLocaleString('ru-RU')} so'm\n`;
+            }
+            
+            // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
+            try {
+                const { createDebtDataPage } = require('../../../utils/telegraph.js');
+                const { getPreviousMonthName } = require('../../../utils/dateHelper.js');
+                telegraphUrl = await createDebtDataPage({
+                    request_uid: `PREVIEW-${userId}-${Date.now()}`,
+                    brand_name: brand?.name || 'Noma\'lum',
+                    filial_name: branch?.name || 'Noma\'lum',
+                    svr_name: svr?.name || state.data.svr_name || 'Noma\'lum',
+                    month_name: getPreviousMonthName(),
+                    extra_info: state.data.extra_info || null,
+                    excel_data: state.data.excel_data,
+                    excel_headers: state.data.excel_headers || null,
+                    excel_columns: state.data.excel_columns || null,
+                    total_amount: state.data.excel_total
+                });
+            } catch (telegraphError) {
+                // Telegraph xatolari silent qilinadi (ixtiyoriy xizmat)
+                log.debug(`[PREVIEW] Telegraph xatolik (ixtiyoriy xizmat): userId=${userId}`);
+            }
+            
+            // Telegraph link ko'rsatish (agar mavjud bo'lsa)
+            if (telegraphUrl) {
+                previewText += `\n🔗 <a href="${telegraphUrl}">📊 Qarzdorlik klientlar:</a>\n`;
             }
         }
         
@@ -1254,10 +1497,14 @@ async function showPreview(chatId, userId, messageId, bot) {
             await safeEditMessageText(bot, previewText, {
                 chat_id: chatId,
                 message_id: messageId,
-                reply_markup: keyboard
+                reply_markup: keyboard,
+                parse_mode: 'HTML'
             });
         } else {
-            await bot.sendMessage(chatId, previewText, { reply_markup: keyboard });
+            await sendMessageAndTrack(bot, chatId, previewText, { 
+                reply_markup: keyboard,
+                parse_mode: 'HTML'
+            }, userId);
         }
         
     } catch (error) {
@@ -1378,49 +1625,129 @@ async function handleSendRequest(query, bot) {
             log.info(`[SEND_REQUEST] ✅ SET so'rov tekshiruvi muvaffaqiyatli o'tdi: userId=${userId}, excelTotal=${excelTotal}`);
         }
         
-        // API orqali so'rov yaratish
-        // "➕ Yangi so'rov" knopkasi uchun - to'g'ridan-to'g'ri oddiy so'rov (type: 'NORMAL')
-        const requestData = {
-            type: state.data.type || 'NORMAL', // Default oddiy so'rov
-            brand_id: state.data.brand_id,
-            branch_id: state.data.branch_id,
-            svr_id: state.data.svr_id,
-            extra_info: state.data.extra_info,
-            created_by: state.data.user_id,
-            // Excel ma'lumotlarini qo'shish (agar mavjud bo'lsa)
-            excel_data: state.data.excel_data ? JSON.stringify(state.data.excel_data) : null,
-            excel_headers: state.data.excel_headers ? JSON.stringify(state.data.excel_headers) : null,
-            excel_columns: state.data.excel_columns ? JSON.stringify(state.data.excel_columns) : null,
-            excel_total: state.data.excel_total || null
-        };
+        // Foydalanuvchi ma'lumotlarini olish
+        const user = await userHelper.getUserByTelegram(chatId, userId);
+        if (!user) {
+            await bot.sendMessage(chatId, '❌ Foydalanuvchi topilmadi.');
+            return;
+        }
         
-        log.info(`[SEND_REQUEST] API'ga so'rov yuborilmoqda:`, requestData);
-        log.debug(`[SEND_REQUEST] API URL: ${API_URL}/api/debt-approval/requests`);
+        // Filial ma'lumotlarini olish
+        const branch = state.data.branch_id ? await db('debt_branches').where('id', state.data.branch_id).first() : null;
+        
+        // Dublikat so'rovni tekshirish (SVR_ID bo'yicha)
+        if (state.data.svr_id) {
+            const inProcessStatuses = ['FINAL_APPROVED', 'CANCELLED', 'REJECTED'];
+            const existingRequest = await db('debt_requests')
+                .where('svr_id', state.data.svr_id)
+                .whereNotIn('status', inProcessStatuses)
+                .first();
+            
+            if (existingRequest) {
+                log.warn(`[SEND_REQUEST] Dublikat so'rov topildi: SVR ID=${state.data.svr_id}, Existing Request ID=${existingRequest.id}, RequestUID=${existingRequest.request_uid}, Status=${existingRequest.status}`);
+                await bot.sendMessage(chatId,
+                    `⚠️ <b>Bu SVR uchun jarayondagi so'rov mavjud</b>\n\n` +
+                    `So'rov ID: ${existingRequest.request_uid}\n` +
+                    `Holat: ${existingRequest.status}\n\n` +
+                    `Yangi so'rov yaratish uchun avval mavjud so'rovni yakunlang.`,
+                    { parse_mode: 'HTML' }
+                );
+                return;
+            }
+        }
+        
+        // So'rov turini aniqlash
+        const requestType = state.data.type || 'NORMAL';
+        
+        // Helper funksiyalarni import qilish
+        const { generateRequestUID } = require('../../../utils/requestIdGenerator.js');
+        const { logRequestAction } = require('../../../utils/auditLogger.js');
+        const { scheduleReminder } = require('../../../utils/debtReminder.js');
+        
+        const requestUID = generateRequestUID();
+        const status = requestType === 'SET' ? 'SET_PENDING' : 'PENDING_APPROVAL';
+        
+        // Excel ma'lumotlarini JSON formatiga o'tkazish (agar mavjud bo'lsa)
+        const excelHeaders = state.data.excel_headers 
+            ? (Array.isArray(state.data.excel_headers) ? JSON.stringify(state.data.excel_headers) : state.data.excel_headers)
+            : null;
+        const excelColumns = state.data.excel_columns 
+            ? (typeof state.data.excel_columns === 'object' ? JSON.stringify(state.data.excel_columns) : state.data.excel_columns)
+            : null;
+        const excelData = state.data.excel_data 
+            ? (Array.isArray(state.data.excel_data) ? JSON.stringify(state.data.excel_data) : state.data.excel_data)
+            : null;
+        
+        // Database'ga so'rov yozish
+        let requestId;
+        if (isPostgres) {
+            const [result] = await db('debt_requests').insert({
+                request_uid: requestUID,
+                type: requestType,
+                brand_id: state.data.brand_id,
+                branch_id: state.data.branch_id,
+                svr_id: state.data.svr_id,
+                status: status,
+                created_by: user.id,
+                extra_info: state.data.extra_info || null,
+                excel_file_path: null, // Excel fayl saqlanmaydi, faqat ma'lumotlar database'ga saqlanadi
+                excel_data: excelData,
+                excel_headers: excelHeaders,
+                excel_columns: excelColumns,
+                excel_total: state.data.excel_total || null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            }).returning('id');
+            requestId = result.id;
+        } else {
+            [requestId] = await db('debt_requests').insert({
+                request_uid: requestUID,
+                type: requestType,
+                brand_id: state.data.brand_id,
+                branch_id: state.data.branch_id,
+                svr_id: state.data.svr_id,
+                status: status,
+                created_by: user.id,
+                extra_info: state.data.extra_info || null,
+                excel_file_path: null, // Excel fayl saqlanmaydi, faqat ma'lumotlar database'ga saqlanadi
+                excel_data: excelData,
+                excel_headers: excelHeaders,
+                excel_columns: excelColumns,
+                excel_total: state.data.excel_total || null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            });
+        }
+        
+        log.info(`[SEND_REQUEST] ✅ So'rov muvaffaqiyatli yaratildi. Request ID: ${requestId}, Request UID: ${requestUID}`);
+        
+        // Log yozish
+        await db('debt_request_logs').insert({
+            request_id: requestId,
+            action: 'create_request',
+            new_status: status,
+            performed_by: user.id,
+            note: `So'rov yaratildi: ${requestUID}`,
+            created_at: new Date().toISOString()
+        });
+        
+        // Audit log
+        await logRequestAction(requestId, 'request_created', user.id, {
+            new_status: status,
+            type: requestType
+        });
+        
+        // Eslatma boshlash
+        await scheduleReminder(requestId);
         
         try {
-            const response = await axios.post(`${API_URL}/api/debt-approval/requests`, requestData, {
-                timeout: 10000, // 10 soniya timeout
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            log.info(`[SEND_REQUEST] API javob:`, { 
-                status: response.status, 
-                data: response.data 
-            });
-            
-            if (response.data && response.data.success) {
-                log.info(`[SEND_REQUEST] ✅ So'rov muvaffaqiyatli yaratildi. Request UID: ${response.data.request_uid}`);
-                
-                // So'rov turini aniqlash
-                const requestType = state.data.type || 'NORMAL';
-                let cashierAssigned = false;
-                let cashierWarning = '';
+            // So'rov turiga qarab keyingi bosqichlarni bajarish
+            let cashierAssigned = false;
+            let cashierWarning = '';
                 
                 // SET so'rov uchun rahbarlar guruhiga yuborish
                 if (requestType === 'SET') {
-                    log.info(`[SEND_REQUEST] 🔍 SET so'rov uchun rahbarlar guruhini topish boshlanmoqda. RequestId: ${response.data.id}, RequestUID: ${response.data.request_uid}`);
+                    log.info(`[SEND_REQUEST] 🔍 SET so'rov uchun rahbarlar guruhini topish boshlanmoqda. RequestId: ${requestId}, RequestUID: ${requestUID}`);
                     
                     log.debug(`[SEND_REQUEST] SET.1. Rahbarlar guruhini qidirish...`);
                     const leadersGroup = await db('debt_groups')
@@ -1431,7 +1758,7 @@ async function handleSendRequest(query, bot) {
                     if (leadersGroup) {
                         log.info(`[SEND_REQUEST] SET.1.1. ✅ Rahbarlar guruhi topildi: GroupId=${leadersGroup.telegram_group_id}, GroupName=${leadersGroup.name}`);
                         
-                        log.debug(`[SEND_REQUEST] SET.2. So'rov ma'lumotlarini olish: requestId=${response.data.id}`);
+                        log.debug(`[SEND_REQUEST] SET.2. So'rov ma'lumotlarini olish: requestId=${requestId}`);
                         const fullRequest = await db('debt_requests')
                             .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
                             .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
@@ -1442,21 +1769,21 @@ async function handleSendRequest(query, bot) {
                                 'debt_branches.name as filial_name',
                                 'debt_svrs.name as svr_name'
                             )
-                            .where('debt_requests.id', response.data.id)
+                            .where('debt_requests.id', requestId)
                             .first();
                         
                         if (fullRequest) {
                             log.info(`[SEND_REQUEST] SET.2.1. ✅ So'rov ma'lumotlari topildi: RequestUID=${fullRequest.request_uid}, Brand=${fullRequest.brand_name}, Branch=${fullRequest.filial_name}, SVR=${fullRequest.svr_name}`);
                             
-                            log.info(`[SEND_REQUEST] SET.3. Rahbarlar guruhiga xabar yuborilmoqda: groupId=${leadersGroup.telegram_group_id}, requestId=${response.data.id}`);
+                            log.info(`[SEND_REQUEST] SET.3. Rahbarlar guruhiga xabar yuborilmoqda: groupId=${leadersGroup.telegram_group_id}, requestId=${requestId}`);
                             const { showSetRequestToLeaders } = require('./leader.js');
                             await showSetRequestToLeaders(fullRequest, leadersGroup.telegram_group_id);
-                            log.info(`[SEND_REQUEST] SET.4. ✅ SET so'rov rahbarlar guruhiga muvaffaqiyatli yuborildi: GroupId=${leadersGroup.telegram_group_id}, RequestId=${response.data.id}, RequestUID=${response.data.request_uid}`);
+                            log.info(`[SEND_REQUEST] SET.4. ✅ SET so'rov rahbarlar guruhiga muvaffaqiyatli yuborildi: GroupId=${leadersGroup.telegram_group_id}, RequestId=${requestId}, RequestUID=${requestUID}`);
                         } else {
-                            log.error(`[SEND_REQUEST] SET.2.1. ❌ SET so'rov topilmadi: RequestId=${response.data.id}`);
+                            log.error(`[SEND_REQUEST] SET.2.1. ❌ SET so'rov topilmadi: RequestId=${requestId}`);
                         }
                     } else {
-                        log.warn(`[SEND_REQUEST] SET.1.1. ⚠️ Rahbarlar guruhi topilmadi. SET so'rov yuborilmadi. RequestId=${response.data.id}`);
+                        log.warn(`[SEND_REQUEST] SET.1.1. ⚠️ Rahbarlar guruhi topilmadi. SET so'rov yuborilmadi. RequestId=${requestId}`);
                         cashierWarning = `\n\n⚠️ <b>Diqqat:</b> Rahbarlar guruhi topilmadi. So'rov admin tomonidan guruh sozlanguncha kutmoqda.`;
                     }
                 }
@@ -1769,9 +2096,9 @@ async function handleSendRequest(query, bot) {
                         })));
                         
                         // 5. So'rovga birinchi kassirni tayinlash (round-robin uchun)
-                        log.debug(`[SEND_REQUEST] 5. So'rovga kassir tayinlash boshlanmoqda: branchId=${state.data.branch_id}, requestId=${response.data.id}`);
+                        log.debug(`[SEND_REQUEST] 5. So'rovga kassir tayinlash boshlanmoqda: branchId=${state.data.branch_id}, requestId=${requestId}`);
                         const { assignCashierToRequest } = require('../../../utils/cashierAssignment.js');
-                        const assignedCashier = await assignCashierToRequest(state.data.branch_id, response.data.id);
+                        const assignedCashier = await assignCashierToRequest(state.data.branch_id, requestId);
                         
                         if (assignedCashier) {
                             log.info(`[SEND_REQUEST] 5.1. ✅ So'rovga tayinlangan kassir: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, TelegramChatId=${assignedCashier.telegram_chat_id ? 'mavjud' : 'yo\'q'}`);
@@ -1802,13 +2129,13 @@ async function handleSendRequest(query, bot) {
                                     'debt_branches.name as filial_name',
                                     'debt_svrs.name as svr_name'
                                 )
-                                .where('debt_requests.id', response.data.id)
+                                .where('debt_requests.id', requestId)
                                 .first();
                             
                             if (!fullRequest) {
-                                log.error(`[SEND_REQUEST] 6.3. ❌ So'rov topilmadi: requestId=${response.data.id}`);
+                                log.error(`[SEND_REQUEST] 6.3. ❌ So'rov topilmadi: requestId=${requestId}`);
                             } else {
-                                log.info(`[SEND_REQUEST] 6.3. So'rov topildi: RequestId=${response.data.id}, RequestUID=${fullRequest.request_uid}, BranchName=${fullRequest.filial_name}`);
+                                log.info(`[SEND_REQUEST] 6.3. So'rov topildi: RequestId=${requestId}, RequestUID=${fullRequest.request_uid}, BranchName=${fullRequest.filial_name}`);
                                 
                                 try {
                                     const cashierUser = await db('users').where('id', assignedCashier.user_id).first();
@@ -1817,10 +2144,25 @@ async function handleSendRequest(query, bot) {
                                     } else {
                                         log.info(`[SEND_REQUEST] 6.4. Kassir foydalanuvchi topildi: CashierId=${cashierUser.id}, Fullname=${cashierUser.fullname}, Status=${cashierUser.status}, TelegramChatId=${cashierUser.telegram_chat_id ? 'mavjud' : 'yo\'q'}`);
                                         
-                                        log.info(`[SEND_REQUEST] 6.5. showRequestToCashier funksiyasini chaqirish boshlanmoqda...`);
-                                        await cashierHandlers.showRequestToCashier(fullRequest, assignedCashier.telegram_chat_id, cashierUser);
+                                        // Kassirning boshqa faol so'rovlarini tekshirish (pendingCount hisoblash uchun)
+                                        // MUHIM: Joriy so'rovni (requestId) istisno qilish kerak
+                                        const activeRequestsCount = await db('debt_requests')
+                                            .where('current_approver_id', assignedCashier.user_id)
+                                            .where('current_approver_type', 'cashier')
+                                            .whereIn('status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER'])
+                                            .where('locked', false)
+                                            .where('id', '!=', requestId) // Joriy so'rovni istisno qilish
+                                            .count('* as count')
+                                            .first();
+                                        
+                                        const pendingCount = activeRequestsCount ? parseInt(activeRequestsCount.count) : 0;
+                                        
+                                        // HAR DOIM so'rovni yuborish (navbatli ko'rsatish uchun)
+                                        // pendingCount = boshqa pending so'rovlar soni (joriy so'rovni istisno qilgan holda)
+                                        log.info(`[SEND_REQUEST] 6.5. showRequestToCashier funksiyasini chaqirish boshlanmoqda... (pendingCount=${pendingCount})`);
+                                        await cashierHandlers.showRequestToCashier(fullRequest, assignedCashier.telegram_chat_id, cashierUser, pendingCount);
                                         notifiedCashiersCount++;
-                                        log.info(`[SEND_REQUEST] 6.6. ✅ Kassirga xabar muvaffaqiyatli yuborildi: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, ChatId=${assignedCashier.telegram_chat_id}, RequestUID=${fullRequest.request_uid}`);
+                                        log.info(`[SEND_REQUEST] 6.6. ✅ Kassirga xabar muvaffaqiyatli yuborildi: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, ChatId=${assignedCashier.telegram_chat_id}, RequestUID=${fullRequest.request_uid}, pendingCount=${pendingCount}`);
                                     }
                                 } catch (notifyError) {
                                     log.error(`[SEND_REQUEST] 6.7. ❌ Kassirga xabar yuborishda xatolik: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, ChatId=${assignedCashier.telegram_chat_id}, Error=${notifyError.message}`, notifyError);
@@ -1840,6 +2182,10 @@ async function handleSendRequest(query, bot) {
                 }
                 
                 // So'rov turiga qarab tasdiqlash jarayonini ko'rsatish
+                // Filial va SVR nomlarini olish
+                const branch = state.data.branch_id ? await db('debt_branches').where('id', state.data.branch_id).select('name').first() : null;
+                const svr = state.data.svr_id ? await db('debt_svrs').where('id', state.data.svr_id).select('name').first() : null;
+                
                 let approvalFlow = '';
                 
                 if (requestType === 'SET') {
@@ -1861,8 +2207,10 @@ async function handleSendRequest(query, bot) {
                 // Xabarni yangilash va message_id ni saqlash
                 await safeEditMessageText(bot,
                     `✅ <b>So'rov muvaffaqiyatli yaratildi!</b>\n\n` +
-                    `📋 <b>ID:</b> ${response.data.request_uid}\n` +
+                    `📋 <b>ID:</b> ${requestUID}\n` +
                     `📋 <b>Turi:</b> ${requestType === 'SET' ? 'SET (Muddat uzaytirish)' : 'ODDIY'}\n` +
+                    (branch ? `📍 <b>Filial:</b> ${branch.name}\n` : '') +
+                    (svr ? `👤 <b>SVR:</b> ${svr.name}\n` : '') +
                     approvalFlow +
                     cashierWarning,
                     {
@@ -1872,43 +2220,52 @@ async function handleSendRequest(query, bot) {
                     }
                 );
                 
-                // preview_message_id ni saqlash (keyinroq real-time yangilash uchun)
-                if (response.data.id) {
-                    try {
-                        await axios.patch(`${API_URL}/api/debt-approval/requests/${response.data.id}/preview-message`, {
-                            preview_message_id: query.message.message_id,
-                            preview_chat_id: chatId
-                        }, {
-                            timeout: 5000,
-                            headers: { 'Content-Type': 'application/json' }
-                        });
-                        log.debug(`[SEND_REQUEST] preview_message_id saqlandi: ${query.message.message_id}`);
-                    } catch (error) {
-                        log.warn(`[SEND_REQUEST] preview_message_id saqlashda xatolik:`, error.message);
-                    }
+                // Status xabarni kuzatishga qo'shish (saqlanadi)
+                const { markAsStatusMessage } = require('../utils/messageTracker.js');
+                const { cleanupAfterStatusMessage } = require('../utils/messageCleanup.js');
+                markAsStatusMessage(chatId, query.message.message_id);
+                
+                // preview_message_id ni saqlash (keyinroq real-time yangilash uchun) - API orqali
+                try {
+                    await axios.patch(`${API_URL}/api/debt-approval/requests/${requestId}/preview-message`, {
+                        preview_message_id: query.message.message_id,
+                        preview_chat_id: chatId
+                    }, {
+                        timeout: 5000,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    log.debug(`[SEND_REQUEST] preview_message_id saqlandi: ${query.message.message_id}`);
+                } catch (error) {
+                    log.warn(`[SEND_REQUEST] preview_message_id saqlashda xatolik:`, error.message);
                 }
                 
-                // State'ni tozalash
-                stateManager.clearUserState(userId);
-                log.info(`[SEND_REQUEST] ✅ State tozalandi`);
-            } else {
-                const errorMsg = response.data?.error || 'So\'rov yaratilmadi';
-                log.error(`[SEND_REQUEST] ❌ API javobida xatolik:`, errorMsg);
-                throw new Error(errorMsg);
-            }
-        } catch (apiError) {
-            log.error(`[SEND_REQUEST] ❌ API xatolik:`, {
-                message: apiError.message,
-                response: apiError.response?.data,
-                status: apiError.response?.status,
-                statusText: apiError.response?.statusText,
-                config: {
-                    url: apiError.config?.url,
-                    method: apiError.config?.method,
-                    data: apiError.config?.data
+                // Status xabari yuborilgandan keyin tozalash
+                try {
+                    log.info(`[SEND_REQUEST] [CLEANUP] Cleanup boshlanmoqda: chatId=${chatId}, userId=${userId}, statusMessageId=${query.message.message_id}`);
+                    
+                    // Kichik kutish - so'rov rahborga/kassirga yuborilishini kutish
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Tozalashni amalga oshirish
+                    const cleanupResult = await cleanupAfterStatusMessage(
+                        bot,
+                        chatId,
+                        query.message.message_id,
+                        { maxMessages: 50, delayBetween: 100, silent: true }
+                    );
+                    
+                    log.info(`[SEND_REQUEST] [CLEANUP] ✅ Tozalash yakunlandi: deleted=${cleanupResult.deleted}, errors=${cleanupResult.errors}`);
+                } catch (cleanupError) {
+                    // Silent fail - cleanup ixtiyoriy
+                    log.warn(`[SEND_REQUEST] [CLEANUP] Cleanup xatolik (ixtiyoriy):`, cleanupError.message);
                 }
-            });
-            throw apiError;
+                
+            // State'ni tozalash
+            stateManager.clearUserState(userId);
+            log.info(`[SEND_REQUEST] ✅ State tozalandi`);
+        } catch (error) {
+            log.error(`[SEND_REQUEST] ❌ So'rov yaratishda xatolik:`, error);
+            throw error;
         }
         
     } catch (error) {
@@ -2042,14 +2399,23 @@ async function handleBack(query, bot) {
                 log.info(`[BACK] Faqat bitta brend, avtomatik tanlash: brandId=${brands[0].id}`);
                 await handleBrandSelection({ ...query, data: `debt_select_brand:${brands[0].id}` }, bot);
             } else {
-                const keyboard = {
-                    inline_keyboard: [
-                        ...brands.map(brand => [{
+                // Grid formatda brendlar ro'yxatini ko'rsatish
+                const columns = brands.length > 10 ? 3 : brands.length > 5 ? 2 : 1;
+                const keyboardRows = [];
+                
+                for (let i = 0; i < brands.length; i += columns) {
+                    const row = brands.slice(i, i + columns).map(brand => ({
                             text: brand.name,
                             callback_data: `debt_select_brand:${brand.id}`
-                        }]),
-                        [{ text: '⬅️ Ortga', callback_data: 'debt_back_to_menu' }]
-                    ]
+                    }));
+                    keyboardRows.push(row);
+                }
+                
+                // Ortga tugmasi qo'shish
+                keyboardRows.push([{ text: '⬅️ Ortga', callback_data: 'debt_back_to_menu' }]);
+                
+                const keyboard = {
+                    inline_keyboard: keyboardRows
                 };
                 
                 await safeEditMessageText(bot,
@@ -2280,6 +2646,8 @@ async function handleBack(query, bot) {
                 
                 stateManager.updateUserState(userId, STATES.SET_EXTRA_INFO, {
                     ...state.data,
+                    // Type'ni saqlash (agar NORMAL ga o'zgarganda ham)
+                    type: state.data?.type || 'SET',
                     excel_data: null,
                     excel_headers: null,
                     excel_columns: null,
@@ -2311,7 +2679,7 @@ async function handleBack(query, bot) {
                     }
                 ).catch(async (error) => {
                     log.warn(`[BACK] Xabarni yangilashda xatolik: ${error.message}`);
-                    await bot.sendMessage(chatId, `✅ Brend: ${brand?.name || ''}\n✅ Filial: ${branch.name}\n✅ SVR: ${svr.name}\n\n📝 Izoh kiriting yoki Excel fayl yuboring:`, {
+                    await bot.sendMessage(chatId, `✅ Brend: ${brand?.name || ''}\n✅ Filial: ${branch.name}\n✅ SVR: ${svr.name}\n\n📊 <b>SET so'rov uchun Excel fayl yuborilishi shart!</b>\n\nExcel fayl yuboring (ustunlar avtomatik aniqlanadi yoki siz tanlaysiz).\n\n📝 Qo'shimcha izoh (ixtiyoriy):`, { parse_mode: 'HTML',
                         reply_markup: {
                             inline_keyboard: [
                                 [{ text: "⬅️ Ortga", callback_data: 'debt_back_to_svr' }],
@@ -2778,6 +3146,7 @@ module.exports = {
     showInProgressRequests,
     showApprovedRequests,
     showBrandBranchStats,
+    showPreview,
     STATES
 };
 

@@ -73,6 +73,14 @@ function connectWebSocket() {
             reconnectAttempts = 0;
         };
         
+        ws.onerror = (error) => {
+            // WebSocket xatolik - silent fail (real-time funksiyalar ixtiyoriy)
+            // Faqat development rejimida log qilish
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                console.debug('[WebSocket] Ulanish xatolik (bu normal, real-time funksiyalar ixtiyoriy):', error);
+            }
+        };
+        
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
@@ -83,8 +91,14 @@ function connectWebSocket() {
         };
         
         ws.onerror = (error) => {
-            console.error('❌ [WEBSOCKET] Xatolik:', error);
-            console.error('❌ [WEBSOCKET] URL:', wsUrl);
+            // Development rejimida faqat muhim xatoliklarni ko'rsatish
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                // Local development - xatoliklarni ko'rsatmaslik (chunki bu normal)
+                // console.debug('❌ [WEBSOCKET] Xatolik:', error);
+            } else {
+                console.error('❌ [WEBSOCKET] Xatolik:', error);
+                console.error('❌ [WEBSOCKET] URL:', wsUrl);
+            }
             // Xatolikda qayta ulanishni rejalashtirish
             if (ws.readyState === WebSocket.CLOSED) {
                 scheduleReconnect();
@@ -92,8 +106,12 @@ function connectWebSocket() {
         };
         
         ws.onclose = (event) => {
+            // Development rejimida faqat muhim xatoliklarni ko'rsatish
             if (event.code !== 1000 && event.code !== 1001) {
-                console.error('[WEBSOCKET] Ulanish yopildi. Code:', event.code, 'Reason:', event.reason || 'N/A');
+                // Local development - xatoliklarni ko'rsatmaslik (chunki bu normal)
+                if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                    console.error('[WEBSOCKET] Ulanish yopildi. Code:', event.code, 'Reason:', event.reason || 'N/A');
+                }
             }
             
             // Faqat noqonuniy yopilish holatlarida qayta ulanish
@@ -960,6 +978,33 @@ function handleWebSocketMessage(data) {
                 }, 300);
             }
             break;
+            
+        case 'debt_comparison':
+            // Qarzdorlik solishtirish natijasi (backend'dan kelgan xabar)
+            // Bu xabar faqat menejerga yuboriladi va log qilinadi
+            // Frontend'da alohida ko'rsatish talab qilinmaydi, chunki bu ma'lumot
+            // telegram bot orqali allaqachon menejerga yuborilgan
+            console.log('[REALTIME] Qarzdorlik solishtirish natijasi:', {
+                request_id: payload.request_id,
+                request_uid: payload.request_uid,
+                user_name: payload.user_name,
+                isIdentical: payload.comparison_result?.isIdentical,
+                totalDifference: payload.comparison_result?.totalDifference
+            });
+            
+            // Agar debt-approval sahifasi aktiv bo'lsa, yangilash (agar kerak bo'lsa)
+            const debtApprovalPage = document.getElementById('debt-approval');
+            if (debtApprovalPage && debtApprovalPage.classList.contains('active')) {
+                // Debt approval sahifasini yangilash (agar kerak bo'lsa)
+                // Bu yerda faqat log qilamiz, chunki asosiy ma'lumot telegram orqali yuborilgan
+            }
+            break;
+            
+        // Webhook rejimi Qarzdorlik tasdiqlash bo'limida o'chirilgan
+        // case 'debt_request_status_changed':
+        // case 'debt_request_updated':
+            // Bu event'lar endi ishlatilmaydi - foydalanuvchi "Yangilash" knopkasi orqali yangilaydi
+            // break;
             
         default:
             console.error('[REALTIME] Noma\'lum xabar turi:', type, payload);

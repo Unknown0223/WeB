@@ -125,6 +125,18 @@ export async function navigateTo(pageId, hideLoaderAfter = false) {
                 }
             }
             
+            if (pageId === 'debt-approval' && hasPermission(state.currentUser, 'roles:manage')) {
+                (async () => {
+                    try {
+                        const { loadDebtApprovalPage } = await import('./debtApproval.js');
+                        loadDebtApprovalPage();
+                    } catch (error) {
+                        console.error('Debt-approval sahifasini yuklashda xatolik:', error);
+                    }
+                })();
+            }
+            
+            
             // Agar loader yashirilishi kerak bo'lsa
             if (hideLoaderAfter) {
                 // Sahifa to'liq render bo'lguncha biroz kutish (100ms - tezroq)

@@ -216,7 +216,7 @@ async function safeSendMessage(chatId, text, options = {}) {
 // ===================================================================
 async function formatAndSendReport(payload) {
     // `old_report_date` va `old_location` payload'dan olinmoqda
-    const { type, report_id, location, date, author, author_id, data, old_data, settings, group_id, old_report_date, old_location, brand_name, old_brand_name, currency } = payload;
+    const { type, report_id, location, date, author, author_id, data, old_data, settings, group_id, old_report_date, old_location, brand_name, old_brand_name, currency, late_comment } = payload;
     
 
     
@@ -249,12 +249,13 @@ async function formatAndSendReport(payload) {
     let messageText = '';
     const reportRowsOrder = settings.rows || [];
     
-    // Brendlarni database'dan olish
+    // Brendlarni database'dan olish (saralash uchun)
     let brandsMap = {}; // { brand_id: brand_name }
     try {
         const brands = await db('brands').select('id', 'name');
         brands.forEach(b => {
-            brandsMap[b.id] = b.name;
+            // Key'ni string sifatida saqlash (saralash uchun)
+            brandsMap[String(b.id)] = b.name;
         });
     } catch (error) {
         botLog.error('Brendlarni olishda xatolik:', error.message);
@@ -277,7 +278,18 @@ async function formatAndSendReport(payload) {
 
         let grandTotal = 0;
         
-        // YANGI: Brendlar bo'yicha ma'lumotlarni ajratish
+        // Filialga biriktirilgan brendlarni olish (sort_order bilan)
+        let locationBrands = [];
+        try {
+            locationBrands = await db('brands')
+                .join('brand_locations', 'brands.id', 'brand_locations.brand_id')
+                .where('brand_locations.location_name', location)
+                .select('brands.id', 'brands.name', 'brands.sort_order');
+        } catch (error) {
+            botLog.error('Filialga biriktirilgan brendlarni olishda xatolik:', error.message);
+        }
+        
+        // Brendlar bo'yicha ma'lumotlarni ajratish
         const brandTotals = {}; // { brandId: { brandTotal, columns: { colName: value } } }
         
         // Ma'lumotlarni brendlar bo'yicha guruhlash
@@ -298,33 +310,72 @@ async function formatAndSendReport(payload) {
             }
         }
         
-        // Brendlar bo'yicha ko'rsatish (ustun tekis, ikki nuqta bilan)
-        messageText += `<b>Yangilangan summalar:</b>\n\n`;
-        
-        const sortedBrandIds = Object.keys(brandTotals).sort((a, b) => a - b);
-        const brandLines = [];
-        
-        // Eng uzun brend nomini va eng uzun qiymatni topish (ustun tekisligi uchun)
-        let maxBrandNameLength = 0;
-        let maxValueLength = 0;
-        const brandValues = [];
-        
-        for (const brandId of sortedBrandIds) {
-            const { brandTotal } = brandTotals[brandId];
-            if (brandTotal > 0) {
-                const brandName = brandsMap[brandId] || `Brend #${brandId}`;
-                const formattedValue = formatCurrency(brandTotal, reportCurrency);
-                maxBrandNameLength = Math.max(maxBrandNameLength, brandName.length);
-                maxValueLength = Math.max(maxValueLength, formattedValue.length);
-                brandValues.push({ brandName, formattedValue });
+        // Filialga biriktirilgan barcha brendlar uchun 0 qiymat qo'shish (agar qiymat yo'q bo'lsa)
+        for (const locationBrand of locationBrands) {
+            const brandId = String(locationBrand.id);
+            if (!brandTotals[brandId]) {
+                brandTotals[brandId] = { brandTotal: 0, columns: {} };
             }
         }
         
-        // Har bir brend uchun formatlash (ustun tekis - brend nomlari va qiymatlar)
-        for (const { brandName, formattedValue } of brandValues) {
-            const brandSpaces = ' '.repeat(maxBrandNameLength - brandName.length);
-            const valueSpaces = ' '.repeat(maxValueLength - formattedValue.length);
-            brandLines.push(`${escapeHtml(brandName)}${brandSpaces}: ${valueSpaces}<code>${formattedValue}</code>`);
+        // Brendlar bo'yicha ko'rsatish (ustun tekis, ikki nuqta bilan)
+        messageText += `<b>Yangilangan summalar:</b>\n\n`;
+        
+        // Filialga biriktirilgan brendlar bo'yicha tartiblash
+        // Agar sort_order mavjud bo'lsa, shu bo'yicha saralash, aks holda alifbo tartibida
+        const sortedBrandIds = locationBrands.length > 0
+            ? locationBrands
+                .map(b => ({
+                    id: String(b.id),
+                    name: b.name || brandsMap[String(b.id)] || '',
+                    sortOrder: b.sort_order !== null && b.sort_order !== undefined ? parseInt(b.sort_order) : null
+                }))
+                .sort((a, b) => {
+                    // Agar ikkala brendda ham sort_order mavjud bo'lsa, sort_order bo'yicha saralash
+                    if (a.sortOrder !== null && b.sortOrder !== null) {
+                        return a.sortOrder - b.sortOrder;
+                    }
+                    // Agar faqat birida sort_order bo'lsa, u birinchi bo'ladi
+                    if (a.sortOrder !== null) return -1;
+                    if (b.sortOrder !== null) return 1;
+                    // Agar ikkalasida ham sort_order yo'q bo'lsa, alifbo tartibida saralash
+                    return a.name.localeCompare(b.name, 'uz', { sensitivity: 'base', numeric: true });
+                })
+                .map(b => b.id)
+            : Object.keys(brandTotals)
+                .map(brandId => {
+                    // brandsMap dan sort_order ni olish uchun qayta so'rov
+                    const brand = locationBrands.find(b => String(b.id) === brandId);
+                    return {
+                        id: brandId,
+                        name: brandsMap[brandId] || `Brend #${brandId}`,
+                        sortOrder: brand && brand.sort_order !== null && brand.sort_order !== undefined 
+                            ? parseInt(brand.sort_order) 
+                            : null
+                    };
+                })
+                .sort((a, b) => {
+                    // Agar ikkala brendda ham sort_order mavjud bo'lsa, sort_order bo'yicha saralash
+                    if (a.sortOrder !== null && b.sortOrder !== null) {
+                        return a.sortOrder - b.sortOrder;
+                    }
+                    // Agar faqat birida sort_order bo'lsa, u birinchi bo'ladi
+                    if (a.sortOrder !== null) return -1;
+                    if (b.sortOrder !== null) return 1;
+                    // Agar ikkalasida ham sort_order yo'q bo'lsa, alifbo tartibida saralash
+                    return a.name.localeCompare(b.name, 'uz', { sensitivity: 'base', numeric: true });
+                })
+                .map(b => b.id);
+        
+        const brandLines = [];
+        
+        // Brendlar va qiymatlarni to'plash
+        for (const brandId of sortedBrandIds) {
+            const { brandTotal = 0 } = brandTotals[brandId] || {};
+                const brandName = brandsMap[brandId] || `Brend #${brandId}`;
+                const formattedValue = formatCurrency(brandTotal, reportCurrency);
+            // Oddiy format: BrandName: summa
+            brandLines.push(`${escapeHtml(brandName)}: <code>${formattedValue}</code>`);
         }
         
         // Har bir brend alohida qatorda
@@ -332,9 +383,21 @@ async function formatAndSendReport(payload) {
 
         // Jami summa - qiymat allaqachon tanlangan valyutada, konvertatsiya qilmaslik kerak
         messageText += `💰 <b>JAMI:</b> <code>${formatCurrency(grandTotal, reportCurrency)}</code>`;
+        
+        // Kechikish sababi (agar mavjud bo'lsa)
+        if (late_comment && late_comment.trim()) {
+            messageText += `\n\n⚠️ <b>Kechikish sababi:</b> ${escapeHtml(late_comment)}`;
+        }
 
     } else if (type === 'edit') {
+        // Eski sanani ko'rsatish
+        const formattedOldDate = old_report_date ? format(new Date(old_report_date), 'dd.MM.yyyy') : null;
+        const formattedNewDate = format(new Date(date), 'dd.MM.yyyy');
+        
         messageText += `✍️ <b>Hisobot Tahrirlandi #${String(report_id).padStart(4, '0')}</b>\n`;
+        if (formattedOldDate) {
+            messageText += `📅 ${formattedOldDate} uchun hisobot\n`;
+        }
         messageText += `👤 O'zgartirdi: <b>${escapeHtml(userFullname)}</b>\n`;
         if (userTelegramUsername) {
             messageText += `📱 @${escapeHtml(userTelegramUsername)}\n`;
@@ -350,7 +413,6 @@ async function formatAndSendReport(payload) {
 
         // === O'ZGARTIRISH: Sana o'zgarishini tekshirish ===
         if (old_report_date && date !== old_report_date) {
-            const formattedOldDate = format(new Date(old_report_date), 'dd.MM.yyyy');
             const formattedNewDate = format(new Date(date), 'dd.MM.yyyy');
             changes.push(`Sana: <s>${formattedOldDate}</s> → <b>${formattedNewDate}</b>`);
         }
@@ -369,6 +431,17 @@ async function formatAndSendReport(payload) {
         }
         
         messageText += `<b>Yangilangan summalar:</b>\n\n`;
+
+        // Filialga biriktirilgan brendlarni olish (sort_order bilan)
+        let locationBrands = [];
+        try {
+            locationBrands = await db('brands')
+                .join('brand_locations', 'brands.id', 'brand_locations.brand_id')
+                .where('brand_locations.location_name', location)
+                .select('brands.id', 'brands.name', 'brands.sort_order');
+        } catch (error) {
+            botLog.error('Filialga biriktirilgan brendlarni olishda xatolik:', error.message);
+        }
 
         let newGrandTotal = 0;
         let oldGrandTotal = 0;
@@ -401,54 +474,81 @@ async function formatAndSendReport(payload) {
             }
         }
         
-        // Brendlar bo'yicha o'zgarishlarni ko'rsatish (ustun tekis, ikki nuqta bilan)
-        const sortedBrandIds = Object.keys(brandChanges).sort((a, b) => a - b);
+        // Filialga biriktirilgan barcha brendlar uchun 0 qiymat qo'shish (agar qiymat yo'q bo'lsa)
+        for (const locationBrand of locationBrands) {
+            const brandId = String(locationBrand.id);
+            if (!brandChanges[brandId]) {
+                brandChanges[brandId] = { newTotal: 0, oldTotal: 0, columns: {} };
+            }
+        }
+        
+        // Filialga biriktirilgan brendlar bo'yicha tartiblash
+        // Agar sort_order mavjud bo'lsa, shu bo'yicha saralash, aks holda alifbo tartibida
+        const sortedBrandIds = locationBrands.length > 0
+            ? locationBrands
+                .map(b => ({
+                    id: String(b.id),
+                    name: b.name || brandsMap[String(b.id)] || '',
+                    sortOrder: b.sort_order !== null && b.sort_order !== undefined ? parseInt(b.sort_order) : null
+                }))
+                .sort((a, b) => {
+                    // Agar ikkala brendda ham sort_order mavjud bo'lsa, sort_order bo'yicha saralash
+                    if (a.sortOrder !== null && b.sortOrder !== null) {
+                        return a.sortOrder - b.sortOrder;
+                    }
+                    // Agar faqat birida sort_order bo'lsa, u birinchi bo'ladi
+                    if (a.sortOrder !== null) return -1;
+                    if (b.sortOrder !== null) return 1;
+                    // Agar ikkalasida ham sort_order yo'q bo'lsa, alifbo tartibida saralash
+                    return a.name.localeCompare(b.name, 'uz', { sensitivity: 'base', numeric: true });
+                })
+                .map(b => b.id)
+            : Object.keys(brandChanges)
+                .map(brandId => {
+                    // brandsMap dan sort_order ni olish uchun qayta so'rov
+                    const brand = locationBrands.find(b => String(b.id) === brandId);
+                    return {
+                        id: brandId,
+                        name: brandsMap[brandId] || `Brend #${brandId}`,
+                        sortOrder: brand && brand.sort_order !== null && brand.sort_order !== undefined 
+                            ? parseInt(brand.sort_order) 
+                            : null
+                    };
+                })
+                .sort((a, b) => {
+                    // Agar ikkala brendda ham sort_order mavjud bo'lsa, sort_order bo'yicha saralash
+                    if (a.sortOrder !== null && b.sortOrder !== null) {
+                        return a.sortOrder - b.sortOrder;
+                    }
+                    // Agar faqat birida sort_order bo'lsa, u birinchi bo'ladi
+                    if (a.sortOrder !== null) return -1;
+                    if (b.sortOrder !== null) return 1;
+                    // Agar ikkalasida ham sort_order yo'q bo'lsa, alifbo tartibida saralash
+                    return a.name.localeCompare(b.name, 'uz', { sensitivity: 'base', numeric: true });
+                })
+                .map(b => b.id);
+        
         const brandLines = [];
         const brandData = [];
         
-        // Ma'lumotlarni to'plash
+        // Ma'lumotlarni to'plash (barcha brendlar, 0 qiymat bilan ham)
         for (const brandId of sortedBrandIds) {
-            const { newTotal, oldTotal } = brandChanges[brandId];
-            
-            if (newTotal > 0 || oldTotal > 0) {
+            const { newTotal = 0, oldTotal = 0 } = brandChanges[brandId] || {};
                 const brandName = brandsMap[brandId] || `Brend #${brandId}`;
                 const formattedNewValue = formatCurrency(newTotal, reportCurrency);
                 const formattedOldValue = formatCurrency(oldTotal, reportCurrency);
                 brandData.push({ brandName, newTotal, oldTotal, formattedNewValue, formattedOldValue });
             }
-        }
         
-        // Eng uzun brend nomini va eng uzun qiymat kombinatsiyasini topish (ustun tekisligi uchun)
-        let maxBrandNameLength = 0;
-        let maxValueLength = 0;
-        for (const { brandName, formattedNewValue, formattedOldValue, newTotal, oldTotal } of brandData) {
-            maxBrandNameLength = Math.max(maxBrandNameLength, brandName.length);
-            
-            if (newTotal !== oldTotal) {
-                // O'zgarishlar uchun: oldValue + " → " + newValue + " ➕" (HTML tag'larsiz uzunlik)
-                // " → " = 3 belgi, " ➕" = 2 belgi, jami 5 belgi
-                const changeLength = formattedOldValue.length + formattedNewValue.length + 5;
-                maxValueLength = Math.max(maxValueLength, changeLength);
-            } else {
-                // O'zgarish yo'q
-                maxValueLength = Math.max(maxValueLength, formattedNewValue.length);
-            }
-        }
-        
-        // Har bir brend uchun formatlash (ustun tekis - brend nomlari va qiymatlar)
+        // Har bir brend uchun formatlash (oddiy format)
         for (const { brandName, newTotal, oldTotal, formattedNewValue, formattedOldValue } of brandData) {
-            const brandSpaces = ' '.repeat(maxBrandNameLength - brandName.length);
-            
             if (newTotal !== oldTotal) {
                 const sign = newTotal > oldTotal ? '➕' : '➖';
-                // HTML tag'larsiz uzunlikni hisoblash (faqat matn uzunligi)
-                const changeText = `${formattedOldValue} → ${formattedNewValue} ${sign}`;
-                const changeLength = changeText.length;
-                const valueSpaces = ' '.repeat(maxValueLength - changeLength);
-                brandLines.push(`${escapeHtml(brandName)}${brandSpaces}: ${valueSpaces}<s>${formattedOldValue}</s> → <code>${formattedNewValue}</code> ${sign}`);
+                // Oddiy format: BrandName: oldValue → newValue ➕
+                brandLines.push(`${escapeHtml(brandName)}: <s>${formattedOldValue}</s> → <code>${formattedNewValue}</code> ${sign}`);
             } else {
-                const valueSpaces = ' '.repeat(maxValueLength - formattedNewValue.length);
-                brandLines.push(`${escapeHtml(brandName)}${brandSpaces}: ${valueSpaces}<code>${formattedNewValue}</code>`);
+                // Oddiy format: BrandName: summa
+                brandLines.push(`${escapeHtml(brandName)}: <code>${formattedNewValue}</code>`);
             }
         }
         
@@ -465,6 +565,11 @@ async function formatAndSendReport(payload) {
         }
 
         messageText += `💰 <b>JAMI:</b> <code>${formatCurrency(newGrandTotal, reportCurrency)}</code>  ${diffText}`;
+        
+        // Kechikish sababi (agar mavjud bo'lsa)
+        if (late_comment && late_comment.trim()) {
+            messageText += `\n\n⚠️ <b>Kechikish sababi:</b> ${escapeHtml(late_comment)}`;
+        }
     }
 
     if (messageText) {
@@ -516,9 +621,15 @@ async function handleSecurityRequest(payload) {
 
     switch (type) {
         case 'secret_word_request':
-            userStates[chat_id] = { state: 'awaiting_secret_word', user_id, attempts_left: 2 };
             text = `Salom, *${escapeMarkdownV2(username)}*\\! \n\n${escapeMarkdownV2("Tizimga yangi qurilmadan kirishga urinish aniqlandi. Xavfsizlikni tasdiqlash uchun, iltimos, ")}*${escapeMarkdownV2("maxfiy so'zingizni")}*${escapeMarkdownV2(" shu botga yozib yuboring.")}`;
-            await sendMarkdownV2Message(chat_id, text);
+            const secretWordMsg = await sendMarkdownV2Message(chat_id, text);
+            // Xabar ID'sini saqlash (keyinchalik o'chirish uchun)
+            userStates[chat_id] = { 
+                state: 'awaiting_secret_word', 
+                user_id, 
+                attempts_left: 2,
+                secret_word_message_id: secretWordMsg?.message_id || null
+            };
             break;
 
         case 'magic_link_request':
@@ -733,22 +844,34 @@ const initializeBot = async (botToken, options = { polling: true }) => {
     // 409 Conflict flag'ni qayta tiklash
     pollingConflictHandled = false;
 
-    bot = new TelegramBot(botToken, options);
+    // Polling sozlamalari - timeout va qayta urinish
+    if (options.polling) {
+        // Polling rejimida - timeout va interval sozlamalari
+        bot = new TelegramBot(botToken, {
+            polling: {
+                interval: 1000, // 1 soniyada bir marta so'rov
+                autoStart: true,
+                params: {
+                    timeout: 10 // 10 soniya timeout
+                }
+            }
+        });
+    } else {
+        bot = new TelegramBot(botToken, options);
+    }
+    
     botIsInitialized = true;
 
-    if (options.polling) {
-        // Bot polling rejimida ishga tushdi
-    } else {
-        // Bot webhook rejimi uchun tayyor
-    }
-
-    bot.on('polling_error', (error) => {
+    // Polling error handler - qayta urinish mexanizmi bilan
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 5;
+    const RECONNECT_DELAY = 30000; // 30 soniya
+    
+    bot.on('polling_error', async (error) => {
         // 409 Conflict - boshqa bot instance allaqachon polling qilmoqda
         if (error.code === 'ETELEGRAM' && error.message && error.message.includes('409')) {
             if (!pollingConflictHandled) {
                 pollingConflictHandled = true;
-
-
                 try {
                     if (bot && bot.isPolling && bot.isPolling()) {
                         bot.stopPolling();
@@ -760,6 +883,61 @@ const initializeBot = async (botToken, options = { polling: true }) => {
             }
             // Xatolikni qayta ko'rsatmaslik
             return;
+        }
+        
+        // ETIMEDOUT yoki boshqa tarmoq xatoliklari
+        if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.message?.includes('timeout')) {
+            reconnectAttempts++;
+            
+            if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
+                botLog.warn(`Polling xatolik (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}): ${error.code} - ${error.message}`);
+                botLog.info(`${RECONNECT_DELAY / 1000} soniyadan keyin qayta uriniladi...`);
+                
+                // Polling'ni to'xtatish
+                try {
+                    if (bot && bot.isPolling && bot.isPolling()) {
+                        await bot.stopPolling();
+                    }
+                } catch (stopError) {
+                    botLog.error('Polling to\'xtatishda xatolik:', stopError.message);
+                }
+                
+                // Qayta urinish
+                setTimeout(async () => {
+                    try {
+                        botLog.info('Bot qayta ishga tushirilmoqda...');
+                        await bot.startPolling({
+                            restart: true,
+                            polling: {
+                                interval: 1000,
+                                autoStart: true,
+                                params: {
+                                    timeout: 10
+                                }
+                            }
+                        });
+                        reconnectAttempts = 0; // Muvaffaqiyatli bo'lsa, counter'ni tozalash
+                        botLog.info('✅ Bot qayta ishga tushirildi');
+                    } catch (reconnectError) {
+                        botLog.error('Qayta ishga tushirishda xatolik:', reconnectError.message);
+                    }
+                }, RECONNECT_DELAY);
+                
+                return; // Xatolikni qayta ko'rsatmaslik
+            } else {
+                botLog.error(`Polling xatolik: ${MAX_RECONNECT_ATTEMPTS} marta urinishdan keyin to'xtatildi`);
+                botLog.error('Internet aloqasini yoki firewall sozlamalarini tekshiring');
+                // Polling'ni to'xtatish
+                try {
+                    if (bot && bot.isPolling && bot.isPolling()) {
+                        await bot.stopPolling();
+                        botIsInitialized = false;
+                    }
+                } catch (stopError) {
+                    botLog.error('Polling to\'xtatishda xatolik:', stopError.message);
+                }
+                return;
+            }
         }
         
         // Boshqa xatoliklarni ko'rsatish
@@ -782,6 +960,70 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         try {
             const chatId = msg.chat.id;
             const code = match[1];
+            
+            // Agar bu guruh bo'lsa (chatId manfiy raqam)
+            if (chatId < 0) {
+                try {
+                    // Rahbarlar guruhini tekshirish
+                    const leadersGroup = await db('debt_groups')
+                        .where('group_type', 'leaders')
+                        .where('is_active', true)
+                        .first();
+                    
+                    if (leadersGroup && leadersGroup.telegram_group_id === chatId) {
+                        // Rahbarlar guruhida /start bosilganda reply keyboard yuborish
+                        const welcomeText = `✅ <b>Bot ishga tushdi!</b>\n\n` +
+                            `Rahbarlar uchun bloklash va boshqaruv funksiyalari mavjud.\n\n` +
+                            `Quyidagi tugmalardan foydalaning:`;
+                        
+                        const keyboard = {
+                            keyboard: [
+                                [{ text: "📥 SET so'rovlari" }],
+                                [{ text: "📋 Tasdiqlangan so'rovlar" }],
+                                [{ text: "🚫 Bloklash" }]
+                            ],
+                            resize_keyboard: true,
+                            one_time_keyboard: false
+                        };
+                        
+                        try {
+                            await bot.sendMessage(chatId, welcomeText, {
+                                parse_mode: 'HTML',
+                                reply_markup: keyboard
+                            });
+                            botLog.info(`Reply keyboard rahbarlar guruhiga /start orqali yuborildi: groupId=${chatId}`);
+                            return; // Guruhda /start bosilganda, shaxsiy chat handler'iga o'tmasin
+                        } catch (keyboardError) {
+                            botLog.warn(`Guruhga keyboard yuborishda xatolik (bot admin bo'lishi kerak): ${keyboardError.message}`);
+                        }
+                    }
+                    
+                    // Operatorlar guruhini tekshirish
+                    const operatorsGroup = await db('debt_groups')
+                        .where('group_type', 'operators')
+                        .where('is_active', true)
+                        .first();
+                    
+                    if (operatorsGroup && operatorsGroup.telegram_group_id === chatId) {
+                        // Operatorlar guruhida /start bosilganda xabar yuborish
+                        const welcomeText = `✅ <b>Bot ishga tushdi!</b>\n\n` +
+                            `Operatorlar guruhi uchun bot faollashtirildi.\n\n` +
+                            `Operatorlar tasdiqlash jarayonlari bu yerda amalga oshiriladi.`;
+                        
+                        try {
+                            await bot.sendMessage(chatId, welcomeText, {
+                                parse_mode: 'HTML'
+                            });
+                            botLog.info(`Xabar operatorlar guruhiga /start orqali yuborildi: groupId=${chatId}`);
+                            return; // Guruhda /start bosilganda, shaxsiy chat handler'iga o'tmasin
+                        } catch (sendError) {
+                            botLog.warn(`Operatorlar guruhiga xabar yuborishda xatolik: ${sendError.message}`);
+                        }
+                    }
+                } catch (groupError) {
+                    botLog.error('Guruh tekshiruvida xatolik:', groupError);
+                }
+            }
             
 
 
@@ -1094,30 +1336,378 @@ const initializeBot = async (botToken, options = { polling: true }) => {
 
         } else {
             // Agar hech qanday kod bo'lmasa, oddiy /start komandasi
-            // Super admin yoki admin bo'lsa, chat ID'ni avtomatik saqlash
             try {
-            const user = await db('users').where({ telegram_chat_id: chatId }).first();
-            if (user && (user.role === 'super_admin' || user.role === 'admin')) {
-                // Admin chat ID'ni tekshirish va saqlash
-                const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
-                if (!adminChatIdSetting || !adminChatIdSetting.value) {
-                    await db('settings')
-                        .insert({ key: 'telegram_admin_chat_id', value: String(chatId) })
-                        .onConflict('key')
-                        .merge();
+                const userHelper = require('../bot/unified/userHelper.js');
+                const { createUnifiedKeyboard, createRegistrationKeyboard } = require('../bot/unified/keyboards.js');
+                const stateManager = require('../bot/unified/stateManager.js');
+                
+                // userId ni msg.from.id dan olish
+                const telegramUserId = msg.from.id;
+                const user = await userHelper.getUserByTelegram(chatId, telegramUserId);
+                
+                if (user) {
+                    // Rahbarlar guruhida ekanligini tekshirish
+                    const { isUserInGroup } = require('../utils/groupValidator.js');
+                    const userInLeadersGroup = await isUserInGroup(user.id, 'leaders');
+                    
+                    // Eski xabarlarni tozalash (xavfsizlik uchun - maxfiy ma'lumotlar ko'rinmasligi uchun)
+                    // Message ID'larni saqlash orqali tozalash
+                    try {
+                        // Foydalanuvchining so'nggi xabarlarini o'chirish
+                        // Telegram API orqali so'nggi xabarlarni olish va o'chirish
+                        // Eslatma: Bu faqat polling rejimida ishlaydi
+                        if (bot.isPolling && bot.isPolling()) {
+                            // getUpdates() orqali so'nggi xabarlarni olish
+                            try {
+                                const updates = await bot.getUpdates({ offset: -50, limit: 50 });
+                                const messagesToDelete = [];
+                                
+                                // Faqat joriy chat'dan va foydalanuvchidan kelgan xabarlarni to'plash
+                                for (const update of updates || []) {
+                                    if (update.message && 
+                                        update.message.chat.id === chatId && 
+                                        update.message.from.id === telegramUserId &&
+                                        update.message.message_id &&
+                                        update.message.message_id !== msg.message_id) { // Joriy xabarni o'chirmaslik
+                                        messagesToDelete.push(update.message.message_id);
+                                    }
+                                }
+                                
+                                // Xabarlarni teskari tartibda o'chirish (eng eski avval)
+                                messagesToDelete.reverse();
+                                // Bir safarda 5 tagacha o'chirish (rate limit'ni oldini olish uchun)
+                                for (const messageId of messagesToDelete.slice(0, 5)) {
+                                    try {
+                                        await bot.deleteMessage(chatId, messageId);
+                                        await new Promise(resolve => setTimeout(resolve, 200)); // 200ms kutish
+                                    } catch (deleteError) {
+                                        // Silent fail - eski xabarlarni o'chirish ixtiyoriy
+                                    }
+                                }
+                            } catch (getUpdatesError) {
+                                // getUpdates() ishlamasa, e'tiborsiz qoldirish
+                            }
+                        }
+                    } catch (cleanupError) {
+                        // Silent fail - cleanup ixtiyoriy
+                    }
+                    
+                    // Status tekshirish
+                    if (userHelper.isPending(user)) {
+                        const pendingMessage = `⏳ <b>So'rovingiz ko'rib chiqilmoqda</b>\n\n` +
+                            `━━━━━━━━━━━━━━━━━━━━\n\n` +
+                            `👤 <b>To'liq ism:</b> ${user.fullname || 'Noma\'lum'}\n` +
+                            `👔 <b>Rol:</b> ${user.role || 'Tasdiqlanmagan'}\n` +
+                            `📊 <b>Holat:</b> <b>Admin tasdig'ini kutmoqda</b>\n\n` +
+                            `⏱️ Admin tomonidan tasdiqlangandan keyin sizga xabar yuboriladi.\n\n` +
+                            `💡 Bu odatda 1-2 soat ichida amalga oshiriladi.`;
+                        
+                        // Agar so'nggi xabar mavjud bo'lsa, uni yangilash, aks holda yangi xabar yuborish
+                        // Avval database'dan to'liq ma'lumotni olish (bot_pending_message_id bilan)
+                        const userWithPendingMsg = await db('users').where({ id: user.id }).first();
+                        
+                        if (userWithPendingMsg && userWithPendingMsg.bot_pending_message_id) {
+                            try {
+                                await bot.editMessageText(pendingMessage, {
+                                    chat_id: chatId,
+                                    message_id: userWithPendingMsg.bot_pending_message_id,
+                                    parse_mode: 'HTML'
+                                });
+                                botLog.debug(`Pending xabar yangilandi: message_id=${userWithPendingMsg.bot_pending_message_id}`);
+                                return;
+                            } catch (editError) {
+                                // Agar xabarni yangilab bo'lmasa (masalan, o'chirilgan bo'lsa), yangi xabar yuborish
+                                botLog.debug(`Pending xabarni yangilab bo'lmadi, yangi xabar yuborilmoqda: ${editError.message}`);
+                                // Eski message_id'ni tozalash
+                                await db('users').where({ id: user.id }).update({ 
+                                    bot_pending_message_id: null 
+                                });
+                            }
+                        }
+                        
+                        // Yangi xabar yuborish va message_id'ni saqlash
+                        const sentMessage = await safeSendMessage(chatId, pendingMessage, { parse_mode: 'HTML' });
+                        if (sentMessage && sentMessage.message_id) {
+                            await db('users').where({ id: user.id }).update({ 
+                                bot_pending_message_id: sentMessage.message_id 
+                            });
+                            botLog.debug(`Yangi pending xabar yuborildi va saqlandi: message_id=${sentMessage.message_id}`);
+                        }
+                        return;
+                    }
+                    
+                    // Agar status = 'active' bo'lsa, unified keyboard ko'rsatish
+                    if (userHelper.isActive(user)) {
+                        // Foydalanuvchiga biriktirilgan filial va brendlarni olish
+                        const [userBrandsRaw, userBranchesRaw, cashierBranchesRaw, operatorBrandsRaw] = await Promise.all([
+                            db('debt_user_brands')
+                                .where('user_id', user.id)
+                                .join('debt_brands', 'debt_user_brands.brand_id', 'debt_brands.id')
+                                .select('debt_brands.id', 'debt_brands.name')
+                                .groupBy('debt_brands.id', 'debt_brands.name')
+                                .orderBy('debt_brands.name'),
+                            db('debt_user_branches')
+                                .where('user_id', user.id)
+                                .join('debt_branches', 'debt_user_branches.branch_id', 'debt_branches.id')
+                                .select('debt_branches.id', 'debt_branches.name')
+                                .groupBy('debt_branches.id', 'debt_branches.name')
+                                .orderBy('debt_branches.name'),
+                            // Kassir uchun debt_cashiers jadvalidan ham filiallarni olish
+                            userHelper.hasRole(user, ['kassir', 'cashier']) 
+                                ? db('debt_cashiers')
+                                    .where('user_id', user.id)
+                                    .where('is_active', true)
+                                    .join('debt_branches', 'debt_cashiers.branch_id', 'debt_branches.id')
+                                    .select('debt_branches.id', 'debt_branches.name')
+                                    .groupBy('debt_branches.id', 'debt_branches.name')
+                                    .orderBy('debt_branches.name')
+                                : Promise.resolve([]),
+                            // Operator uchun debt_operators jadvalidan ham brendlarni olish
+                            userHelper.hasRole(user, ['operator']) 
+                                ? db('debt_operators')
+                                    .where('user_id', user.id)
+                                    .where('is_active', true)
+                                    .join('debt_brands', 'debt_operators.brand_id', 'debt_brands.id')
+                                    .select('debt_brands.id', 'debt_brands.name')
+                                    .groupBy('debt_brands.id', 'debt_brands.name')
+                                    .orderBy('debt_brands.name')
+                                : Promise.resolve([])
+                        ]);
+                        
+                        // Dublikatlarni olib tashlash (ID bo'yicha) - debt_user_brands va debt_operators ni birlashtirish
+                        const allBrandsRaw = [...userBrandsRaw, ...operatorBrandsRaw];
+                        const uniqueBrandsMap = new Map();
+                        allBrandsRaw.forEach(brand => {
+                            if (!uniqueBrandsMap.has(brand.id)) {
+                                uniqueBrandsMap.set(brand.id, brand);
+                            }
+                        });
+                        const userBrands = Array.from(uniqueBrandsMap.values());
+                        
+                        // Filiallarni birlashtirish (debt_user_branches va debt_cashiers dan)
+                        const allBranchesRaw = [...userBranchesRaw, ...cashierBranchesRaw];
+                        const uniqueBranchesMap = new Map();
+                        allBranchesRaw.forEach(branch => {
+                            if (!uniqueBranchesMap.has(branch.id)) {
+                                uniqueBranchesMap.set(branch.id, branch);
+                            }
+                        });
+                        const userBranches = Array.from(uniqueBranchesMap.values());
+                        
+                        // Biriktirilgan filial va brendlarni formatlash
+                        let bindingsText = '';
+                        if (userBrands.length > 0 || userBranches.length > 0) {
+                            bindingsText = `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                            if (userBrands.length > 0) {
+                                const brandNames = userBrands.map(b => escapeHtml(b.name)).join(', ');
+                                bindingsText += `🏷️ <b>Brendlar:</b> ${brandNames}\n`;
+                            }
+                            if (userBranches.length > 0) {
+                                const branchNames = userBranches.map(b => escapeHtml(b.name)).join(', ');
+                                bindingsText += `📍 <b>Filiallar:</b> ${branchNames}\n`;
+                            }
+                        }
+                        
+                        // Vazifalardan rollarni olish
+                        const { getUserRolesFromTasks, getSelectedRole, ROLE_DISPLAY_NAMES, shouldShowRoleSelection, getRolesForSelection, getGroupRoleByChatId } = userHelper;
+                        const userRolesFromTasks = await getUserRolesFromTasks(user.id);
+                        
+                        // Guruhda bo'lsa, guruh roli bilan ishlash (rol tanlash so'ralmaydi)
+                        const isGroup = chatId < 0;
+                        let activeRole = null;
+                        
+                        if (isGroup) {
+                            // Guruhda → guruh roli bilan ishlash
+                            const groupRole = await getGroupRoleByChatId(chatId);
+                            if (groupRole) {
+                                activeRole = groupRole;
+                                botLog.info(`[ROLE_SELECTION] Guruhda rol avtomatik tanlandi: userId=${user.id}, chatId=${chatId}, groupRole=${groupRole}`);
+                            } else {
+                                // Agar guruh roli aniqlanmasa, birinchi rolni tanlash
+                                activeRole = userRolesFromTasks.length > 0 ? userRolesFromTasks[0] : user.role;
+                            }
+                        } else {
+                            // Shaxsiy chatda
+                            const selectedRole = getSelectedRole(user.id);
+                            
+                            // Faqat manager + cashier kombinatsiyasi bo'lsa va rol tanlanmagan bo'lsa, rol tanlash so'raladi
+                            const shouldShowSelection = shouldShowRoleSelection(userRolesFromTasks);
+                            
+                            if (shouldShowSelection && !selectedRole) {
+                                // Rol tanlash inline keyboard (faqat manager va cashier)
+                                const rolesForSelection = getRolesForSelection(userRolesFromTasks);
+                                const roleButtons = rolesForSelection.map(role => ({
+                                    text: ROLE_DISPLAY_NAMES[role] || role,
+                                    callback_data: `select_role_${role}`
+                                }));
+                            
+                            // Keyboard'ni 2 ta yonma-yon qilish
+                            const inlineKeyboardRows = [];
+                            for (let i = 0; i < roleButtons.length; i += 2) {
+                                if (i + 1 < roleButtons.length) {
+                                    inlineKeyboardRows.push([roleButtons[i], roleButtons[i + 1]]);
+                                } else {
+                                    inlineKeyboardRows.push([roleButtons[i]]);
+                                }
+                            }
+                            
+                            const roleSelectionMessage = `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\n` +
+                                `Hisobot va Qarzdorlik tasdiqlash tizimiga xush kelibsiz!\n\n` +
+                                `Sizda bir nechta rol mavjud. Iltimos, qaysi rol bilan ishlashni tanlang:`;
+                            
+                            const inlineKeyboard = {
+                                inline_keyboard: inlineKeyboardRows
+                            };
+                            
+                            // Agar so'nggi welcome xabar mavjud bo'lsa, uni o'chirish
+                            const userWithWelcomeMsg = await db('users').where({ id: user.id }).first();
+                            if (userWithWelcomeMsg && userWithWelcomeMsg.bot_welcome_message_id) {
+                                try {
+                                    await bot.deleteMessage(chatId, userWithWelcomeMsg.bot_welcome_message_id);
+                                } catch (deleteError) {
+                                    // Silent fail
+                                }
+                                await db('users').where({ id: user.id }).update({ 
+                                    bot_welcome_message_id: null 
+                                });
+                            }
+                            
+                            const sentMessage = await safeSendMessage(chatId, roleSelectionMessage, {
+                                reply_markup: inlineKeyboard,
+                                parse_mode: 'HTML'
+                            });
+                            
+                            if (sentMessage && sentMessage.message_id) {
+                                await db('users').where({ id: user.id }).update({
+                                    bot_welcome_message_id: sentMessage.message_id
+                                });
+                            }
+                            
+                                return; // Rol tanlanguncha boshqa kod ishlamaydi
+                            } else {
+                                // Agar rol tanlash so'ralmasa yoki rol tanlangan bo'lsa
+                                activeRole = selectedRole || (userRolesFromTasks.length > 0 ? userRolesFromTasks[0] : null) || user.role;
+                            }
+                        }
+                        
+                        const roleDisplayName = ROLE_DISPLAY_NAMES[activeRole] || activeRole || 'Tasdiqlanmagan';
+                        
+                        // Foydalanuvchi ma'lumotlarini formatlash (menejernikidek)
+                        const userInfoText = `━━━━━━━━━━━━━━━━━━━━\n\n` +
+                            `👤 <b>To'liq ism:</b> ${escapeHtml(user.fullname || 'Noma\'lum')}\n` +
+                            `👔 <b>Rol:</b> <b>${escapeHtml(roleDisplayName)}</b>\n` +
+                            `📊 <b>Holat:</b> <b>Faol</b>`;
+                        
+                        // Agar so'nggi welcome xabar mavjud bo'lsa, uni yangilash yoki o'chirish
+                        const userWithWelcomeMsg = await db('users').where({ id: user.id }).first();
+                        
+                        // Rahbarlar guruhida bo'lsa VA rahbar roli yoki permission'ga ega bo'lsa, maxsus xabar
+                        let welcomeMessage;
+                        const userPermissions = await userHelper.getUserPermissions(user.id);
+                        const isLeader = userInLeadersGroup && (
+                            activeRole === 'rahbar' || 
+                            activeRole === 'leader' || 
+                            userPermissions.includes('debt:approve_leader')
+                        );
+                        
+                        if (isLeader) {
+                            // Rahbarlar uchun maxsus xabar
+                            welcomeMessage = `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\n` +
+                                `Hisobot va Qarzdorlik tasdiqlash tizimiga xush kelibsiz!\n\n` +
+                                `${userInfoText}${bindingsText}\n\n` +
+                                `📋 <b>Rahbarlar uchun funksiyalar:</b>\n` +
+                                `• SET so'rovlarni ko'rish va tasdiqlash\n` +
+                                `• Bloklangan elementlarni boshqarish\n` +
+                                `• Tasdiqlangan so'rovlarni ko'rish\n\n` +
+                                `Quyidagi tugmalardan foydalaning:`;
+                        } else {
+                            // Oddiy foydalanuvchilar uchun
+                            welcomeMessage = `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\n` +
+                                `Hisobot va Qarzdorlik tasdiqlash tizimiga xush kelibsiz!\n\n` +
+                                `${userInfoText}${bindingsText}\n\n` +
+                                `Quyidagi tugmalardan foydalaning:`;
+                        }
+                        
+                        const keyboard = await createUnifiedKeyboard(user, activeRole);
+                        
+                        // Keyboard'ga "Rolni o'zgartirish" knopkasini qo'shish (faqat shaxsiy chatda va faqat manager+cashier kombinatsiyasi bo'lsa)
+                        botLog.debug(`[ROLE_SELECTION] Rol tanlash tekshiruvi: userId=${user.id}, isGroup=${isGroup}, userRolesFromTasks=${userRolesFromTasks.length}, activeRole=${activeRole || 'none'}`);
+                        
+                        if (!isGroup && shouldShowRoleSelection(userRolesFromTasks)) {
+                            // Faqat shaxsiy chatda va faqat manager+cashier kombinatsiyasi bo'lsa
+                            keyboard.keyboard.push([{ text: "🔄 Rolni o'zgartirish" }]);
+                            botLog.info(`[ROLE_SELECTION] "Rolni o'zgartirish" knopkasi qo'shildi: userId=${user.id}, roles=${userRolesFromTasks.join(',')}`);
+                        } else {
+                            botLog.debug(`[ROLE_SELECTION] "Rolni o'zgartirish" knopkasi qo'shilmadi: userId=${user.id}, isGroup=${isGroup}, shouldShowSelection=${shouldShowRoleSelection(userRolesFromTasks)}`);
+                        }
+                        
+                        if (userWithWelcomeMsg && userWithWelcomeMsg.bot_welcome_message_id) {
+                            try {
+                                // Avval yangilashga urinish
+                                await bot.editMessageText(welcomeMessage, {
+                                    chat_id: chatId,
+                                    message_id: userWithWelcomeMsg.bot_welcome_message_id,
+                                    reply_markup: keyboard,
+                                    parse_mode: 'HTML'
+                                });
+                                botLog.debug(`Welcome xabar yangilandi: message_id=${userWithWelcomeMsg.bot_welcome_message_id}`);
+                                return;
+                            } catch (editError) {
+                                // Agar xabarni yangilab bo'lmasa, eski xabarni o'chirishga urinish
+                                botLog.debug(`Welcome xabarni yangilab bo'lmadi, eski xabarni o'chirishga urinilmoqda: ${editError.message}`);
+                                try {
+                                    await bot.deleteMessage(chatId, userWithWelcomeMsg.bot_welcome_message_id);
+                                    botLog.debug(`Eski welcome xabar o'chirildi: message_id=${userWithWelcomeMsg.bot_welcome_message_id}`);
+                                } catch (deleteError) {
+                                    // Agar o'chirib bo'lmasa, e'tiborsiz qoldirish
+                                    botLog.debug(`Eski welcome xabarni o'chirib bo'lmadi: ${deleteError.message}`);
+                                }
+                                // Eski message_id'ni tozalash
+                                await db('users').where({ id: user.id }).update({ 
+                                    bot_welcome_message_id: null 
+                                });
+                            }
+                        }
+                        
+                        // Yangi xabar yuborish va message_id'ni saqlash
+                        const sentMessage = await safeSendMessage(chatId, welcomeMessage, { reply_markup: keyboard, parse_mode: 'HTML' });
+                        if (sentMessage && sentMessage.message_id) {
+                            await db('users').where({ id: user.id }).update({ 
+                                bot_welcome_message_id: sentMessage.message_id 
+                            });
+                            botLog.debug(`Yangi welcome xabar yuborildi va saqlandi: message_id=${sentMessage.message_id}`);
+                        }
+                        return;
+                    }
+                    
+                    // Super admin yoki admin bo'lsa, chat ID'ni avtomatik saqlash
+                    if (userHelper.isAdminUser(user)) {
+                        const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
+                        if (!adminChatIdSetting || !adminChatIdSetting.value) {
+                            await db('settings')
+                                .insert({ key: 'telegram_admin_chat_id', value: String(chatId) })
+                                .onConflict('key')
+                                .merge();
 
-                    await safeSendMessage(chatId, `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\nSizning Chat ID'ingiz avtomatik saqlandi.`);
+                            await safeSendMessage(chatId, `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\nSizning Chat ID'ingiz avtomatik saqlandi.`, { parse_mode: 'HTML' });
+                        } else {
+                            const keyboard = await createUnifiedKeyboard(user);
+                            await safeSendMessage(chatId, `Salom! Bu hisobot tizimining rasmiy boti.`, { reply_markup: keyboard });
+                        }
+                    } else {
+                        await safeSendMessage(chatId, `Salom! Bu hisobot tizimining rasmiy boti.`);
+                    }
                 } else {
-                    await safeSendMessage(chatId, `Salom! Bu hisobot tizimining rasmiy boti.`);
-                }
-            } else {
-                await safeSendMessage(chatId, `Salom! Bu hisobot tizimining rasmiy boti.`);
+                    // Foydalanuvchi topilmadi - ro'yxatdan o'tish taklif qilish
+                    const keyboard = createRegistrationKeyboard();
+                    // Yangi foydalanuvchilar uchun faqat inline keyboard ko'rsatish (reply keyboard yuborilmaydi)
+                    await safeSendMessage(chatId, `Salom! Bu hisobot tizimining rasmiy boti.\n\nTizimga kirish uchun ro'yxatdan o'ting:`, { reply_markup: keyboard });
                 }
             } catch (error) {
                 botLog.error(`Else blokida xatolik:`, error.message);
                 await safeSendMessage(chatId, `❌ Tizimda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring.`);
             }
-            }
+        }
         } catch (error) {
             botLog.error(`/start handler'da xatolik:`, error.message);
             try {
@@ -1135,35 +1725,175 @@ const initializeBot = async (botToken, options = { polling: true }) => {
 
         // Admin chat ID'ni avtomatik saqlash (super admin yoki admin uchun)
         try {
-            const user = await db('users').where({ telegram_chat_id: chatId }).first();
-            if (user && (user.role === 'super_admin' || user.role === 'admin')) {
+            const userHelper = require('../bot/unified/userHelper.js');
+            const user = await userHelper.getUserByTelegram(chatId, msg.from.id);
+            if (user && userHelper.isAdminUser(user)) {
                 const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
                 if (!adminChatIdSetting || !adminChatIdSetting.value) {
                     await db('settings')
                         .insert({ key: 'telegram_admin_chat_id', value: String(chatId) })
                         .onConflict('key')
                         .merge();
-
                 }
             }
         } catch (error) {
             botLog.error(`Admin chat ID saqlashda xatolik:`, error.message);
         }
 
+        // Message routing - unified handler chain
+        try {
+            const messageRouter = require('../bot/unified/messageRouter.js');
+            const stateManager = require('../bot/unified/stateManager.js');
+            const userHelper = require('../bot/unified/userHelper.js');
+            
+            const user = await userHelper.getUserByTelegram(chatId, msg.from.id);
+            const context = messageRouter.routeMessage(msg, user, stateManager);
+            
+            // ✅ Context switching tekshiruvi - agar foydalanuvchi boshqa bo'limda ishlamoqda bo'lsa
+            if (context !== stateManager.CONTEXTS.IDLE && 
+                context !== stateManager.CONTEXTS.REGISTRATION) {
+                
+                const currentState = stateManager.getUserState(msg.from.id);
+                if (currentState && 
+                    currentState.context !== stateManager.CONTEXTS.IDLE &&
+                    currentState.context !== stateManager.CONTEXTS.REGISTRATION &&
+                    currentState.context !== context) {
+                    
+                    // Foydalanuvchi boshqa bo'limda ishlamoqda
+                    const contextNames = {
+                        [stateManager.CONTEXTS.DEBT_APPROVAL]: "Qarzdorlik tasdiqlash",
+                        [stateManager.CONTEXTS.HISOBOT]: "Hisobotlar"
+                    };
+                    
+                    const currentContextName = contextNames[currentState.context] || "boshqa bo'lim";
+                    
+                    await safeSendMessage(chatId, 
+                        `⚠️ <b>E'tibor!</b>\n\n` +
+                        `Siz hozir <b>${currentContextName}</b> bo'limida ishlamoqdasiz.\n\n` +
+                        `Boshqa bo'limga o'tish uchun avval joriy jarayonni yakunlang yoki\n` +
+                        `<code>/start</code> buyrug'i bilan asosiy menyuga qayting.`,
+                        { parse_mode: 'HTML' }
+                    );
+                    return; // Boshqa bo'limga o'tish mumkin emas
+                }
+            }
+            
+            // Handler chain (prioritet bo'yicha)
+            if (context === stateManager.CONTEXTS.REGISTRATION) {
+                const { handleRegistrationMessage } = require('../bot/debt-approval/handlers/registration.js');
+                const handled = await handleRegistrationMessage(msg, bot);
+                if (handled) return;
+            }
+            
+            // "Rolni o'zgartirish" knopkasi handler (IDLE context'da ham ishlashi kerak)
+            if (text && text === "🔄 Rolni o'zgartirish") {
+                const { handleDebtApprovalMessage } = require('../bot/debt-approval/handlers/index.js');
+                const handled = await handleDebtApprovalMessage(msg, bot);
+                if (handled) return;
+            }
+            
+            if (context === stateManager.CONTEXTS.DEBT_APPROVAL) {
+                const { handleDebtApprovalMessage } = require('../bot/debt-approval/handlers/index.js');
+                const handled = await handleDebtApprovalMessage(msg, bot);
+                if (handled) return;
+            }
+            
+            // "Menejer"/"Kassir" rol tanlash handler'i (IDLE context'da ham ishlashi kerak)
+            if (text && (text === "Menejer" || text === "Kassir")) {
+                const { handleDebtApprovalMessage } = require('../bot/debt-approval/handlers/index.js');
+                const handled = await handleDebtApprovalMessage(msg, bot);
+                if (handled) return;
+            }
+            
+            // IDLE context'da ham debt approval button text'larni tekshirish (masalan, "Kutayotgan so'rovlar")
+            if (context === stateManager.CONTEXTS.IDLE && text) {
+                const { handleDebtApprovalMessage } = require('../bot/debt-approval/handlers/index.js');
+                const handled = await handleDebtApprovalMessage(msg, bot);
+                if (handled) return;
+            }
+            
+            if (context === stateManager.CONTEXTS.HISOBOT) {
+                // Hisobot handler
+                botLog.info(`[HISOBOT] Hisobot buyrug'i qabul qilindi. UserId: ${msg.from.id}, Text: ${text}`);
+                
+                // State tekshirish - agar foydalanuvchi hisobot ma'lumotlarini kiritish jarayonida bo'lsa
+                const currentState = stateManager.getUserState(msg.from.id);
+                if (currentState && 
+                    currentState.context === stateManager.CONTEXTS.HISOBOT) {
+                    const createHandler = require('../bot/hisobot/handlers/create.js');
+                    
+                    // Excel fayl qabul qilish (barcha state'larda)
+                    if (msg.document) {
+                        // Excel fayl ekanligini tekshirish
+                        const fileName = msg.document.file_name || '';
+                        const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || 
+                                       msg.document.mime_type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+                                       msg.document.mime_type === 'application/vnd.ms-excel';
+                        
+                        if (isExcel) {
+                            // Agar UPLOAD_EXCEL yoki enter_report_data state'ida bo'lsa, Excel faylni qabul qilish
+                            if (currentState.state === 'upload_excel' || currentState.state === 'enter_report_data') {
+                                // handleExcelFile funksiyasi ichida state o'zgartiriladi
+                                const handled = await createHandler.handleExcelFile(msg, bot);
+                                if (handled) return;
+                            }
+                        }
+                    }
+                    
+                    // Oddiy hisobot ma'lumotlari (faqat text bo'lsa)
+                    if (text && !text.startsWith('/')) {
+                        if (currentState.state === 'enter_report_data') {
+                            const handled = await createHandler.handleReportData(msg, bot);
+                            if (handled) return;
+                        }
+                        
+                        // SET qo'shimcha ma'lumot
+                        if (currentState.state === 'set_extra_info') {
+                            const handled = await createHandler.handleSetExtraInfo(msg, bot);
+                            if (handled) return;
+                        }
+                    }
+                }
+                
+                // Hisobotlar handler'ini chaqirish
+                const { handleHisobotMessage } = require('../bot/hisobot/handlers/index.js');
+                const handled = await handleHisobotMessage(msg, bot);
+                if (handled) return;
+                
+                // Default javob
+                await safeSendMessage(chatId, `📊 <b>Hisobotlar bo'limi</b>\n\n` +
+                    `Quyidagi tugmalardan foydalaning:\n\n` +
+                    `📊 <b>Hisobotlar ro'yxati</b> - Barcha hisobotlarni ko'rish\n` +
+                    `➕ <b>Yangi hisobot</b> - Yangi hisobot yaratish\n` +
+                    `📈 <b>Statistika</b> - Hisobotlar statistikasi`, { parse_mode: 'HTML' });
+                return;
+            }
+            
+            // /register command handler
+            if (text && messageRouter.isRegistrationCommand(text)) {
+                const { handleRegistrationStart } = require('../bot/debt-approval/handlers/registration.js');
+                const handled = await handleRegistrationStart(msg, bot);
+                if (handled) return;
+            }
+        } catch (routeError) {
+            botLog.error('Message routing xatolik:', routeError);
+        }
+
         if (!text || text.startsWith('/')) return;
 
+        // Eski secret word verification logikasi (faqat admin uchun)
         const state = userStates[chatId];
         if (state && state.state === 'awaiting_secret_word') {
             const { user_id } = state;
             
-            // Text'ni trim qilish
-            const text = (msg.text || '').trim();
+            // Text'ni trim qilish (qayta e'lon qilish shart emas, lekin xavfsizlik uchun)
+            const secretWordText = (msg.text || '').trim();
 
             try {
                 const response = await fetch(new URL('api/telegram/verify-secret-word', NODE_SERVER_URL).href, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id, secret_word: text })
+                    body: JSON.stringify({ user_id, secret_word: secretWordText })
                 });
                 
                 if (!response.ok) {
@@ -1174,11 +1904,52 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                 const result = await response.json();
 
                 if (result.status === 'success') {
+                    // Xavfsizlik: Maxfiy so'z xabarini o'chirish
+                    try {
+                        await bot.deleteMessage(chatId, msg.message_id);
+                        botLog.info(`[BOT] Maxfiy so'z xabari o'chirildi - ChatId: ${chatId}`);
+                    } catch (delErr) {
+                        botLog.warn(`[BOT] Maxfiy so'z xabarini o'chirib bo'lmadi - ChatId: ${chatId}`, delErr.message);
+                    }
+                    
+                    // Eski "maxfiy so'zingizni yuboring" xabarini o'chirish
+                    if (state.secret_word_message_id) {
+                        try {
+                            await bot.deleteMessage(chatId, state.secret_word_message_id);
+                            botLog.info(`[BOT] Eski maxfiy so'z so'rovi xabari o'chirildi - ChatId: ${chatId}`);
+                        } catch (delErr) {
+                            botLog.warn(`[BOT] Eski maxfiy so'z so'rovi xabarini o'chirib bo'lmadi - ChatId: ${chatId}`, delErr.message);
+                        }
+                    }
 
                     const magicLink = new URL(path.join('api/auth/verify-session/', result.magic_token), NODE_SERVER_URL).href;
-                    const messageText = `Salom, <b>${escapeHtml(msg.from.username || 'Foydalanuvchi')}</b>! \n\nYangi qurilmadan kirishni tasdiqlash uchun quyidagi tugmani bosing. Bu havola 5 daqiqa amal qiladi.`;
-                    const keyboard = { inline_keyboard: [[{ text: "✅ Yangi Qurilmada Kirish", url: magicLink }]] };
-                    await safeSendMessage(chatId, messageText, { reply_markup: keyboard });
+                    const isHttps = magicLink.startsWith('https://');
+                    
+                    let sentMagicLinkMsg;
+                    if (isHttps) {
+                        // HTTPS bo'lsa, inline button bilan yuborish
+                        const messageText = `✅ <b>Maxfiy so'z to'g'ri!</b>\n\nYangi qurilmadan kirishni tasdiqlash uchun quyidagi tugmani bosing.\n\n⚠️ Bu havola <b>5 daqiqa</b> amal qiladi.`;
+                        const keyboard = { inline_keyboard: [[{ text: "🔗 Yangi Qurilmada Kirish", url: magicLink }]] };
+                        sentMagicLinkMsg = await safeSendMessage(chatId, messageText, { reply_markup: keyboard });
+                    } else {
+                        // HTTP bo'lsa (localhost), oddiy matn sifatida yuborish
+                        const messageText = `✅ <b>Maxfiy so'z to'g'ri!</b>\n\nYangi qurilmadan kirishni tasdiqlash uchun quyidagi havolani brauzerda oching:\n\n<code>${magicLink}</code>\n\n⚠️ Bu havola <b>5 daqiqa</b> amal qiladi.`;
+                        sentMagicLinkMsg = await safeSendMessage(chatId, messageText);
+                    }
+                    
+                    // Magic link xabarining message_id'sini saqlash (keyinchalik o'chirish uchun)
+                    if (sentMagicLinkMsg && sentMagicLinkMsg.message_id) {
+                        try {
+                            await db('users').where({ id: user_id }).update({ 
+                                bot_login_message_id: sentMagicLinkMsg.message_id 
+                            });
+                            botLog.info(`[BOT] Magic link message_id saqlandi - User ID: ${user_id}, Message ID: ${sentMagicLinkMsg.message_id}`);
+                        } catch (saveErr) {
+                            botLog.warn(`[BOT] Magic link message_id saqlashda xatolik - User ID: ${user_id}`, saveErr.message);
+                        }
+                    }
+                    
+                    botLog.info(`[BOT] Magic link yuborildi - ChatId: ${chatId}, HTTPS: ${isHttps}`);
                     delete userStates[chatId];
 
                 } else if (result.status === 'locked') {
@@ -1219,6 +1990,360 @@ const initializeBot = async (botToken, options = { polling: true }) => {
     });
 
     bot.on('callback_query', async (query) => {
+        try {
+            const chatId = query.message.chat.id;
+            const userId = query.from.id;
+            const data = query.data;
+
+            // Hisobot callback handler'larini tekshirish
+            if (data && data.startsWith('hisobot_')) {
+                botLog.info(`[HISOBOT] Callback qabul qilindi: ${data}, UserId: ${userId}`);
+                
+                if (data === 'hisobot_back') {
+                    await bot.answerCallbackQuery(query.id, { text: 'Asosiy menyuga qaytildi' });
+                    const userHelper = require('../bot/unified/userHelper.js');
+                    const { createUnifiedKeyboard } = require('../bot/unified/keyboards.js');
+                    const user = await userHelper.getUserByTelegram(chatId, userId);
+                    if (user) {
+                        // Foydalanuvchiga biriktirilgan filial va brendlarni olish
+                        const [userBrands, userBranches] = await Promise.all([
+                            db('debt_user_brands')
+                                .where('user_id', user.id)
+                                .join('debt_brands', 'debt_user_brands.brand_id', 'debt_brands.id')
+                                .select('debt_brands.id', 'debt_brands.name')
+                                .groupBy('debt_brands.id', 'debt_brands.name')
+                                .orderBy('debt_brands.name'),
+                            db('debt_user_branches')
+                                .where('user_id', user.id)
+                                .join('debt_branches', 'debt_user_branches.branch_id', 'debt_branches.id')
+                                .select('debt_branches.id', 'debt_branches.name')
+                                .groupBy('debt_branches.id', 'debt_branches.name')
+                                .orderBy('debt_branches.name')
+                        ]);
+                        
+                        // Biriktirilgan filial va brendlarni formatlash
+                        let bindingsText = '';
+                        if (userBrands.length > 0 || userBranches.length > 0) {
+                            bindingsText = `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                            if (userBrands.length > 0) {
+                                const brandNames = userBrands.map(b => escapeHtml(b.name)).join(', ');
+                                bindingsText += `🏷️ <b>Brendlar:</b> ${brandNames}\n`;
+                            }
+                            if (userBranches.length > 0) {
+                                const branchNames = userBranches.map(b => escapeHtml(b.name)).join(', ');
+                                bindingsText += `📍 <b>Filiallar:</b> ${branchNames}\n`;
+                            }
+                        }
+                        
+                        const keyboard = await createUnifiedKeyboard(user);
+                        const welcomeMessage = `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\n` +
+                            `Hisobot va Qarzdorlik tasdiqlash tizimiga xush kelibsiz!\n\n` +
+                            `Quyidagi tugmalardan foydalaning:${bindingsText}`;
+                        await safeSendMessage(chatId, welcomeMessage, { reply_markup: keyboard, parse_mode: 'HTML' });
+                    }
+                    return;
+                }
+                
+                if (data === 'hisobot_list' || data === 'hisobot_new' || data === 'hisobot_stats') {
+                    await bot.answerCallbackQuery(query.id, { text: 'Bu funksiya tez orada qo\'shiladi' });
+                    return;
+                }
+            }
+
+            // Report creation callback handler'larini tekshirish
+            if (data && data.startsWith('report_')) {
+                botLog.info(`[REPORT] Callback qabul qilindi: ${data}, UserId: ${userId}`);
+                
+                try {
+                    const { 
+                        handleBrandSelection, 
+                        handleBranchSelection, 
+                        handleSVRSelection, 
+                        handleSendReport, 
+                        handleCancelReport,
+                        handleDebtExists,
+                        handleSetDebtExists,
+                        handleColumnSelection,
+                        handleSelectSingleColumn,
+                        handleSelectColumnValue,
+                        handleConfirmColumns,
+                        handleConfirmExcel,
+                        handleEditExcel
+                    } = require('../bot/hisobot/handlers/create.js');
+                    
+                    if (data.startsWith('report_select_brand:')) {
+                        await handleBrandSelection(query, bot);
+                        return;
+                    }
+                    
+                    if (data.startsWith('report_select_branch:')) {
+                        await handleBranchSelection(query, bot);
+                        return;
+                    }
+                    
+                    if (data.startsWith('report_select_svr:')) {
+                        await handleSVRSelection(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_send') {
+                        await handleSendReport(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_send_set') {
+                        const { handleSendSetReport } = require('../bot/hisobot/handlers/create.js');
+                        await handleSendSetReport(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_edit_set') {
+                        // Qayta qo'shimcha ma'lumot kiritish
+                        const { handleSetReport } = require('../bot/hisobot/handlers/create.js');
+                        await handleSetReport(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_debt_exists') {
+                        await handleDebtExists(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_set_debt_exists') {
+                        await handleSetDebtExists(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_select_columns') {
+                        await handleColumnSelection(query, bot);
+                        return;
+                    }
+                    
+                    if (data.startsWith('report_select_column:')) {
+                        await handleSelectSingleColumn(query, bot);
+                        return;
+                    }
+                    
+                    if (data.startsWith('report_select_column_value:')) {
+                        await handleSelectColumnValue(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_confirm_columns') {
+                        await handleConfirmColumns(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_confirm_excel') {
+                        await handleConfirmExcel(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_edit_excel') {
+                        await handleEditExcel(query, bot);
+                        return;
+                    }
+                    
+                    if (data === 'report_cancel') {
+                        await handleCancelReport(query, bot);
+                        return;
+                    }
+                } catch (reportError) {
+                    botLog.error('Report callback handler xatolik:', reportError);
+                    await bot.answerCallbackQuery(query.id, { text: 'Xatolik yuz berdi', show_alert: true });
+                    return;
+                }
+            }
+
+            // Rol tanlash callback handler (avval tekshirish)
+            if (data && data.startsWith('select_role_')) {
+                const userHelper = require('../bot/unified/userHelper.js');
+                const { createUnifiedKeyboard } = require('../bot/unified/keyboards.js');
+                const stateManager = require('../bot/unified/stateManager.js');
+                
+                const selectedRole = data.replace('select_role_', '');
+                botLog.info(`[ROLE_SELECTION] Rol tanlash callback qabul qilindi: userId=${userId}, selectedRole=${selectedRole}`);
+                
+                const user = await userHelper.getUserByTelegram(chatId, userId);
+                
+                if (!user) {
+                    botLog.warn(`[ROLE_SELECTION] Foydalanuvchi topilmadi: userId=${userId}, chatId=${chatId}`);
+                    await bot.answerCallbackQuery(query.id, { text: 'Foydalanuvchi topilmadi', show_alert: false });
+                    return;
+                }
+                
+                // State'ga saqlash
+                const currentState = stateManager.getUserState(userId);
+                const stateData = currentState?.data || {};
+                stateData.selectedRole = selectedRole;
+                
+                stateManager.setUserState(userId, stateManager.CONTEXTS.IDLE, 'idle', stateData);
+                botLog.info(`[ROLE_SELECTION] Rol state'ga saqlandi: userId=${userId}, selectedRole=${selectedRole}`);
+                
+                await bot.answerCallbackQuery(query.id, {
+                    text: `Rol tanlandi: ${userHelper.ROLE_DISPLAY_NAMES[selectedRole] || selectedRole}`,
+                    show_alert: false
+                });
+                
+                // Welcome message'ni qayta yuborish
+                try {
+                    // Eski xabarni o'chirish
+                    await bot.deleteMessage(chatId, query.message.message_id);
+                } catch (deleteError) {
+                    // Silent fail
+                }
+                
+                // Welcome message'ni qayta yuborish
+                const { getUserRolesFromTasks, getSelectedRole, ROLE_DISPLAY_NAMES, shouldShowRoleSelection, getGroupRoleByChatId } = userHelper;
+                const userRolesFromTasks = await getUserRolesFromTasks(user.id);
+                const isGroup = chatId < 0;
+                
+                let activeRole = selectedRole;
+                if (isGroup) {
+                    // Guruhda → guruh roli bilan ishlash
+                    const groupRole = await getGroupRoleByChatId(chatId);
+                    if (groupRole) {
+                        activeRole = groupRole;
+                    } else {
+                        activeRole = userRolesFromTasks.length > 0 ? userRolesFromTasks[0] : user.role;
+                    }
+                } else {
+                    // Shaxsiy chatda → tanlangan rol yoki birinchi rol
+                    activeRole = selectedRole || (userRolesFromTasks.length > 0 ? userRolesFromTasks[0] : null) || user.role;
+                }
+                
+                const roleDisplayName = ROLE_DISPLAY_NAMES[activeRole] || activeRole || 'Tasdiqlanmagan';
+                
+                // Foydalanuvchiga biriktirilgan filial va brendlarni olish
+                const [userBrandsRaw, userBranchesRaw, cashierBranchesRaw] = await Promise.all([
+                    db('debt_user_brands')
+                        .where('user_id', user.id)
+                        .join('debt_brands', 'debt_user_brands.brand_id', 'debt_brands.id')
+                        .select('debt_brands.id', 'debt_brands.name')
+                        .groupBy('debt_brands.id', 'debt_brands.name')
+                        .orderBy('debt_brands.name'),
+                    db('debt_user_branches')
+                        .where('user_id', user.id)
+                        .join('debt_branches', 'debt_user_branches.branch_id', 'debt_branches.id')
+                        .select('debt_branches.id', 'debt_branches.name')
+                        .groupBy('debt_branches.id', 'debt_branches.name')
+                        .orderBy('debt_branches.name'),
+                    db('debt_cashiers')
+                        .where('user_id', user.id)
+                        .where('is_active', true)
+                        .join('debt_branches', 'debt_cashiers.branch_id', 'debt_branches.id')
+                        .select('debt_branches.id', 'debt_branches.name')
+                        .groupBy('debt_branches.id', 'debt_branches.name')
+                        .orderBy('debt_branches.name')
+                ]);
+                
+                // Brendlarni birlashtirish
+                const uniqueBrandsMap = new Map();
+                userBrandsRaw.forEach(brand => {
+                    if (!uniqueBrandsMap.has(brand.id)) {
+                        uniqueBrandsMap.set(brand.id, brand);
+                    }
+                });
+                const userBrands = Array.from(uniqueBrandsMap.values());
+                
+                // Filiallarni birlashtirish
+                const allBranchesRaw = [...userBranchesRaw, ...cashierBranchesRaw];
+                const uniqueBranchesMap = new Map();
+                allBranchesRaw.forEach(branch => {
+                    if (!uniqueBranchesMap.has(branch.id)) {
+                        uniqueBranchesMap.set(branch.id, branch);
+                    }
+                });
+                const userBranches = Array.from(uniqueBranchesMap.values());
+                
+                // Biriktirilgan filial va brendlarni formatlash
+                let bindingsText = '';
+                if (userBrands.length > 0 || userBranches.length > 0) {
+                    bindingsText = `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                    if (userBrands.length > 0) {
+                        const brandNames = userBrands.map(b => escapeHtml(b.name)).join(', ');
+                        bindingsText += `🏷️ <b>Brendlar:</b> ${brandNames}\n`;
+                    }
+                    if (userBranches.length > 0) {
+                        const branchNames = userBranches.map(b => escapeHtml(b.name)).join(', ');
+                        bindingsText += `📍 <b>Filiallar:</b> ${branchNames}\n`;
+                    }
+                }
+                
+                // Foydalanuvchi ma'lumotlarini formatlash
+                const userInfoText = `━━━━━━━━━━━━━━━━━━━━\n\n` +
+                    `👤 <b>To'liq ism:</b> ${escapeHtml(user.fullname || 'Noma\'lum')}\n` +
+                    `👔 <b>Rol:</b> <b>${escapeHtml(roleDisplayName)}</b>\n` +
+                    `📊 <b>Holat:</b> <b>Faol</b>`;
+                
+                const userPermissions = await userHelper.getUserPermissions(user.id);
+                const { isUserInGroup } = require('../utils/groupValidator.js');
+                const userInLeadersGroup = await isUserInGroup(user.id, 'leaders');
+                const isLeader = userInLeadersGroup && (
+                    activeRole === 'rahbar' || 
+                    activeRole === 'leader' || 
+                    userPermissions.includes('debt:approve_leader')
+                );
+                
+                let welcomeMessage;
+                if (isLeader) {
+                    welcomeMessage = `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\n` +
+                        `Hisobot va Qarzdorlik tasdiqlash tizimiga xush kelibsiz!\n\n` +
+                        `${userInfoText}${bindingsText}\n\n` +
+                        `📋 <b>Rahbarlar uchun funksiyalar:</b>\n` +
+                        `• SET so'rovlarni ko'rish va tasdiqlash\n` +
+                        `• Bloklangan elementlarni boshqarish\n` +
+                        `• Tasdiqlangan so'rovlarni ko'rish\n\n` +
+                        `Quyidagi tugmalardan foydalaning:`;
+                } else {
+                    welcomeMessage = `✅ <b>Salom, ${escapeHtml(user.fullname || user.username)}!</b>\n\n` +
+                        `Hisobot va Qarzdorlik tasdiqlash tizimiga xush kelibsiz!\n\n` +
+                        `${userInfoText}${bindingsText}\n\n` +
+                        `Quyidagi tugmalardan foydalaning:`;
+                }
+                
+                const keyboard = await createUnifiedKeyboard(user, activeRole);
+                botLog.debug(`[ROLE_SELECTION] Rol tanlash tekshiruvi (callback): userId=${user.id}, isGroup=${isGroup}, userRolesFromTasks=${userRolesFromTasks.length}, activeRole=${activeRole || 'none'}`);
+                
+                if (!isGroup && shouldShowRoleSelection(userRolesFromTasks)) {
+                    // Faqat shaxsiy chatda va faqat manager+cashier kombinatsiyasi bo'lsa
+                    keyboard.keyboard.push([{ text: "🔄 Rolni o'zgartirish" }]);
+                    botLog.info(`[ROLE_SELECTION] "Rolni o'zgartirish" knopkasi qo'shildi (callback): userId=${user.id}, roles=${userRolesFromTasks.join(',')}`);
+                } else {
+                    botLog.debug(`[ROLE_SELECTION] "Rolni o'zgartirish" knopkasi qo'shilmadi (callback): userId=${user.id}, isGroup=${isGroup}, shouldShowSelection=${shouldShowRoleSelection(userRolesFromTasks)}`);
+                }
+                
+                const sentMessage = await safeSendMessage(chatId, welcomeMessage, { reply_markup: keyboard, parse_mode: 'HTML' });
+                if (sentMessage && sentMessage.message_id) {
+                    await db('users').where({ id: user.id }).update({
+                        bot_welcome_message_id: sentMessage.message_id
+                    });
+                }
+                
+                return;
+            }
+
+            // Debt-approval callback handler
+            const { handleDebtApprovalCallback } = require('../bot/debt-approval/handlers/index.js');
+            const handled = await handleDebtApprovalCallback(query, bot);
+            if (handled) {
+                // Callback query'ni javob berish (xatolik bo'lsa ham e'tiborsiz qoldirish)
+                try {
+                    await bot.answerCallbackQuery(query.id);
+                } catch (callbackError) {
+                    // "query is too old" kabi xatoliklarni e'tiborsiz qoldirish
+                    if (callbackError.code === 'ETELEGRAM' && callbackError.response?.body?.description?.includes('too old')) {
+                        botLog.debug(`[BOT] Callback query eski (timeout): ${query.id}`);
+                    } else {
+                        botLog.warn(`[BOT] Callback query javob berishda xatolik: ${callbackError.message}`);
+                    }
+                }
+                return; // Agar debt-approval handler qayta ishlagan bo'lsa, boshqa handler'larni o'tkazib yuborish
+            }
+        } catch (debtError) {
+            botLog.error('Debt-approval callback handler xatolik:', debtError);
+        }
+        
         const adminChatId = query.message.chat.id;
         const { data, message } = query;
         
@@ -1233,7 +2358,13 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         // Bot orqali tasdiqlash olib tashlandi - barcha tasdiqlashlar web'dan bo'ladi
         // approve_ va reject_ callback'lar e'tiborsiz qoldiriladi
         if (action === 'approve' || action === 'reject') {
-                    await bot.answerCallbackQuery(query.id);
+                    try {
+                        await bot.answerCallbackQuery(query.id);
+                    } catch (callbackError) {
+                        if (callbackError.code === 'ETELEGRAM' && callbackError.response?.body?.description?.includes('too old')) {
+                            botLog.debug(`[BOT] Callback query eski (timeout): ${query.id}`);
+                        }
+                    }
                     return;
         } else {
             // Boshqa callback'lar (retry, block, unblock...)
@@ -1243,7 +2374,15 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                 case 'block': endpoint = 'api/telegram/confirm-lock'; break;
                 case 'unblock': endpoint = 'api/telegram/unblock-user'; break;
                 case 'keep_blocked': endpoint = 'api/telegram/keep-blocked'; break;
-                default: await bot.answerCallbackQuery(query.id); return;
+                default: 
+                    try {
+                        await bot.answerCallbackQuery(query.id);
+                    } catch (callbackError) {
+                        if (callbackError.code === 'ETELEGRAM' && callbackError.response?.body?.description?.includes('too old')) {
+                            botLog.debug(`[BOT] Callback query eski (timeout): ${query.id}`);
+                        }
+                    }
+                    return;
             }
 
             try {
@@ -1279,7 +2418,17 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                 await bot.answerCallbackQuery(query.id, { text: "Server bilan bog'lanishda xatolik!", show_alert: true });
             }
         }
-        await bot.answerCallbackQuery(query.id);
+        // Callback query'ni javob berish (xatolik bo'lsa ham e'tiborsiz qoldirish)
+        try {
+            await bot.answerCallbackQuery(query.id);
+        } catch (callbackError) {
+            // "query is too old" kabi xatoliklarni e'tiborsiz qoldirish
+            if (callbackError.code === 'ETELEGRAM' && callbackError.response?.body?.description?.includes('too old')) {
+                botLog.debug(`[BOT] Callback query eski (timeout): ${query.id}`);
+            } else {
+                botLog.warn(`[BOT] Callback query javob berishda xatolik: ${callbackError.message}`);
+            }
+        }
     });
 
     bot.on('my_chat_member', async (msg) => {
@@ -1302,10 +2451,50 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     await safeSendMessage(adminChatId, text);
                 }
             }
-        } else if (newStatus === 'member') {
-            const user = await db('users').where({ telegram_chat_id: chatId }).first();
-            if (user) {
-                // User rejoined bot
+        } else if (newStatus === 'member' || newStatus === 'administrator') {
+            // Bot guruhga qo'shildi
+            // Agar bu rahbarlar guruhi bo'lsa, reply keyboard yuborish
+            try {
+                const leadersGroup = await db('debt_groups')
+                    .where('group_type', 'leaders')
+                    .where('is_active', true)
+                    .first();
+                
+                if (leadersGroup && leadersGroup.telegram_group_id === chatId) {
+                    // Rahbarlar guruhiga bot qo'shilganda reply keyboard yuborish
+                    const { createUnifiedKeyboard } = require('../bot/unified/keyboards.js');
+                    const userHelper = require('../bot/unified/userHelper.js');
+                    
+                    // Guruhda birinchi rahbar foydalanuvchisini topish (misol uchun)
+                    // Yoki guruh uchun umumiy keyboard yaratish
+                    // Guruhda keyboard yuborish uchun bot admin bo'lishi kerak
+                    const welcomeText = `✅ <b>Bot guruhga qo'shildi!</b>\n\n` +
+                        `Rahbarlar uchun bloklash va boshqaruv funksiyalari mavjud.\n\n` +
+                        `Quyidagi tugmalardan foydalaning:`;
+                    
+                    // Guruh uchun umumiy keyboard yaratish (rahbarlar uchun)
+                    const keyboard = {
+                        keyboard: [
+                            [{ text: "📥 SET so'rovlari" }],
+                            [{ text: "📋 Tasdiqlangan so'rovlar" }],
+                            [{ text: "🚫 Bloklash" }]
+                        ],
+                        resize_keyboard: true,
+                        one_time_keyboard: false
+                    };
+                    
+                    try {
+                        await bot.sendMessage(chatId, welcomeText, {
+                            parse_mode: 'HTML',
+                            reply_markup: keyboard
+                        });
+                        botLog.info(`Reply keyboard rahbarlar guruhiga yuborildi: groupId=${chatId}`);
+                    } catch (keyboardError) {
+                        botLog.warn(`Guruhga keyboard yuborishda xatolik (bot admin bo'lishi kerak): ${keyboardError.message}`);
+                    }
+                }
+            } catch (error) {
+                botLog.error('Guruhga bot qo\'shilganda xatolik:', error);
             }
         }
     });

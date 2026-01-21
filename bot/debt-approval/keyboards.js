@@ -58,10 +58,26 @@ function debtPreviewKeyboard(requestId) {
     };
 }
 
+// Kutilinayotgan so'rovlarni ko'rish knopkasi
+function showPendingRequestsKeyboard(role, userId = null) {
+    const callbackData = userId ? `show_pending_requests_${role}_${userId}` : `show_pending_requests_${role}`;
+    return {
+        inline_keyboard: [
+            [
+                { 
+                    text: '📋 Kutilinayotgan so\'rovlar', 
+                    callback_data: callbackData
+                }
+            ]
+        ]
+    };
+}
+
 module.exports = {
     mainMenuKeyboard,
     approvalKeyboard,
     previewKeyboard,
-    debtPreviewKeyboard
+    debtPreviewKeyboard,
+    showPendingRequestsKeyboard
 };
 

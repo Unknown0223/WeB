@@ -118,6 +118,267 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
 });
 
 /**
+ * Ma'lumotlarni JSON formatda export qilish (backup/nusxa)
+ * GET /api/debt-approval/export/json
+ * 
+ * Barcha brendlar, filiallar va SVR'larni JSON fayl sifatida yuklab olish
+ */
+router.get('/json', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        // Barcha ma'lumotlarni olish
+        const brands = await db('debt_brands').select('*').orderBy('name');
+        const branches = await db('debt_branches')
+            .join('debt_brands', 'debt_branches.brand_id', 'debt_brands.id')
+            .select(
+                'debt_branches.id',
+                'debt_branches.brand_id',
+                'debt_brands.name as brand_name',
+                'debt_branches.name as branch_name',
+                'debt_branches.created_at',
+                'debt_branches.updated_at'
+            )
+            .orderBy('debt_brands.name')
+            .orderBy('debt_branches.name');
+        
+        const svrs = await db('debt_svrs')
+            .join('debt_brands', 'debt_svrs.brand_id', 'debt_brands.id')
+            .leftJoin('debt_branches', 'debt_svrs.branch_id', 'debt_branches.id')
+            .select(
+                'debt_svrs.id',
+                'debt_svrs.brand_id',
+                'debt_svrs.branch_id',
+                'debt_brands.name as brand_name',
+                'debt_branches.name as branch_name',
+                'debt_svrs.name as svr_name',
+                'debt_svrs.created_at',
+                'debt_svrs.updated_at'
+            )
+            .orderBy('debt_brands.name')
+            .orderBy('debt_branches.name')
+            .orderBy('debt_svrs.name');
+        
+        // JSON formatda ma'lumotlarni tayyorlash
+        const exportData = {
+            export_info: {
+                version: '1.0',
+                exported_at: new Date().toISOString(),
+                exported_by: req.user?.username || 'admin',
+                description: 'Qarzdorlik tasdiqlash tizimi ma\'lumotlari - JSON backup',
+                total_brands: brands.length,
+                total_branches: branches.length,
+                total_svrs: svrs.length
+            },
+            data: {
+                brands: brands,
+                branches: branches.map(b => ({
+                    id: b.id,
+                    brand_id: b.brand_id,
+                    brand_name: b.brand_name,
+                    name: b.branch_name,
+                    created_at: b.created_at,
+                    updated_at: b.updated_at
+                })),
+                svrs: svrs.map(s => ({
+                    id: s.id,
+                    brand_id: s.brand_id,
+                    branch_id: s.branch_id,
+                    brand_name: s.brand_name,
+                    branch_name: s.branch_name,
+                    name: s.svr_name,
+                    created_at: s.created_at,
+                    updated_at: s.updated_at
+                }))
+            }
+        };
+        
+        const fileName = `debt_data_backup_${new Date().toISOString().split('T')[0]}_${new Date().toTimeString().split(' ')[0].replace(/:/g, '-')}.json`;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.json(exportData);
+        
+        log.info(`JSON export yakunlandi: ${brands.length} brend, ${branches.length} filial, ${svrs.length} SVR`);
+    } catch (error) {
+        log.error('JSON export xatolik:', error);
+        res.status(500).json({ success: false, message: 'JSON export qilishda xatolik: ' + error.message });
+    }
+});
+
+/**
+ * JSON formatdan ma'lumotlarni import qilish
+ * POST /api/debt-approval/export/import-json
+ */
+router.post('/import-json', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        let importData;
+        
+        // JSON ma'lumotlarini olish
+        if (req.body && req.body.export_info) {
+            // JSON body'dan
+            importData = req.body;
+        } else {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'JSON ma\'lumotlar topilmadi. Iltimos, to\'g\'ri JSON fayl yuklang.' 
+            });
+        }
+        
+        if (!importData.data || !importData.data.brands) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'JSON fayl format noto\'g\'ri. Iltimos, to\'g\'ri formatdagi fayl yuklang.' 
+            });
+        }
+        
+        let created = 0;
+        let updated = 0;
+        let errors = [];
+        
+        // Brands import qilish
+        for (const brand of importData.data.brands) {
+            try {
+                const existing = await db('debt_brands').where('name', brand.name).first();
+                if (existing) {
+                    await db('debt_brands')
+                        .where('id', existing.id)
+                        .update({
+                            updated_at: new Date().toISOString()
+                        });
+                    updated++;
+                } else {
+                    await db('debt_brands').insert({
+                        name: brand.name,
+                        created_at: brand.created_at || new Date().toISOString(),
+                        updated_at: brand.updated_at || new Date().toISOString()
+                    });
+                    created++;
+                }
+            } catch (error) {
+                errors.push(`Brend "${brand.name}": ${error.message}`);
+            }
+        }
+        
+        // Branches import qilish
+        for (const branch of importData.data.branches || []) {
+            try {
+                // Brand'ni topish - faqat brand_name ishlatish kerak
+                if (!branch.brand_name) {
+                    errors.push(`Filial "${branch.name || branch.branch_name}": brand_name topilmadi`);
+                    continue;
+                }
+                
+                const brand = await db('debt_brands').where('name', branch.brand_name).first();
+                if (!brand) {
+                    errors.push(`Filial "${branch.name || branch.branch_name}": Brend "${branch.brand_name}" topilmadi`);
+                    continue;
+                }
+                
+                // Branch nomini aniqlash
+                const branchName = branch.name || branch.branch_name;
+                if (!branchName) {
+                    errors.push(`Filial: Branch nomi topilmadi (brand: "${branch.brand_name}")`);
+                    continue;
+                }
+                
+                const existing = await db('debt_branches')
+                    .where('brand_id', brand.id)
+                    .where('name', branchName)
+                    .first();
+                    
+                if (existing) {
+                    await db('debt_branches')
+                        .where('id', existing.id)
+                        .update({
+                            updated_at: new Date().toISOString()
+                        });
+                    updated++;
+                } else {
+                    await db('debt_branches').insert({
+                        brand_id: brand.id,
+                        name: branchName,
+                        created_at: branch.created_at || new Date().toISOString(),
+                        updated_at: branch.updated_at || new Date().toISOString()
+                    });
+                    created++;
+                }
+            } catch (error) {
+                errors.push(`Filial "${branch.name || branch.branch_name || 'noma\'lum'}": ${error.message}`);
+            }
+        }
+        
+        // SVRs import qilish
+        for (const svr of importData.data.svrs || []) {
+            try {
+                // Brand'ni topish
+                if (!svr.brand_name) {
+                    errors.push(`SVR "${svr.name || 'noma\'lum'}": brand_name topilmadi`);
+                    continue;
+                }
+                
+                const brand = await db('debt_brands').where('name', svr.brand_name).first();
+                if (!brand) {
+                    errors.push(`SVR "${svr.name || 'noma\'lum'}": Brend "${svr.brand_name}" topilmadi`);
+                    continue;
+                }
+                
+                // Branch'ni topish (agar mavjud bo'lsa)
+                let branch = null;
+                if (svr.branch_name) {
+                    branch = await db('debt_branches')
+                        .where('brand_id', brand.id)
+                        .where('name', svr.branch_name)
+                        .first();
+                }
+                
+                // SVR nomini tekshirish
+                if (!svr.name) {
+                    errors.push(`SVR: SVR nomi topilmadi (brand: "${svr.brand_name}")`);
+                    continue;
+                }
+                
+                const existing = await db('debt_svrs')
+                    .where('brand_id', brand.id)
+                    .where('branch_id', branch ? branch.id : null)
+                    .where('name', svr.name)
+                    .first();
+                    
+                if (existing) {
+                    await db('debt_svrs')
+                        .where('id', existing.id)
+                        .update({
+                            updated_at: new Date().toISOString()
+                        });
+                    updated++;
+                } else {
+                    await db('debt_svrs').insert({
+                        brand_id: brand.id,
+                        branch_id: branch ? branch.id : null,
+                        name: svr.name,
+                        created_at: svr.created_at || new Date().toISOString(),
+                        updated_at: svr.updated_at || new Date().toISOString()
+                    });
+                    created++;
+                }
+            } catch (error) {
+                errors.push(`SVR "${svr.name || 'noma\'lum'}": ${error.message}`);
+            }
+        }
+        
+        log.info(`JSON import yakunlandi: ${created} yaratildi, ${updated} yangilandi, ${errors.length} xatolik`);
+        
+        res.json({
+            success: true,
+            message: `Ma'lumotlar import qilindi: ${created} yaratildi, ${updated} yangilandi`,
+            created,
+            updated,
+            errors: errors.length > 0 ? errors : undefined
+        });
+    } catch (error) {
+        log.error('JSON import xatolik:', error);
+        res.status(500).json({ success: false, message: 'JSON import qilishda xatolik: ' + error.message });
+    }
+});
+
+/**
  * Shablon yuklab olish (bo'sh shablon yoki mavjud ma'lumotlar bilan)
  * GET /api/debt-approval/export/template?withData=true
  */

@@ -42,7 +42,7 @@ function setupUserPermissionTabs() {
     const tabs = document.querySelectorAll('.roles-tab');
     // console.log('📑 Found roles tabs:', tabs.length);
     tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
+        tab.addEventListener('click', async () => {
             // console.log('📑 Tab clicked:', tab.getAttribute('data-tab'));
             // Remove active from all tabs
             tabs.forEach(t => t.classList.remove('active'));
@@ -67,6 +67,14 @@ function setupUserPermissionTabs() {
                 } else if (tabName === 'permissions-overview') {
                     // console.log('📑 Loading permissions overview...');
                     loadPermissionsOverview();
+                } else if (tabName === 'categories-management') {
+                    // console.log('📑 Loading categories...');
+                    try {
+                        const { loadCategories } = await import('./roles.js');
+                        loadCategories();
+                    } catch (error) {
+                        console.error('Categories modulini yuklashda xatolik:', error);
+                    }
                 }
             } else {
                 // console.error('❌ Tab content not found for:', tabName);
@@ -987,7 +995,23 @@ function getPermissionExplanation(permKey) {
         
         'comparison:view': 'Qiymatlarni solishtirish bo\'limini ko\'rish va operatorlar kiritgan qiymatlarni umumiy qiymatlar bilan solishtirish',
         'comparison:export': 'Solishtirish natijalarini Excel faylga eksport qilish',
-        'comparison:notify': 'Farqlar haqida operatorlarga Telegram orqali bildirishnoma yuborish'
+        'comparison:notify': 'Farqlar haqida operatorlarga Telegram orqali bildirishnoma yuborish',
+        
+        'debt:view_all': 'Barcha qarzdorlik so\'rovlarini ko\'rish (barcha filiallar va foydalanuvchilar)',
+        'debt:view_own': 'Faqat o\'zi yaratgan qarzdorlik so\'rovlarini ko\'rish',
+        'debt:create': 'Yangi qarzdorlik so\'rovi yaratish (brend, filial, SVR tanlash va so\'rov yuborish)',
+        'debt:approve_leader': 'Leader sifatida SET so\'rovlarni ko\'rish va tasdiqlash',
+        'debt:approve_cashier': 'Cashier sifatida so\'rovlarni ko\'rish va tasdiqlash',
+        'debt:approve_operator': 'Operator sifatida so\'rovlarni yakuniy tasdiqlash',
+        'debt:approve_supervisor': 'Nazoratchi sifatida so\'rovlarni nazorat qilish va tasdiqlash',
+        'debt:mark_debt': 'Qarzdorlik belgilash (Excel fayl, rasm yoki summa kiritish)',
+        'debt:view_statistics': 'Qarzdorlik statistikasini ko\'rish (brendlar, filiallar bo\'yicha)',
+        'debt:export': 'Qarzdorlik ma\'lumotlarini Excel formatida eksport qilish',
+        'debt:view_bindings': 'Qarzdorlik bog\'lanishlarini ko\'rish (brendlar, filiallar, SVR\'lar)',
+        'debt:manage_bindings': 'Qarzdorlik bog\'lanishlarini boshqarish (yaratish, o\'zgartirish, o\'chirish)',
+        'debt:admin': 'Qarzdorlik tizimini to\'liq boshqarish (barcha funksiyalar)',
+        'debt:block': 'Elementlarni bloklash (brendlar, filiallar, SVR\'lar) - bloklangan elementlar bo\'yicha so\'rov yaratib bo\'lmaydi',
+        'debt:unblock': 'Bloklashni bekor qilish (brendlar, filiallar, SVR\'lar) - bloklangan elementlarni qayta faollashtirish'
     };
     
     return explanations[permKey] || 'Bu huquq tizimda ma\'lum bir amalni bajarish imkoniyatini beradi.';

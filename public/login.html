@@ -39,6 +39,9 @@
         <p class="register-link" style="margin-top: 20px; font-size: 14px; color: var(--text-secondary );">
             Akkauntingiz yo'qmi? <a href="/register.html" style="color: var(--blue-color); text-decoration: none; font-weight: 600;">Ro'yxatdan o'tish</a>
         </p>
+        <p class="register-link" style="margin-top: 10px; font-size: 14px; color: var(--text-secondary );">
+            Parolni unutdingizmi? <a href="/reset-password.html" style="color: var(--blue-color); text-decoration: none; font-weight: 600;">Parolni tiklash</a>
+        </p>
         <!-- QO'SHILGAN QISM TUGADI -->
 
     </div>
@@ -53,16 +56,40 @@
         document.body.addEventListener('click', (e) => {
             const toggleBtn = e.target.closest('.toggle-visibility-btn');
             if (toggleBtn) {
-                const input = toggleBtn.closest('.secure-input-wrapper').querySelector('input');
+                console.log('[LOGIN] Toggle button clicked');
+                const wrapper = toggleBtn.closest('.secure-input-wrapper');
+                if (!wrapper) {
+                    console.warn('[LOGIN] secure-input-wrapper topilmadi');
+                    return;
+                }
+                const input = wrapper.querySelector('input');
+                if (!input) {
+                    console.warn('[LOGIN] Input topilmadi');
+                    return;
+                }
                 const icon = toggleBtn.querySelector('i');
+                console.log('[LOGIN] Input type:', input.type, 'Icon:', icon ? 'mavjud' : 'yo\'q');
+                
                 if (input.type === 'password') {
                     input.type = 'text';
-                    icon.setAttribute('data-feather', 'eye-off');
+                    console.log('[LOGIN] Parol ko\'rsatildi');
+                    if (icon) {
+                        icon.setAttribute('data-feather', 'eye-off');
+                    }
                 } else {
                     input.type = 'password';
-                    icon.setAttribute('data-feather', 'eye');
+                    console.log('[LOGIN] Parol yashirildi');
+                    if (icon) {
+                        icon.setAttribute('data-feather', 'eye');
+                    }
                 }
-                feather.replace();
+                
+                if (typeof feather !== 'undefined') {
+                    feather.replace();
+                    console.log('[LOGIN] Feather icons yangilandi');
+                } else {
+                    console.warn('[LOGIN] Feather mavjud emas');
+                }
             }
         });
     </script>

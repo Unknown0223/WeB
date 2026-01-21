@@ -24,6 +24,7 @@ const getLogLevel = () => {
     if (envLevel && LOG_LEVELS[envLevel] !== undefined) {
         return envLevel;
     }
+    // Development'da ham default 'error' (faqat xatoliklar)
     return 'error'; // Har doim faqat error loglar
 };
 

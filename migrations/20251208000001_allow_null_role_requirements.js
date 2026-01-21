@@ -5,36 +5,46 @@
  * @returns { Promise<void> }
  */
 exports.up = async function(knex) {
-  // SQLite'da ALTER COLUMN ishlamaydi, shuning uchun jadvalni qayta yaratish kerak
-  // Lekin role_permissions jadvali roles jadvaliga reference qiladi, shuning uchun
-  // avval foreign key constraint'ni olib tashlash, keyin jadvalni qayta yaratish, keyin constraint'ni qaytarish kerak
+  // Database client turini aniqlash
+  const client = knex.client.config.client;
+  const isPostgres = client === 'pg';
   
-  return knex.transaction(async (trx) => {
-    // 1. role_permissions jadvalidan foreign key constraint'ni olib tashlash (SQLite'da bu avtomatik)
-    // 2. Yangi jadval yaratish (null qiymatlarni qo'llab-quvvatlash)
-    await trx.raw(`
-      CREATE TABLE roles_new (
-        role_name TEXT PRIMARY KEY NOT NULL,
-        requires_brands INTEGER,
-        requires_locations INTEGER
-      );
-    `);
-    
-    // 3. Ma'lumotlarni ko'chirish
-    await trx.raw(`
-      INSERT INTO roles_new (role_name, requires_brands, requires_locations)
-      SELECT role_name, requires_brands, requires_locations FROM roles;
-    `);
-    
-    // 4. Eski jadvalni o'chirish
-    await trx.raw(`DROP TABLE roles;`);
-    
-    // 5. Yangi jadvalni eski nomga o'zgartirish
-    await trx.raw(`ALTER TABLE roles_new RENAME TO roles;`);
-    
-    // 6. role_permissions jadvali uchun foreign key constraint'ni qaytarish
-    // SQLite'da bu avtomatik ishlaydi, chunki jadval nomi o'zgarmadi
-  });
+  if (isPostgres) {
+    // PostgreSQL'da ALTER COLUMN ishlatish
+    return knex.schema.table('roles', function(table) {
+      // Boolean ustunlarini nullable qilish
+      table.boolean('requires_brands').nullable().alter();
+      table.boolean('requires_locations').nullable().alter();
+    });
+  } else {
+    // SQLite'da ALTER COLUMN ishlamaydi, shuning uchun jadvalni qayta yaratish kerak
+    return knex.transaction(async (trx) => {
+      // 1. Yangi jadval yaratish (null qiymatlarni qo'llab-quvvatlash)
+      await trx.raw(`
+        CREATE TABLE roles_new (
+          role_name TEXT PRIMARY KEY NOT NULL,
+          requires_brands INTEGER,
+          requires_locations INTEGER
+        );
+      `);
+      
+      // 2. Ma'lumotlarni ko'chirish (boolean ni integer ga konvertatsiya)
+      await trx.raw(`
+        INSERT INTO roles_new (role_name, requires_brands, requires_locations)
+        SELECT 
+          role_name, 
+          CASE WHEN requires_brands THEN 1 ELSE 0 END as requires_brands,
+          CASE WHEN requires_locations THEN 1 ELSE 0 END as requires_locations
+        FROM roles;
+      `);
+      
+      // 3. Eski jadvalni o'chirish
+      await trx.raw(`DROP TABLE roles;`);
+      
+      // 4. Yangi jadvalni eski nomga o'zgartirish
+      await trx.raw(`ALTER TABLE roles_new RENAME TO roles;`);
+    });
+  }
 };
 
 /**
@@ -42,28 +52,36 @@ exports.up = async function(knex) {
  * @returns { Promise<void> }
  */
 exports.down = async function(knex) {
-  // Qaytarish: notNullable() ni qaytarish
-  return knex.schema.raw(`
-    -- Yangi jadval yaratish
-    CREATE TABLE roles_new (
-      role_name TEXT PRIMARY KEY,
-      requires_brands INTEGER NOT NULL DEFAULT 0,
-      requires_locations INTEGER NOT NULL DEFAULT 0
-    );
-    
-    -- Ma'lumotlarni ko'chirish (null qiymatlarni false ga o'zgartirish)
-    INSERT INTO roles_new (role_name, requires_brands, requires_locations)
-    SELECT 
-      role_name, 
-      COALESCE(requires_brands, 0) as requires_brands,
-      COALESCE(requires_locations, 0) as requires_locations
-    FROM roles;
-    
-    -- Eski jadvalni o'chirish
-    DROP TABLE roles;
-    
-    -- Yangi jadvalni eski nomga o'zgartirish
-    ALTER TABLE roles_new RENAME TO roles;
-  `);
+  // Database client turini aniqlash
+  const client = knex.client.config.client;
+  const isPostgres = client === 'pg';
+  
+  if (isPostgres) {
+    // PostgreSQL'da ALTER COLUMN ishlatish
+    return knex.schema.table('roles', function(table) {
+      // Boolean ustunlarini notNullable qilish
+      table.boolean('requires_brands').defaultTo(false).notNullable().alter();
+      table.boolean('requires_locations').defaultTo(false).notNullable().alter();
+    });
+  } else {
+    // SQLite uchun eski usul
+    return knex.schema.raw(`
+      CREATE TABLE roles_new (
+        role_name TEXT PRIMARY KEY,
+        requires_brands INTEGER NOT NULL DEFAULT 0,
+        requires_locations INTEGER NOT NULL DEFAULT 0
+      );
+      
+      INSERT INTO roles_new (role_name, requires_brands, requires_locations)
+      SELECT 
+        role_name, 
+        COALESCE(requires_brands, 0) as requires_brands,
+        COALESCE(requires_locations, 0) as requires_locations
+      FROM roles;
+      
+      DROP TABLE roles;
+      ALTER TABLE roles_new RENAME TO roles;
+    `);
+  }
 };
 

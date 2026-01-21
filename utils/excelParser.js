@@ -73,7 +73,9 @@ function detectColumns(headers) {
         name: null,
         summa: null,
         svr: null,
-        brand: null
+        brand: null,
+        agent: null, // ✅ Qo'shilgan: Агент ustuni
+        agent_code: null // ✅ Qo'shilgan: Код агента ustuni
     };
     
     // ID ustuni variantlari
@@ -105,6 +107,19 @@ function detectColumns(headers) {
         'направление торговли', 'trade direction', 'brend', 'brand',
         'brand name', 'brend nomi', 'brand nomi', 'направление',
         'trade_direction', 'tradedirection'
+    ];
+    
+    // ✅ Агент ustuni variantlari
+    const agentVariants = [
+        'агент', 'agent', 'agent name', 'agent_name', 'agentname',
+        'агент name', 'агент_name', 'agent nomi'
+    ];
+    
+    // ✅ Код агента ustuni variantlari
+    const agentCodeVariants = [
+        'код агента', 'agent code', 'agent_code', 'agentcode',
+        'код_агента', 'agent id', 'agent_id', 'agentid',
+        'код агента', 'agent kod', 'agent_kod'
     ];
     
     // Har bir ustunni tekshirish
@@ -141,6 +156,18 @@ function detectColumns(headers) {
         if (!detected.brand && brandVariants.some(variant => headerLower.includes(variant))) {
             detected.brand = index;
             log.debug(`[DETECT] Brend ustuni topildi: "${header}" (index: ${index})`);
+        }
+        
+        // ✅ Агент ustuni
+        if (!detected.agent && agentVariants.some(variant => headerLower.includes(variant))) {
+            detected.agent = index;
+            log.debug(`[DETECT] Агент ustuni topildi: "${header}" (index: ${index})`);
+        }
+        
+        // ✅ Код агента ustuni
+        if (!detected.agent_code && agentCodeVariants.some(variant => headerLower.includes(variant))) {
+            detected.agent_code = index;
+            log.debug(`[DETECT] Код агента ustuni topildi: "${header}" (index: ${index})`);
         }
     });
     
@@ -180,6 +207,11 @@ function validateAndFilterRows(data, columns, requestData, headers = []) {
                 : '';
             const requestSvr = String(requestData.svr_name).trim();
             
+            // Birinchi mos kelgan va mos kelmagan holatlarni log qilish
+            if (svrMatchCount === 0 && svrMismatches.size === 0 && index < 5) {
+                log.debug(`[VALIDATE] SVR solishtirish: Excel="${rowSvr}" vs DB="${requestSvr}"`);
+            }
+            
             // Agar qator bo'sh bo'lsa, o'tkazib yuborish
             if (!rowSvr) {
                 shouldInclude = false;
@@ -194,6 +226,9 @@ function validateAndFilterRows(data, columns, requestData, headers = []) {
                     // Keraksiz loglarni olib tashlash
                 } else {
                     svrMatchCount++;
+                    if (svrMatchCount === 1) {
+                        log.info(`[VALIDATE] ✅ Birinchi SVR mos kelgan: Excel="${rowSvr}" = DB="${requestSvr}"`);
+                    }
                     // Keraksiz loglarni olib tashlash
                 }
             }
@@ -242,11 +277,16 @@ function validateAndFilterRows(data, columns, requestData, headers = []) {
     };
     
     log.info(`[VALIDATE] Filtrlash natijasi: ${filtered.length}/${data.length} qator mos keldi`);
-    if (columns.svr !== null) {
+    if (columns.svr !== null && requestData.svr_name) {
         log.info(`[VALIDATE] SVR mosligi: ${svrMatchCount} ta, mos kelmaganlar: ${stats.svrMismatches.length} ta`);
+        log.info(`[VALIDATE] DB SVR nomi: "${requestData.svr_name}"`);
+        if (stats.svrMismatches.length > 0 && stats.svrMismatches.length <= 10) {
+            log.info(`[VALIDATE] Excel'dagi SVR nomlari (misol): ${stats.svrMismatches.slice(0, 5).map(s => `"${s}"`).join(', ')}`);
+        }
     }
-    if (columns.brand !== null) {
+    if (columns.brand !== null && requestData.brand_name) {
         log.info(`[VALIDATE] Brend mosligi: ${brandMatchCount} ta, mos kelmaganlar: ${stats.brandMismatches.length} ta`);
+        log.info(`[VALIDATE] DB Brend nomi: "${requestData.brand_name}"`);
     }
     
     return { filtered, stats };

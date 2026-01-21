@@ -434,6 +434,9 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
     if (role === 'superadmin' || role === 'super_admin') {
         // Superadmin uchun filiallar va brendlar shart emas
     } else {
+        // Rol o'zgarganini tekshirish
+        const roleChanged = role !== targetUserRole;
+        
         // Boshqa rollar uchun rol shartlarini tekshirish
         const roleData = await db('roles').where('role_name', role).first();
         if (roleData) {
@@ -444,13 +447,34 @@ router.put('/:id', isAuthenticated, hasPermission('users:edit'), async (req, res
                 ? Boolean(roleData.requires_brands) 
                 : null;
             
-            // Agar filiallar majburiy bo'lsa
-            if (requiresLocations === true && locations.length === 0) {
-                return res.status(400).json({ message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.` });
-            }
-            // Agar brendlar majburiy bo'lsa
-            if (requiresBrands === true && brands.length === 0) {
-                return res.status(400).json({ message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.` });
+            // Agar rol o'zgarmagan bo'lsa, faqat yangi tanlanganlar bo'yicha tekshirish
+            // Agar rol o'zgargan bo'lsa, yangi rol shartlarini tekshirish
+            if (roleChanged) {
+                // Rol o'zgargan - yangi rol shartlarini tekshirish
+                if (requiresLocations === true && locations.length === 0) {
+                    return res.status(400).json({ message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.` });
+                }
+                if (requiresBrands === true && brands.length === 0) {
+                    return res.status(400).json({ message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.` });
+                }
+            } else {
+                // Rol o'zgarmagan - faqat yangi tanlanganlar bo'yicha tekshirish
+                // Agar filiallar majburiy bo'lsa va barcha filiallar olib tashlangan bo'lsa
+                if (requiresLocations === true && locations.length === 0) {
+                    // Avvalgi filiallar bor-yo'qligini tekshirish
+                    const existingLocations = await db('debt_user_branches').where('user_id', userId).select('branch_id');
+                    if (existingLocations.length === 0) {
+                        return res.status(400).json({ message: `"${role}" roli uchun kamida bitta filial tanlanishi shart.` });
+                    }
+                }
+                // Agar brendlar majburiy bo'lsa va barcha brendlar olib tashlangan bo'lsa
+                if (requiresBrands === true && brands.length === 0) {
+                    // Avvalgi brendlar bor-yo'qligini tekshirish
+                    const existingBrands = await db('debt_user_brands').where('user_id', userId).select('brand_id');
+                    if (existingBrands.length === 0) {
+                        return res.status(400).json({ message: `"${role}" roli uchun kamida bitta brend tanlanishi shart.` });
+                    }
+                }
             }
         }
     }
@@ -679,13 +703,111 @@ router.put('/:id/approve', (req, res, next) => {
     try {
         // 1. Foydalanuvchi va uning vaqtinchalik ma'lumotlarini tekshirish
         const user = await db('users').where({ id: userId }).first();
-        if (!user || !['pending_approval', 'pending_telegram_subscription'].includes(user.status)) {
-            return res.status(404).json({ message: "Foydalanuvchi topilmadi yoki allaqachon tasdiqlangan." });
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+        
+        // Agar foydalanuvchi allaqachon active bo'lsa, faqat rol va shartlarni yangilash
+        if (user.status === 'active') {
+            // Faqat rol va shartlarni yangilash (tasdiqlash emas)
+            await db.transaction(async trx => {
+                await trx('users').where({ id: userId }).update({ role: role });
+
+                await trx('user_locations').where({ user_id: userId }).del();
+                if (locations && locations.length > 0) {
+                    const locationsToInsert = locations.map(loc => ({ user_id: userId, location_name: loc }));
+                    await trx('user_locations').insert(locationsToInsert);
+                }
+                
+                await trx('user_brands').where({ user_id: userId }).del();
+                if (brands && brands.length > 0) {
+                    const brandRecords = brands.map(brandId => ({
+                        user_id: userId,
+                        brand_id: brandId
+                    }));
+                    await trx('user_brands').insert(brandRecords);
+                }
+            });
+            
+            // Cache'ni tozalash
+            const { clearAllUserCaches } = require('../utils/cacheUtils.js');
+            clearAllUserCaches(parseInt(userId, 10));
+            
+            // Audit jurnaliga yozish
+            await userRepository.logAction(adminId, 'update_user_role', 'user', userId, { 
+                updated_role: role, 
+                locations, 
+                brands,
+                requires_locations: roleData.requires_locations,
+                requires_brands: roleData.requires_brands,
+                ip: ipAddress, 
+                userAgent 
+            });
+            
+            res.json({ 
+                message: "Foydalanuvchi roli va shartlari muvaffaqiyatli yangilandi.",
+                credentials_sent: false
+            });
+            return;
+        }
+        
+        // Agar foydalanuvchi pending holatda bo'lsa, to'liq tasdiqlash jarayoni
+        if (!['pending_approval', 'pending_telegram_subscription'].includes(user.status)) {
+            return res.status(404).json({ message: "Foydalanuvchi tasdiqlash holatida emas." });
         }
 
         const tempReg = await db('pending_registrations').where({ user_id: userId }).first();
         if (!tempReg) {
-            return res.status(404).json({ message: "Ro'yxatdan o'tish so'rovi topilmadi yoki eskirgan." });
+            // Agar pending_registrations jadvalidan yozuv yo'q bo'lsa, faqat rol va shartlarni yangilash
+            // (Bu holat eski foydalanuvchilar yoki boshqa usul bilan yaratilgan foydalanuvchilar uchun)
+            await db.transaction(async trx => {
+                const updateData = {
+                    status: 'active',
+                    role: role
+                };
+                
+                if (user.telegram_chat_id) {
+                    updateData.is_telegram_connected = true;
+                }
+                
+                await trx('users').where({ id: userId }).update(updateData);
+
+                await trx('user_locations').where({ user_id: userId }).del();
+                if (locations && locations.length > 0) {
+                    const locationsToInsert = locations.map(loc => ({ user_id: userId, location_name: loc }));
+                    await trx('user_locations').insert(locationsToInsert);
+                }
+                
+                await trx('user_brands').where({ user_id: userId }).del();
+                if (brands && brands.length > 0) {
+                    const brandRecords = brands.map(brandId => ({
+                        user_id: userId,
+                        brand_id: brandId
+                    }));
+                    await trx('user_brands').insert(brandRecords);
+                }
+            });
+            
+            // Cache'ni tozalash
+            const { clearAllUserCaches } = require('../utils/cacheUtils.js');
+            clearAllUserCaches(parseInt(userId, 10));
+            
+            // Audit jurnaliga yozish
+            await userRepository.logAction(adminId, 'approve_user', 'user', userId, { 
+                approved_role: role, 
+                locations, 
+                brands,
+                requires_locations: roleData.requires_locations,
+                requires_brands: roleData.requires_brands,
+                ip: ipAddress, 
+                userAgent 
+            });
+            
+            res.json({ 
+                message: "Foydalanuvchi muvaffaqiyatli tasdiqlandi.",
+                credentials_sent: false
+            });
+            return;
         }
         
         const userData = JSON.parse(tempReg.user_data);
@@ -1110,6 +1232,40 @@ router.put('/me/avatar', isAuthenticated, async (req, res) => {
 });
 
 // Joriy foydalanuvchining avatarini o'chirish
+// Tema preference olish
+router.get('/me/theme', isAuthenticated, async (req, res) => {
+    try {
+        const user = await db('users').where('id', req.session.user.id).first();
+        res.json({ theme: user.theme || 'dark' });
+    } catch (error) {
+        log.error('Tema olishda xatolik:', error.message);
+        res.status(500).json({ message: 'Tema olishda xatolik yuz berdi' });
+    }
+});
+
+// Tema preference saqlash
+router.put('/me/theme', isAuthenticated, async (req, res) => {
+    try {
+        const { theme } = req.body;
+        
+        if (!theme || !['dark', 'light'].includes(theme)) {
+            return res.status(400).json({ message: 'Tema "dark" yoki "light" bo\'lishi kerak' });
+        }
+        
+        await db('users')
+            .where('id', req.session.user.id)
+            .update({ 
+                theme: theme,
+                updated_at: db.fn.now()
+            });
+        
+        res.json({ message: 'Tema muvaffaqiyatli yangilandi', theme });
+    } catch (error) {
+        log.error('Tema saqlashda xatolik:', error.message);
+        res.status(500).json({ message: 'Tema saqlashda xatolik yuz berdi' });
+    }
+});
+
 router.delete('/me/avatar', isAuthenticated, async (req, res) => {
     try {
         await db('users')
@@ -1344,33 +1500,38 @@ router.delete('/:id', isAuthenticated, hasPermission('users:edit'), async (req, 
         }
 
         // Jadval mavjudligini tekshirish (eski backup DBlarda bo'lmasligi mumkin)
-        const [hasReportsTable, hasHistoryTable, hasComparisonsTable] = await Promise.all([
+        const [hasReportsTable, hasHistoryTable, hasComparisonsTable, hasPivotTemplatesTable] = await Promise.all([
             db.schema.hasTable('reports'),
             db.schema.hasTable('report_history'),
-            db.schema.hasTable('comparisons')
+            db.schema.hasTable('comparisons'),
+            db.schema.hasTable('pivot_templates')
         ]);
 
         // Ma'lumotlarni tekshirish (jadval bo'lmasa 0 deb hisoblaymiz)
-        const [reportsCount, historyCount, comparisonsCount] = await Promise.all([
+        const [reportsCount, historyCount, comparisonsCount, pivotTemplatesCount] = await Promise.all([
             hasReportsTable
-                ? db('reports').where({ created_by: userId }).count('* as count').first()
+                ? db('reports').where({ created_by: userId }).orWhere({ updated_by: userId }).count('* as count').first()
                 : Promise.resolve({ count: 0 }),
             hasHistoryTable
                 ? db('report_history').where({ changed_by: userId }).count('* as count').first()
                 : Promise.resolve({ count: 0 }),
             hasComparisonsTable
                 ? db('comparisons').where({ created_by: userId }).count('* as count').first()
+                : Promise.resolve({ count: 0 }),
+            hasPivotTemplatesTable
+                ? db('pivot_templates').where({ created_by: userId }).count('* as count').first()
                 : Promise.resolve({ count: 0 })
         ]);
 
         const hasData = {
             reports: parseInt(reportsCount.count) || 0,
             history: parseInt(historyCount.count) || 0,
-            comparisons: parseInt(comparisonsCount.count) || 0
+            comparisons: parseInt(comparisonsCount.count) || 0,
+            pivotTemplates: parseInt(pivotTemplatesCount.count) || 0
         };
 
         // Agar ma'lumot bor bo'lsa va forceDelete false bo'lsa, xatolik qaytarish
-        if (!forceDelete && (hasData.reports > 0 || hasData.history > 0 || hasData.comparisons > 0)) {
+        if (!forceDelete && (hasData.reports > 0 || hasData.history > 0 || hasData.comparisons > 0 || hasData.pivotTemplates > 0)) {
             return res.status(400).json({ 
                 message: 'Foydalanuvchi ma\'lumotlari mavjud. Force delete parametri bilan o\'chirish mumkin.',
                 hasData 
@@ -1379,12 +1540,37 @@ router.delete('/:id', isAuthenticated, hasPermission('users:edit'), async (req, 
 
         // Foydalanuvchini o'chirish (yoki ma'lumotlarni null qilish)
         if (forceDelete) {
-            // Ma'lumotlarni null qilish
-            await Promise.all([
-                db('reports').where({ created_by: userId }).update({ created_by: null }),
-                db('report_history').where({ changed_by: userId }).update({ changed_by: null }),
-                db('comparisons').where({ created_by: userId }).update({ created_by: null })
-            ]);
+            // Ma'lumotlarni null qilish yoki admin ID ga o'zgartirish
+            // report_history.changed_by NOT NULL constraint bor, shuning uchun admin ID ga o'zgartirish
+            // reports.updated_by ham foreign key, shuning uchun to'g'rilash kerak
+            const updatePromises = [];
+            
+            if (hasReportsTable) {
+                updatePromises.push(
+                    db('reports').where({ created_by: userId }).update({ created_by: null }),
+                    db('reports').where({ updated_by: userId }).update({ updated_by: null })
+                );
+            }
+            
+            if (hasHistoryTable) {
+                updatePromises.push(
+                    db('report_history').where({ changed_by: userId }).update({ changed_by: adminId })
+                );
+            }
+            
+            if (hasComparisonsTable) {
+                updatePromises.push(
+                    db('comparisons').where({ created_by: userId }).update({ created_by: null })
+                );
+            }
+            
+            if (hasPivotTemplatesTable) {
+                updatePromises.push(
+                    db('pivot_templates').where({ created_by: userId }).update({ created_by: null })
+                );
+            }
+            
+            await Promise.all(updatePromises);
         }
 
         // Foydalanuvchini o'chirish

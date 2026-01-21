@@ -37,10 +37,37 @@ export const safeFetch = async (url, options) => {
         }
         
         // Agar response HTML bo'lsa (content-type tekshirish)
+        // Lekin blob fayllar (Excel, PDF, va boshqalar) uchun ruxsat berish
         const contentType = response.headers.get('content-type');
-        if (contentType && !contentType.includes('application/json') && !contentType.includes('text/json')) {
-            console.error('Non-JSON response received:', contentType);
-            return null;
+        if (contentType) {
+            // Blob fayllar uchun ruxsat berish
+            const allowedBlobTypes = [
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // Excel .xlsx
+                'application/vnd.ms-excel', // Excel .xls
+                'application/pdf', // PDF
+                'application/zip', // ZIP
+                'application/octet-stream', // Binary
+                'text/csv', // CSV
+                'application/json', // JSON
+                'text/json' // JSON text
+            ];
+            
+            const isAllowedBlob = allowedBlobTypes.some(type => contentType.includes(type));
+            const isJSON = contentType.includes('application/json') || contentType.includes('text/json');
+            
+            // Agar JSON yoki ruxsat berilgan blob bo'lmasa, null qaytarish
+            if (!isJSON && !isAllowedBlob) {
+                // HTML yoki boshqa formatlar uchun
+                if (contentType.includes('text/html')) {
+                    console.warn('[API] HTML response received, URL:', url);
+                    console.warn('[API] Response status:', response.status);
+                    console.warn('[API] Redirecting to login');
+                    window.location.href = '/login';
+                    return null;
+                }
+                console.error('[API] Non-JSON and non-allowed blob response received:', contentType, 'URL:', url);
+                return null;
+            }
         }
         
         return response;

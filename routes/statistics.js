@@ -1,7 +1,7 @@
 // routes/statistics.js
 
 const express = require('express');
-const { db } = require('../db.js');
+const { db, isPostgres } = require('../db.js');
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 // ===== MUAMMO TUZATILGAN JOY (1): Importni aniqlashtirish =====
 const { endOfMonth, startOfMonth, eachDayOfInterval, format } = require('date-fns');
@@ -16,6 +16,9 @@ router.get('/employees', isAuthenticated, hasPermission('dashboard:view'), async
     try {
         const kpiSettingsRow = await db('settings').where({ key: 'kpi_settings' }).first();
         const kpiSettings = kpiSettingsRow ? JSON.parse(kpiSettingsRow.value) : { latePenalty: 0.5, editPenalty: 0.3, roleFilter: [] };
+
+        // Debug: edit_count ni tekshirish
+        log.debug('KPI Settings:', kpiSettings);
 
         const month = req.query.month ? new Date(req.query.month) : new Date();
         const startDate = format(startOfMonth(month), 'yyyy-MM-dd');
@@ -33,7 +36,7 @@ router.get('/employees', isAuthenticated, hasPermission('dashboard:view'), async
                 'u.username', 
                 'u.fullname',
                 'u.role',
-                db.raw("GROUP_CONCAT(ul.location_name) as locations")
+                db.raw(isPostgres ? "STRING_AGG(ul.location_name, ',') as locations" : "GROUP_CONCAT(ul.location_name) as locations")
             );
         
         // Agar rol filtri belgilangan bo'lsa, faqat shu rollardagi foydalanuvchilarni olish
@@ -49,18 +52,39 @@ router.get('/employees', isAuthenticated, hasPermission('dashboard:view'), async
 
         const employeeIds = employees.map(e => e.id);
 
+        // Har bir report uchun edit_count ni alohida olish (to'g'ri hisoblash uchun)
         const reports = await db('reports as r')
-            .leftJoin('report_history as h', 'r.id', 'h.report_id')
             .whereIn('r.created_by', employeeIds)
             .whereBetween('r.report_date', [startDate, endDate])
-            .groupBy('r.id')
             .select(
                 'r.id',
                 'r.report_date',
                 'r.created_at',
-                'r.created_by',
-                db.raw('COUNT(h.id) as edit_count')
+                'r.created_by'
             );
+        
+        // Har bir report uchun edit_count ni alohida hisoblash
+        const reportIds = reports.map(r => r.id);
+        let editCountMap = {};
+        
+        if (reportIds.length > 0) {
+            const editCounts = await db('report_history')
+                .select('report_id')
+                .count('* as edit_count')
+                .whereIn('report_id', reportIds)
+                .groupBy('report_id');
+            
+            editCountMap = editCounts.reduce((acc, item) => {
+                const count = parseInt(item.edit_count) || 0;
+                acc[item.report_id] = count;
+                return acc;
+            }, {});
+        }
+        
+        // Reports ga edit_count ni qo'shish
+        reports.forEach(report => {
+            report.edit_count = editCountMap[report.id] || 0;
+        });
 
         const statistics = employees.map(employee => {
             const employeeReports = reports.filter(r => r.created_by === employee.id);
@@ -81,7 +105,26 @@ router.get('/employees', isAuthenticated, hasPermission('dashboard:view'), async
             });
 
             const totalSubmitted = employeeReports.length;
-            const totalEdited = employeeReports.reduce((sum, r) => sum + r.edit_count, 0);
+            const totalEdited = employeeReports.reduce((sum, r) => {
+                // edit_count ni to'g'ri integer sifatida olish
+                let editCount = 0;
+                if (r.edit_count !== null && r.edit_count !== undefined) {
+                    if (typeof r.edit_count === 'string') {
+                        // Agar string bo'lsa, faqat raqamlarni olish
+                        const numStr = r.edit_count.toString().replace(/[^0-9]/g, '');
+                        editCount = parseInt(numStr) || 0;
+                    } else if (typeof r.edit_count === 'number') {
+                        editCount = Math.floor(r.edit_count) || 0;
+                    } else {
+                        editCount = parseInt(r.edit_count) || 0;
+                    }
+                }
+                // Faqat musbat raqamlarni qo'shamiz
+                if (editCount < 0) {
+                    editCount = 0;
+                }
+                return sum + editCount;
+            }, 0);
             
             const onTimePercentage = totalSubmitted > 0 ? (onTimeCount / totalSubmitted) * 100 : 0;
             const latePercentage = totalSubmitted > 0 ? (lateCount / totalSubmitted) * 100 : 0;

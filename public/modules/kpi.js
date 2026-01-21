@@ -29,6 +29,30 @@ function getInitials(fullname) {
     return firstLetter + secondLetter;
 }
 
+// Tahrirlangan sonini formatlash
+function formatEditedCount(value) {
+    if (value === null || value === undefined) return 0;
+    
+    // Agar string bo'lsa, faqat raqamlarni olish
+    let num = 0;
+    if (typeof value === 'string') {
+        // Faqat raqamlarni olish (boshqa belgilar olib tashlanadi)
+        const numStr = value.toString().replace(/[^0-9]/g, '');
+        num = parseInt(numStr) || 0;
+    } else if (typeof value === 'number') {
+        num = Math.floor(value) || 0;
+    } else {
+        num = parseInt(value) || 0;
+    }
+    
+    // Faqat musbat raqamlarni qaytaramiz
+    if (num < 0) {
+        num = 0;
+    }
+    
+    return num;
+}
+
 export function setupKpiPage() {
     const now = new Date();
     const year = now.getFullYear();
@@ -270,14 +294,28 @@ function renderSimpleTable(data) {
         return;
     }
     
+    // KPI ball bo'yicha sort qilish (eng yuqoridan pastga)
+    const sortedData = [...data].sort((a, b) => {
+        // Avval KPI ball bo'yicha
+        if (b.kpiScore !== a.kpiScore) {
+            return b.kpiScore - a.kpiScore;
+        }
+        // Agar KPI ball teng bo'lsa, o'z vaqtida topshirilganlar soni bo'yicha
+        if (b.onTimeCount !== a.onTimeCount) {
+            return b.onTimeCount - a.onTimeCount;
+        }
+        // Agar ular ham teng bo'lsa, jami topshirilganlar soni bo'yicha
+        return b.totalSubmitted - a.totalSubmitted;
+    });
+    
     // Statistika kartalarini render qilish
-    renderStatsCards(data);
+    renderStatsCards(sortedData);
     
     // Filiallar filtrini populate qilish
-    populateKpiLocationFilter(data);
+    populateKpiLocationFilter(sortedData);
     
     // Jadval render - zamonaviy dizayn
-    DOM.kpiTableBody.innerHTML = data.map((emp, index) => {
+    DOM.kpiTableBody.innerHTML = sortedData.map((emp, index) => {
         const rank = index + 1;
         const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
         
@@ -364,10 +402,10 @@ function renderSimpleTable(data) {
                     ${emp.kpiScore >= 90 ? '<span style="font-size: 18px;">🔥</span>' : ''}
                 </div>
             </td>
-            <td style="vertical-align: middle; padding: 8px 12px;"><span style="background: linear-gradient(135deg, #4facfe, #00f2fe); color: white; padding: 6px 12px; border-radius: 12px; font-weight: 600; font-size: 14px;">${emp.totalSubmitted}</span></td>
+            <td style="vertical-align: middle; padding: 8px 12px;"><span style="background: linear-gradient(135deg, #4facfe, #00f2fe); color: white; padding: 6px 12px; border-radius: 12px; font-weight: 600; font-size: 14px;">${emp.totalSubmitted || 0}</span></td>
             <td style="vertical-align: middle; padding: 8px 12px;"><span style="color: #52c41a; font-weight: 600; font-size: 15px;">✓ ${emp.onTimeCount || 0}</span></td>
-            <td style="vertical-align: middle; padding: 8px 12px;"><span style="color: #faad14; font-weight: 600; font-size: 15px;">⚠ ${emp.lateCount || 0}</span></td>
-            <td style="vertical-align: middle; padding: 8px 12px;"><span style="color: #1890ff; font-weight: 600; font-size: 15px;">✎ ${emp.totalEdited || 0}</span></td>
+            <td style="vertical-align: middle; padding: 8px 12px;"><span style="color: #ff4d4f; font-weight: 600; font-size: 15px;">⚠ ${emp.lateCount || 0}</span></td>
+            <td style="vertical-align: middle; padding: 8px 12px;"><span style="color: #faad14; font-weight: 600; font-size: 15px;">✎ ${formatEditedCount(emp.totalEdited)}</span></td>
         </tr>
     `;
     }).join('');
@@ -1646,8 +1684,8 @@ function renderKpiTable() {
             </td>
             <td style="vertical-align: middle; padding: 8px 12px;"><span class="kpi-count-badge">${emp.totalSubmitted}</span></td>
             <td style="vertical-align: middle; padding: 8px 12px;"><span class="kpi-count-badge success">${emp.onTimeCount || 0}</span></td>
-            <td style="vertical-align: middle; padding: 8px 12px;"><span class="kpi-count-badge warning">${emp.lateCount || 0}</span></td>
-            <td style="vertical-align: middle; padding: 8px 12px;"><span class="kpi-count-badge info">${emp.totalEdited || 0}</span></td>
+            <td style="vertical-align: middle; padding: 8px 12px;"><span class="kpi-count-badge danger">${emp.lateCount || 0}</span></td>
+            <td style="vertical-align: middle; padding: 8px 12px;"><span class="kpi-count-badge warning">${formatEditedCount(emp.totalEdited)}</span></td>
         </tr>
         <tr class="kpi-details-row hidden" data-details-for="${emp.userId}">
             <td colspan="8">

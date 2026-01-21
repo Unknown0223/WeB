@@ -159,27 +159,58 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
  * Guruhni saqlash
  */
 async function saveGroup(groupType, telegramGroupId, name, userId) {
-    const existing = await db('debt_groups')
-        .where('group_type', groupType)
-        .where('is_active', true)
-        .first();
-    
-    if (existing) {
-        await db('debt_groups')
-            .where('id', existing.id)
-            .update({
+    // Transaction ichida bajarish
+    await db.transaction(async (trx) => {
+        const existing = await trx('debt_groups')
+            .where('group_type', groupType)
+            .where('is_active', true)
+            .first();
+        
+        // Barcha guruhlarda (active va inactive) bu ID mavjudligini tekshirish
+        // Unique constraint faqat active guruhlar bilan cheklanmaydi
+        const allGroupsWithSameId = await trx('debt_groups')
+            .where('telegram_group_id', telegramGroupId);
+        
+        // Joriy guruhni (agar mavjud bo'lsa) olib tashlaymiz
+        const conflictingGroups = existing 
+            ? allGroupsWithSameId.filter(g => g.id !== existing.id)
+            : allGroupsWithSameId;
+        
+        // Boshqa guruhlarda bu ID mavjud bo'lsa, ularni deaktivatsiya qilamiz va ID'ni o'zgartirish
+        if (conflictingGroups.length > 0) {
+            // Telegram ID ni temporary unique qiymatga o'zgartirish (notNullable() tufayli null qilib bo'lmaydi)
+            for (const group of conflictingGroups) {
+                // Har bir guruh uchun unique temporary ID yaratish
+                const tempId = -Math.abs(parseInt(group.telegram_group_id)) - group.id - 1000000;
+                await trx('debt_groups')
+                    .where('id', group.id)
+                    .update({
+                        telegram_group_id: tempId, // Temporary unique ID
+                        is_active: false,
+                        updated_at: trx.fn.now()
+                    });
+            }
+            log.warn(`Guruh ID conflict: ${conflictingGroups.map(g => `${g.group_type} (id: ${g.id})`).join(', ')} guruhlarida ${telegramGroupId} ID mavjud edi, deaktivatsiya qilindi`);
+        }
+        
+        // Keyin joriy guruhni yangilaymiz yoki yaratamiz
+        if (existing) {
+            await trx('debt_groups')
+                .where('id', existing.id)
+                .update({
+                    telegram_group_id: telegramGroupId,
+                    name: name,
+                    updated_at: trx.fn.now()
+                });
+        } else {
+            await trx('debt_groups').insert({
+                group_type: groupType,
                 telegram_group_id: telegramGroupId,
                 name: name,
-                updated_at: db.fn.now()
+                is_active: true
             });
-    } else {
-        await db('debt_groups').insert({
-            group_type: groupType,
-            telegram_group_id: telegramGroupId,
-            name: name,
-            is_active: true
-        });
-    }
+        }
+    });
 }
 
 module.exports = router;

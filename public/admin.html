@@ -17,6 +17,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet.js CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="admin.css?v=2024112405">
     <link rel="stylesheet" href="appearance.css">
     <link rel="stylesheet" href="loader.css">
@@ -273,6 +275,20 @@
                 <div class="logo-border-effect">
                     <a href="/" class="brand-logo">MANUS</a>
                 </div>
+                <div class="admin-user-profile">
+                    <div class="admin-user-avatar" id="admin-user-avatar">
+                        <i data-feather="user"></i>
+                    </div>
+                    <div class="admin-user-info">
+                        <span id="admin-username" class="admin-username">Yuklanmoqda...</span>
+                        <span id="admin-user-role" class="admin-user-role"></span>
+                    </div>
+                    <div class="admin-user-actions">
+                        <button class="admin-theme-toggle-btn" id="admin-theme-toggle-btn" title="Temani o'zgartirish">
+                            <i data-feather="moon" id="admin-theme-icon"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
             <nav class="sidebar-nav">
                 <a href="#dashboard" class="nav-link active" data-page="dashboard" data-permission="dashboard:view">
@@ -324,6 +340,10 @@
                 <a href="#branding" class="nav-link" data-page="branding" data-permission="settings:edit_general">
                     <i data-feather="pen-tool"></i>
                     <span>Brending</span>
+                </a>
+                <a href="#debt-approval" class="nav-link" data-page="debt-approval" data-permission="roles:manage,debt:create,debt:view_own,debt:view_statistics">
+                    <i data-feather="clipboard"></i>
+                    <span>Qarzdorlik Tasdiqlash</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
@@ -702,6 +722,14 @@
                         <div class="form-group">
                             <label for="brand-color-input">Rang</label>
                             <input type="color" id="brand-color-input" class="form-control color-input" value="#4facfe">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="brand-sort-order-input">Saralash tartibi</label>
+                            <input type="number" id="brand-sort-order-input" class="form-control" placeholder="Masalan: 1, 2, 3..." min="1" step="1">
+                            <p class="text-white-60 font-13 mt-5">
+                                Brendlarni Telegram xabarlarida saralash uchun raqam kiriting. Agar bo'sh qoldirilsa, alifbo tartibida saralanadi.
+                            </p>
                         </div>
                         
                         <div class="form-group">
@@ -1789,6 +1817,10 @@
                         <i data-feather="list"></i>
                         <span>Barcha Huquqlar</span>
                     </button>
+                    <button class="roles-tab" data-tab="categories-management">
+                        <i data-feather="folder"></i>
+                        <span>Bo'limlar</span>
+                    </button>
                 </div>
 
                 <!-- Tab 1: Rol Huquqlari -->
@@ -1980,6 +2012,33 @@
                         <!-- Dynamic content -->
                     </div>
                 </div>
+
+                <!-- Tab 4: Bo'limlar Boshqaruvi -->
+                <div class="roles-tab-content" id="categories-management-tab" data-content="categories-management">
+                    <div class="roles-info-banner success">
+                        <i data-feather="info"></i>
+                        <div>
+                            <strong>Bo'limlar boshqaruvi:</strong> Huquqlar bo'limlarini (category) yaratish, o'zgartirish va o'chirish.
+                        </div>
+                    </div>
+
+                    <div class="categories-management-container">
+                        <div class="categories-header">
+                            <h3>
+                                <i data-feather="folder"></i>
+                                <span>Bo'limlar Ro'yxati</span>
+                            </h3>
+                            <button id="add-category-btn" class="btn btn-success">
+                                <i data-feather="plus"></i>
+                                <span>Yangi Bo'lim Qo'shish</span>
+                            </button>
+                        </div>
+
+                        <div class="categories-grid" id="categories-grid">
+                            <!-- Dynamic content -->
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- Tizim Jurnali -->
@@ -2157,6 +2216,7 @@
                                             <li>🎭 Rollar va huquqlar</li>
                                             <li>⚙️ Sozlamalar</li>
                                             <li>🏷️ Brendlar va filiallar</li>
+                                            <li>📋 Qarz tasdiqlash ma'lumotlari (brendlar, filiallar, SVRlar)</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -2202,6 +2262,103 @@
                     </div>
                 </div>
                 
+                <!-- === 🗄️ POSTGRESQL EXPORT/IMPORT (Agar PostgreSQL ishlatilsa) === -->
+                <div class="card" id="postgres-section" style="display: none;">
+                    <div class="db-export-header">
+                        <h3 class="db-export-title">
+                            <i data-feather="database"></i>
+                            <span>🗄️ PostgreSQL Ma'lumotlar Bazasi Boshqaruvi</span>
+                        </h3>
+                        <p class="db-export-description">
+                            PostgreSQL bazasidan ma'lumotlarni export/import qilish. JSON yoki SQL dump formatda.
+                        </p>
+                    </div>
+                    
+                    <div style="padding: 30px;">
+                        <div class="export-import-grid">
+                            <!-- PostgreSQL Export -->
+                            <div class="export-import-card">
+                                <div class="card-icon export">
+                                    <i data-feather="download-cloud"></i>
+                                </div>
+                                <h4>📥 PostgreSQL Export</h4>
+                                <p>PostgreSQL ma'lumotlarini JSON yoki SQL formatda yuklab olish.</p>
+                                <button id="export-postgres-json-btn" class="btn btn-export" style="margin-bottom: 10px;">
+                                    <i data-feather="file-text"></i>
+                                    <span>JSON Export</span>
+                                </button>
+                                <button id="export-postgres-sql-btn" class="btn btn-export">
+                                    <i data-feather="database"></i>
+                                    <span>SQL Dump</span>
+                                </button>
+                            </div>
+                            
+                            <!-- PostgreSQL Import -->
+                            <div class="export-import-card">
+                                <div class="card-icon import">
+                                    <i data-feather="upload-cloud"></i>
+                                </div>
+                                <h4>📤 PostgreSQL Import</h4>
+                                <p>JSON yoki SQL dump faylini PostgreSQL ga import qilish.</p>
+                                <input type="file" id="import-postgres-json-input" accept=".json" style="display: none;">
+                                <input type="file" id="import-postgres-sql-input" accept=".sql" style="display: none;">
+                                <button id="import-postgres-json-btn" class="btn btn-import" style="margin-bottom: 10px;">
+                                    <i data-feather="file-text"></i>
+                                    <span>JSON Import</span>
+                                </button>
+                                <button id="import-postgres-sql-btn" class="btn btn-import">
+                                    <i data-feather="database"></i>
+                                    <span>SQL Import</span>
+                                </button>
+                                <div id="selected-postgres-file-info" class="selected-file-info hidden" style="margin-top: 10px;">
+                                    <i data-feather="file-text"></i>
+                                    <span class="file-name"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- === 📦 SQLITE IMPORT (Eski bazalarni import qilish) === -->
+                <!-- SQLite import bo'limi olib tashlandi - endi faqat PostgreSQL bilan ishlaydi -->
+                <div class="card" id="sqlite-import-section" style="display: none !important;">
+                    <div class="db-export-header">
+                        <h3 class="db-export-title">
+                            <i data-feather="upload"></i>
+                            <span>📦 SQLite Database Import</span>
+                        </h3>
+                        <p class="db-export-description">
+                            Eski SQLite .db fayllarni PostgreSQL ga konvertatsiya qilish. Fayl import qilinganidan keyin avtomatik o'chiriladi.
+                        </p>
+                    </div>
+                    
+                    <div style="padding: 30px;">
+                        <div class="export-import-card" style="max-width: 500px; margin: 0 auto;">
+                            <div class="card-icon import">
+                                <i data-feather="upload-cloud"></i>
+                            </div>
+                            <h4>📤 SQLite Database Import</h4>
+                            <p>SQLite .db faylni yuklang. U avtomatik PostgreSQL ga konvertatsiya qilinadi.</p>
+                            <input type="file" id="import-sqlite-db-input" accept=".db" style="display: none;">
+                            <button id="import-sqlite-db-btn" class="btn btn-import">
+                                <i data-feather="upload"></i>
+                                <span class="btn-text">SQLite Faylni Tanlash</span>
+                            </button>
+                            <div id="selected-sqlite-file-info" class="selected-file-info hidden" style="margin-top: 10px;">
+                                <i data-feather="file-text"></i>
+                                <span class="file-name"></span>
+                            </div>
+                            <div class="info-box warning" style="margin-top: 15px;">
+                                <i data-feather="alert-triangle"></i>
+                                <div>
+                                    <strong>⚠️ Diqqat:</strong>
+                                    <p>Fayl import qilinganidan keyin avtomatik o'chiriladi. Ma'lumotlar PostgreSQL ga saqlanadi.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Tizim Boshqaruvi -->
                 <div class="card admin-control-card">
                     <div class="admin-control-header">
@@ -2222,7 +2379,7 @@
                                 </div>
                                 <div class="control-item-info">
                                     <h4>Ma'lumotlar Bazasi Backup</h4>
-                                    <p>Database'ning to'liq nusxasini yuklab olish (.db fayl)</p>
+                                    <p>Database'ning to'liq nusxasini yuklab olish (PostgreSQL: JSON, SQLite: .db fayl)</p>
                                 </div>
                             </div>
                             <button id="backup-db-btn" class="btn btn-control btn-secondary">
@@ -2894,6 +3051,27 @@
                     <p style="margin-top: 10px; color: var(--text-secondary); font-size: 13px;">Barcha o'zgarishlar tizimda saqlanadi va darhol qo'llaniladi</p>
                 </div>
             </section>
+
+            <!-- Qarzdorlik Tasdiqlash -->
+            <section id="debt-approval" class="page" data-permission="roles:manage,debt:create,debt:view_own,debt:view_statistics">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">📋 Qarzdorlik Tasdiqlash Tizimi</h1>
+                        <p class="page-description">
+                            So'rovlar va tasdiqlash jarayonlarini boshqarish
+                        </p>
+                    </div>
+                    <button id="debt-import-btn" class="btn btn-primary">
+                        <i data-feather="upload"></i>
+                        <span>Excel Import</span>
+                    </button>
+                </div>
+                
+                <div id="debt-approval-content" class="content">
+                    <!-- Content will be loaded by JavaScript -->
+                </div>
+            </section>
+
 
             <!-- Sozlamalar -->
             <section id="settings" class="page" data-permission="settings:view">
@@ -3702,6 +3880,8 @@
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Leaflet.js JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.webdatarocks.com/latest/webdatarocks.toolbar.min.js"></script>
     <script src="https://cdn.webdatarocks.com/latest/webdatarocks.js"></script>
     <script src="https://cdn.webdatarocks.com/loc/webdatarocks.locale.ru.js"></script>
@@ -3709,6 +3889,7 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/uz.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module" src="admin.js"></script>
 </body>
 </html>

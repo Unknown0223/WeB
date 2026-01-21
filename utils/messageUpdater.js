@@ -4,7 +4,7 @@
 const { getBot } = require('./bot.js');
 const { db } = require('../db.js');
 const { createLogger } = require('./logger.js');
-const { formatFinalGroupMessage, formatApprovalMessage } = require('./messageTemplates.js');
+const { formatFinalGroupMessage, formatApprovalMessage, formatRequestMessageWithApprovals, formatNormalRequestMessage, formatSetRequestMessage } = require('./messageTemplates.js');
 
 const log = createLogger('MSG_UPDATER');
 
@@ -69,24 +69,10 @@ async function updateFinalGroupMessage(request, approverInfo) {
             return;
         }
         
-        // Barcha tasdiqlashlarni olish
-        const approvals = await db('debt_request_approvals')
-            .join('users', 'debt_request_approvals.approver_id', 'users.id')
-            .where('debt_request_approvals.request_id', request.id)
-            .where('debt_request_approvals.status', 'approved')
-            .orderBy('debt_request_approvals.created_at', 'asc')
-            .select(
-                'users.username',
-                'users.fullname',
-                'debt_request_approvals.approval_type',
-                'debt_request_approvals.created_at'
-            );
-        
         // Excel ma'lumotlarini olish va parse qilish
         let excel_data = null;
         let excel_headers = null;
         let excel_columns = null;
-        let total_amount = null;
         
         if (request.excel_data) {
             // Agar string bo'lsa, parse qilish
@@ -119,27 +105,44 @@ async function updateFinalGroupMessage(request, approverInfo) {
             } else {
                 excel_columns = request.excel_columns || {};
             }
-            
-            total_amount = request.excel_total;
         }
         
         // Xabarni formatlash
         const { getPreviousMonthName } = require('./dateHelper.js');
         const month_name = getPreviousMonthName();
         
-        const message = formatFinalGroupMessage({
-            request_uid: request.request_uid,
-            brand_name: request.brand_name,
-            filial_name: request.filial_name,
-            svr_name: request.svr_name,
-            month_name: month_name,
-            extra_info: request.extra_info,
-            approvals: approvals,
-            total_amount: total_amount,
-            excel_data: excel_data,
-            excel_headers: excel_headers,
-            excel_columns: excel_columns
-        });
+        // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
+        let telegraphUrl = null;
+        if (excel_data && excel_data.length > 0) {
+            try {
+                const { createDebtDataPage } = require('./telegraph.js');
+                telegraphUrl = await createDebtDataPage({
+                    request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                    request_uid: request.request_uid,
+                    brand_name: request.brand_name,
+                    filial_name: request.filial_name,
+                    svr_name: request.svr_name,
+                    month_name: month_name,
+                    extra_info: request.extra_info,
+                    excel_data: excel_data,
+                    excel_headers: excel_headers,
+                    excel_columns: excel_columns,
+                    total_amount: request.excel_total
+                });
+            } catch (telegraphError) {
+                // Telegraph xatolari silent qilinadi (ixtiyoriy xizmat)
+                log.debug(`[MSG_UPDATER] Telegraph xatolik (ixtiyoriy xizmat): requestId=${request.id}`);
+            }
+        }
+        
+        // Request object'ga telegraphUrl va excel ma'lumotlarini qo'shish
+        request.telegraph_url = telegraphUrl;
+        request.excel_data = excel_data;
+        request.excel_headers = excel_headers;
+        request.excel_columns = excel_columns;
+        
+        // formatRequestMessageWithApprovals ishlatish - original xabar + barcha tasdiqlashlar (menejer uchun)
+        const message = await formatRequestMessageWithApprovals(request, db, 'manager');
         
         // Xabarni yangilash
         const bot = getBot();
@@ -185,33 +188,128 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
         
         log.debug(`[MSG_UPDATER] Updating preview message: requestId=${request.id}, chatId=${chatId}, messageId=${request.preview_message_id}, newStatus=${newStatus}`);
         
-        // Barcha tasdiqlashlarni olish
-        const approvals = await db('debt_request_approvals')
-            .join('users', 'debt_request_approvals.approver_id', 'users.id')
-            .where('debt_request_approvals.request_id', request.id)
-            .where('debt_request_approvals.status', 'approved')
-            .orderBy('debt_request_approvals.created_at', 'asc')
-            .select(
-                'users.username',
-                'users.fullname',
-                'debt_request_approvals.approval_type',
-                'debt_request_approvals.created_at'
-            );
+        // Original so'rov xabarini format qilish
+        let originalMessage = '';
         
-        // Status nomlarini formatlash
-        const statusNames = {
-            'PENDING_APPROVAL': 'Kassir kutmoqda',
-            'SET_PENDING': 'Rahbarlar kutmoqda',
-            'APPROVED_BY_LEADER': 'Rahbarlar tasdiqladi',
-            'APPROVED_BY_CASHIER': 'Kassir tasdiqladi',
-            'APPROVED_BY_OPERATOR': 'Operator tasdiqladi',
-            'CANCELLED': 'Bekor qilindi',
-            'DEBT_FOUND': 'Qarzdorlik topildi',
-            'DIFFERENCE_FOUND': 'Farq topildi'
-        };
-        
-        // So'rov turiga qarab tasdiqlash jarayonini ko'rsatish - har bir bosqich yonida status
-        let approvalFlow = '';
+        if (request.type === 'SET' && request.excel_data) {
+            // SET so'rov uchun formatSetRequestMessage
+            // Excel ma'lumotlarini parse qilish
+            let excelData = request.excel_data;
+            let excelHeaders = request.excel_headers;
+            let excelColumns = request.excel_columns;
+            
+            if (typeof excelData === 'string' && excelData) {
+                try {
+                    excelData = JSON.parse(excelData);
+                } catch (e) {
+                    excelData = null;
+                }
+            }
+            if (typeof excelHeaders === 'string' && excelHeaders) {
+                try {
+                    excelHeaders = JSON.parse(excelHeaders);
+                } catch (e) {
+                    excelHeaders = null;
+                }
+            }
+            if (typeof excelColumns === 'string' && excelColumns) {
+                try {
+                    excelColumns = JSON.parse(excelColumns);
+                } catch (e) {
+                    excelColumns = null;
+                }
+            }
+            
+            // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
+            // MUHIM: Preview message uchun ham Telegraph link ishlatilishi kerak
+            let telegraphUrl = null;
+            if (excelData && Array.isArray(excelData) && excelData.length > 0 && excelColumns) {
+                try {
+                    const { createDebtDataPage } = require('./telegraph.js');
+                    const { getPreviousMonthName } = require('./dateHelper.js');
+                    telegraphUrl = await createDebtDataPage({
+                        request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                        request_uid: request.request_uid,
+                        brand_name: request.brand_name,
+                        filial_name: request.filial_name,
+                        svr_name: request.svr_name,
+                        month_name: getPreviousMonthName(),
+                        extra_info: request.extra_info,
+                        excel_data: excelData,
+                        excel_headers: excelHeaders,
+                        excel_columns: excelColumns,
+                        total_amount: request.excel_total
+                    });
+                    
+                    if (!telegraphUrl) {
+                        log.warn(`[MSG_UPDATER] [UPDATE_PREVIEW] Telegraph sahifa yaratilmadi (null qaytdi): requestId=${request.id}`);
+                        // Qayta urinish
+                        try {
+                            telegraphUrl = await createDebtDataPage({
+                                request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                                request_uid: request.request_uid,
+                                brand_name: request.brand_name,
+                                filial_name: request.filial_name,
+                                svr_name: request.svr_name,
+                                month_name: getPreviousMonthName(),
+                                extra_info: request.extra_info,
+                                excel_data: excelData,
+                                excel_headers: excelHeaders,
+                                excel_columns: excelColumns,
+                                total_amount: request.excel_total
+                            });
+                        } catch (retryError) {
+                            log.error(`[MSG_UPDATER] [UPDATE_PREVIEW] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
+                        }
+                    }
+                } catch (telegraphError) {
+                    log.error(`[MSG_UPDATER] [UPDATE_PREVIEW] Telegraph sahifa yaratishda xatolik: requestId=${request.id}, error=${telegraphError.message}`);
+                    // Qayta urinish
+                    try {
+                        const { createDebtDataPage } = require('./telegraph.js');
+                        const { getPreviousMonthName } = require('./dateHelper.js');
+                        telegraphUrl = await createDebtDataPage({
+                            request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                            request_uid: request.request_uid,
+                            brand_name: request.brand_name,
+                            filial_name: request.filial_name,
+                            svr_name: request.svr_name,
+                            month_name: getPreviousMonthName(),
+                            extra_info: request.extra_info,
+                            excel_data: excelData,
+                            excel_headers: excelHeaders,
+                            excel_columns: excelColumns,
+                            total_amount: request.excel_total
+                        });
+                    } catch (retryError) {
+                        log.error(`[MSG_UPDATER] [UPDATE_PREVIEW] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
+                    }
+                }
+            }
+            
+            originalMessage = formatSetRequestMessage({
+                brand_name: request.brand_name,
+                filial_name: request.filial_name,
+                svr_name: request.svr_name,
+                extra_info: request.extra_info,
+                request_uid: request.request_uid,
+                excel_data: excelData,
+                excel_headers: excelHeaders,
+                excel_columns: excelColumns,
+                excel_total: request.excel_total,
+                is_for_cashier: false, // Preview message uchun
+                approvals: [],
+                telegraph_url: telegraphUrl
+            });
+        } else {
+            // NORMAL so'rov uchun formatNormalRequestMessage
+            originalMessage = formatNormalRequestMessage({
+                brand_name: request.brand_name,
+                filial_name: request.filial_name,
+                svr_name: request.svr_name,
+                request_uid: request.request_uid
+            });
+        }
         
         // Status belgilari
         const getStepStatus = (stepNumber, currentStatus, requestType) => {
@@ -219,16 +317,16 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                 if (stepNumber === 1) {
                     // Rahbarlar guruhi
                     if (currentStatus === 'SET_PENDING') return '<code>jarayonda</code>';
-                    if (currentStatus === 'APPROVED_BY_LEADER' || currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
+                    if (currentStatus === 'APPROVED_BY_LEADER' || currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_SUPERVISOR' || currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
                     return '<code>kutilyabdi</code>';
                 } else if (stepNumber === 2) {
                     // Kassir
                     if (currentStatus === 'APPROVED_BY_LEADER') return '<code>jarayonda</code>';
-                    if (currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
+                    if (currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_SUPERVISOR' || currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
                     return '<code>kutilyabdi</code>';
                 } else if (stepNumber === 3) {
                     // Operator
-                    if (currentStatus === 'APPROVED_BY_CASHIER') return '<code>jarayonda</code>';
+                    if (currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_SUPERVISOR') return '<code>jarayonda</code>';
                     if (currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
                     return '<code>kutilyabdi</code>';
                 } else if (stepNumber === 4) {
@@ -242,11 +340,11 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                 if (stepNumber === 1) {
                     // Kassir
                     if (currentStatus === 'PENDING_APPROVAL') return '<code>jarayonda</code>';
-                    if (currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
+                    if (currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_SUPERVISOR' || currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
                     return '<code>kutilyabdi</code>';
                 } else if (stepNumber === 2) {
                     // Operator
-                    if (currentStatus === 'APPROVED_BY_CASHIER') return '<code>jarayonda</code>';
+                    if (currentStatus === 'APPROVED_BY_CASHIER' || currentStatus === 'APPROVED_BY_SUPERVISOR') return '<code>jarayonda</code>';
                     if (currentStatus === 'APPROVED_BY_OPERATOR' || currentStatus === 'FINAL_APPROVED') return '✅ <code>tugallandi</code>';
                     return '<code>kutilyabdi</code>';
                 } else if (stepNumber === 3) {
@@ -259,38 +357,23 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
             return '<code>kutilyabdi</code>';
         };
         
+        // Tasdiqlash jarayoni
+        let approvalFlow = '';
         if (request.type === 'SET') {
-            approvalFlow = `\n\n📋 <b>Tasdiqlash jarayoni:</b>\n` +
+            approvalFlow = `\n\n━━━━━━━━━━━━━━━━━━━━\n\n📋 <b>Tasdiqlash jarayoni:</b>\n` +
                 `1️⃣ <b>Rahbarlar guruhi</b> - ${getStepStatus(1, newStatus, 'SET')}\n` +
                 `2️⃣ <b>Kassir</b> - ${getStepStatus(2, newStatus, 'SET')}\n` +
                 `3️⃣ <b>Operator</b> - ${getStepStatus(3, newStatus, 'SET')}\n` +
                 `4️⃣ <b>Final guruh</b> - ${getStepStatus(4, newStatus, 'SET')}`;
         } else {
-            approvalFlow = `\n\n📋 <b>Tasdiqlash jarayoni:</b>\n` +
+            approvalFlow = `\n\n━━━━━━━━━━━━━━━━━━━━\n\n📋 <b>Tasdiqlash jarayoni:</b>\n` +
                 `1️⃣ <b>Kassir</b> - ${getStepStatus(1, newStatus, 'NORMAL')}\n` +
                 `2️⃣ <b>Operator</b> - ${getStepStatus(2, newStatus, 'NORMAL')}\n` +
                 `3️⃣ <b>Final guruh</b> - ${getStepStatus(3, newStatus, 'NORMAL')}`;
         }
         
-        // Tasdiqlashlar ro'yxati
-        let approvalsText = '';
-        if (approvals.length > 0) {
-            approvalsText = `\n\n✅ <b>Tasdiqlanganlar:</b>\n`;
-            approvals.forEach((approval, index) => {
-                const approverName = approval.fullname || approval.username || 'Noma\'lum';
-                const approvalType = approval.approval_type === 'leader' ? 'Rahbar' :
-                                   approval.approval_type === 'cashier' ? 'Kassir' :
-                                   approval.approval_type === 'operator' ? 'Operator' : approval.approval_type;
-                approvalsText += `${index + 1}. ${approvalType}: ${approverName}\n`;
-            });
-        }
-        
-        // Xabarni formatlash
-        const message = `✅ <b>So'rov muvaffaqiyatli yaratildi!</b>\n\n` +
-            `📋 <b>ID:</b> ${request.request_uid}\n` +
-            `📋 <b>Turi:</b> ${request.type === 'SET' ? 'SET (Muddat uzaytirish)' : 'ODDIY'}\n` +
-            approvalFlow +
-            approvalsText;
+        // Xabarni formatlash - original xabar + tasdiqlash jarayoni
+        const message = originalMessage + approvalFlow;
         
         // Xabarni yangilash
         try {
@@ -299,6 +382,25 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                 message_id: request.preview_message_id,
                 parse_mode: 'HTML'
             });
+            
+            // Status xabarni belgilash va tozalash
+            const { markAsStatusMessage } = require('../bot/debt-approval/utils/messageTracker.js');
+            const { cleanupAfterStatusMessage } = require('../bot/debt-approval/utils/messageCleanup.js');
+            markAsStatusMessage(chatId, request.preview_message_id);
+            
+            // Status xabari yangilanganidan keyin tozalash
+            try {
+                await new Promise(resolve => setTimeout(resolve, 300)); // Kichik kutish
+                const cleanupResult = await cleanupAfterStatusMessage(
+                    bot,
+                    chatId,
+                    request.preview_message_id,
+                    { maxMessages: 50, delayBetween: 100, silent: true }
+                );
+                log.debug(`[MSG_UPDATER] Cleanup completed: deleted=${cleanupResult.deleted}, errors=${cleanupResult.errors}`);
+            } catch (cleanupError) {
+                log.debug(`[MSG_UPDATER] Cleanup error (ignored): ${cleanupError.message}`);
+            }
             
             log.info(`[MSG_UPDATER] ✅ Preview message updated: requestId=${request.id}, status=${newStatus}, chatId=${chatId}, messageId=${request.preview_message_id}`);
         } catch (error) {

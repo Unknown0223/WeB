@@ -29,11 +29,17 @@ async function createTelegraphPage(data) {
         // Telegraph API endpoint
         const apiUrl = 'https://api.telegra.ph/createPage';
         
-        // Request data - faqat mavjud field'larni qo'shamiz
+        // Request data
         const requestData = {
             title: title,
             content: content // Node array formatida
         };
+        
+        // Access token qo'shish (agar mavjud bo'lsa)
+        const accessToken = process.env.TELEGRAPH_ACCESS_TOKEN;
+        if (accessToken) {
+            requestData.access_token = accessToken;
+        }
         
         // author_name faqat mavjud bo'lsa qo'shamiz
         if (author_name && author_name.trim() !== '') {
@@ -45,13 +51,13 @@ async function createTelegraphPage(data) {
             requestData.author_url = author_url;
         }
         
-        log.info(`[TELEGRAPH] Request data: title="${title}", author_name="${requestData.author_name || 'none'}", contentType=${Array.isArray(content) ? 'array' : typeof content}, contentLength=${Array.isArray(content) ? content.length : 'N/A'}`);
+        log.info(`[TELEGRAPH] Request data: title="${title}", author_name="${requestData.author_name || 'none'}", hasToken=${!!accessToken}, contentType=${Array.isArray(content) ? 'array' : typeof content}, contentLength=${Array.isArray(content) ? content.length : 'N/A'}`);
         
         const response = await axios.post(apiUrl, requestData, {
             headers: {
                 'Content-Type': 'application/json'
             },
-            timeout: 10000 // 10 soniya timeout
+            timeout: 30000 // 30 soniya timeout (Telegraph API ba'zan sekin javob beradi)
         });
         
         if (response.data && response.data.ok && response.data.result) {
@@ -59,14 +65,34 @@ async function createTelegraphPage(data) {
             log.info(`[TELEGRAPH] ✅ Sahifa yaratildi: URL=${pageUrl}`);
             return pageUrl;
         } else {
-            log.error(`[TELEGRAPH] ❌ Sahifa yaratishda xatolik:`, response.data);
+            // Telegraph API xatoliklarini silent qilish (ixtiyoriy xizmat)
+            const errorMsg = response.data?.error || 'Noma\'lum xatolik';
+            if (errorMsg === 'ACCESS_TOKEN_INVALID' || errorMsg.includes('ACCESS_TOKEN')) {
+                // ACCESS_TOKEN xatolari - Telegraph API muammosi, debug level'da log qilamiz
+                log.debug(`[TELEGRAPH] Telegraph API access token muammosi (ixtiyoriy xizmat, workflow davom etadi)`);
+            } else {
+                // Boshqa xatolar - debug level'da log qilamiz
+                log.debug(`[TELEGRAPH] Telegraph API xatolik (ixtiyoriy): ${errorMsg}`);
+            }
             return null;
         }
     } catch (error) {
-        if (error.response && error.response.data) {
-            log.error(`[TELEGRAPH] ❌ API xatolik:`, error.response.data);
+        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+            // Timeout - debug level'da log qilamiz (ixtiyoriy xizmat)
+            log.debug(`[TELEGRAPH] Telegraph API timeout (ixtiyoriy xizmat, workflow davom etadi)`);
+        } else if (error.response && error.response.data) {
+            const errorData = error.response.data;
+            const errorMsg = errorData.error || 'Noma\'lum xatolik';
+            if (errorMsg === 'ACCESS_TOKEN_INVALID' || errorMsg.includes('ACCESS_TOKEN')) {
+                // ACCESS_TOKEN xatolari - debug level'da log qilamiz
+                log.debug(`[TELEGRAPH] Telegraph API access token muammosi (ixtiyoriy xizmat, workflow davom etadi)`);
+            } else {
+                // Boshqa xatolar - debug level'da log qilamiz
+                log.debug(`[TELEGRAPH] Telegraph API xatolik (ixtiyoriy): ${errorMsg}`);
+            }
         } else {
-            log.error(`[TELEGRAPH] ❌ Sahifa yaratishda xatolik:`, error.message);
+            // Network yoki boshqa xatolar - debug level'da log qilamiz
+            log.debug(`[TELEGRAPH] Telegraph API xatolik (ixtiyoriy): ${error.message}`);
         }
         return null;
     }
@@ -202,7 +228,8 @@ function formatDebtDataToTelegraphNodes(data) {
         excel_data,
         excel_headers,
         excel_columns,
-        total_amount
+        total_amount,
+        isForCashier = false // ✅ Qo'shilgan: Kassir uchun maxsus format
     } = data;
     
     const nodes = [];
@@ -240,28 +267,122 @@ function formatDebtDataToTelegraphNodes(data) {
     
     // Excel ma'lumotlari
     if (excel_data && excel_data.length > 0 && excel_columns) {
-        nodes.push({ tag: 'h4', children: ['📋 Muddat uzaytirilishi kerak bo\'lgan klientlar'] });
-        nodes.push({ tag: 'br' });
-        
-        // Header'lar
-        const idHeader = excel_headers && excel_headers[excel_columns.id] ? excel_headers[excel_columns.id] : 'ID клиента';
-        const nameHeader = excel_headers && excel_headers[excel_columns.name] ? excel_headers[excel_columns.name] : 'Клиент';
-        const summaHeader = excel_headers && excel_headers[excel_columns.summa] ? excel_headers[excel_columns.summa] : 'Общий';
-        
-        // Jadval boshlang'ichi (telegraph'da jadval oddiy formatda ko'rsatiladi)
-        excel_data.forEach((row, index) => {
-            const idValue = row[idHeader] !== undefined ? String(row[idHeader]) : '';
-            const nameValue = row[nameHeader] !== undefined ? String(row[nameHeader]) : '';
-            const summaValue = row[summaHeader] !== undefined ? parseFloat(String(row[summaHeader]).replace(/\s/g, '').replace(/,/g, '.')) : 0;
+        // ✅ MUHIM: Agar kassir uchun bo'lsa, "Агент" ustuni bo'yicha guruhlash
+        if (isForCashier && excel_columns.agent !== undefined && excel_columns.agent !== null) {
+            // Kassir uchun: Agent bo'yicha guruhlash
+            nodes.push({ tag: 'h4', children: ['📋 Agentlar bo\'yicha qarzdorlik ma\'lumotlari'] });
+            nodes.push({ tag: 'br' });
             
-            nodes.push({ tag: 'p', children: [`${index + 1}. ${idValue} - ${nameValue}: ${summaValue.toLocaleString('ru-RU')}`] });
-        });
-        
-        nodes.push({ tag: 'br' });
-        
-        // Jami summa
-        if (total_amount !== null && total_amount !== undefined) {
-            nodes.push({ tag: 'p', children: [`Jami summa: ${Math.abs(total_amount).toLocaleString('ru-RU')}`] });
+            // Agent ustunini aniqlash (faqat "Агент" ustuni)
+            const agentHeader = excel_headers && excel_headers[excel_columns.agent] 
+                ? excel_headers[excel_columns.agent] 
+                : 'Агент';
+            const summaHeader = excel_headers && excel_headers[excel_columns.summa] 
+                ? excel_headers[excel_columns.summa] 
+                : 'Общий';
+            
+            // Agent bo'yicha guruhlash
+            const agentMap = new Map(); // { agentName: { agentName, totalSumma, count } }
+            
+            excel_data.forEach(row => {
+                // Agent nomini olish (faqat "Агент" ustuni)
+                const agentName = row[agentHeader] !== undefined && row[agentHeader] !== null
+                    ? String(row[agentHeader]).trim() 
+                    : 'Noma\'lum';
+                
+                // Summani olish
+                const summaValue = row[summaHeader] !== undefined 
+                    ? parseFloat(String(row[summaHeader]).replace(/\s/g, '').replace(/,/g, '.')) 
+                    : 0;
+                
+                // Agent key yaratish (faqat nom)
+                const agentKey = agentName;
+                
+                if (!agentMap.has(agentKey)) {
+                    agentMap.set(agentKey, {
+                        agentName: agentName,
+                        totalSumma: 0,
+                        count: 0
+                    });
+                }
+                
+                const agentData = agentMap.get(agentKey);
+                agentData.totalSumma += (isNaN(summaValue) ? 0 : summaValue);
+                agentData.count += 1;
+            });
+            
+            // Agentlar ro'yxatini ko'rsatish
+            let currentIndex = 0;
+            let grandTotal = 0;
+            
+            // Agentlar ro'yxatini tartibga solish (nom bo'yicha)
+            const sortedAgents = Array.from(agentMap.entries()).sort((a, b) => {
+                return a[1].agentName.localeCompare(b[1].agentName);
+            });
+            
+            sortedAgents.forEach(([agentKey, agentData]) => {
+                currentIndex++;
+                grandTotal += agentData.totalSumma;
+                
+                // Format: "1. Агент nomi: Umumiy summa" (faqat agent nomi)
+                // ✅ Summani ajratib ko'rsatish (bold va separator)
+                nodes.push({ 
+                    tag: 'p', 
+                    children: [
+                        `${currentIndex}. ${agentData.agentName}: `,
+                        { tag: 'b', children: [`${Math.abs(agentData.totalSumma).toLocaleString('ru-RU')}`] }
+                    ] 
+                });
+            });
+            
+            nodes.push({ tag: 'br' });
+            nodes.push({ tag: 'hr' });
+            
+            // ✅ Jami summa (bold formatda)
+            nodes.push({ 
+                tag: 'p', 
+                children: [
+                    '📊 ',
+                    { tag: 'b', children: ['Jami summa:'] },
+                    ' ',
+                    { tag: 'b', children: [`${Math.abs(grandTotal).toLocaleString('ru-RU')}`] }
+                ] 
+            });
+        } else {
+            // Boshqa rollar uchun: Eski format (ID, nom, summa)
+            nodes.push({ tag: 'h4', children: ['📋 Muddat uzaytirilishi kerak bo\'lgan klientlar'] });
+            nodes.push({ tag: 'br' });
+            
+            // Header'lar
+            const idHeader = excel_headers && excel_headers[excel_columns.id] ? excel_headers[excel_columns.id] : 'ID клиента';
+            const nameHeader = excel_headers && excel_headers[excel_columns.name] ? excel_headers[excel_columns.name] : 'Клиент';
+            const summaHeader = excel_headers && excel_headers[excel_columns.summa] ? excel_headers[excel_columns.summa] : 'Общий';
+            
+            // Jadval boshlang'ichi (telegraph'da jadval oddiy formatda ko'rsatiladi)
+            // Telegraph API 64KB gacha ma'lumotni qabul qiladi, shuning uchun ma'lumotlarni cheklaymiz (maksimal 1000 qator)
+            const MAX_ROWS = 1000;
+            const limitedData = excel_data.slice(0, MAX_ROWS);
+            
+            limitedData.forEach((row, index) => {
+                const idValue = row[idHeader] !== undefined ? String(row[idHeader]) : '';
+                const nameValue = row[nameHeader] !== undefined ? String(row[nameHeader]) : '';
+                const summaValue = row[summaHeader] !== undefined ? parseFloat(String(row[summaHeader]).replace(/\s/g, '').replace(/,/g, '.')) : 0;
+                
+                nodes.push({ tag: 'p', children: [`${index + 1}. ${idValue} - ${nameValue}: ${summaValue.toLocaleString('ru-RU')}`] });
+            });
+            
+            // Agar ma'lumotlar cheklangan bo'lsa, xabar qo'shish
+            if (excel_data.length > MAX_ROWS) {
+                nodes.push({ tag: 'br' });
+                nodes.push({ tag: 'p', children: [`... va yana ${excel_data.length - MAX_ROWS} ta klient`] });
+            }
+            
+            nodes.push({ tag: 'br' });
+            
+            // Jami summa
+            if (total_amount !== null && total_amount !== undefined) {
+                nodes.push({ tag: 'p', children: [`Jami summa: ${Math.abs(total_amount).toLocaleString('ru-RU')}`] });
+            }
         }
     } else if (total_amount !== null && total_amount !== undefined) {
         nodes.push({ tag: 'p', children: [`Jami summa: ${Math.abs(total_amount).toLocaleString('ru-RU')}`] });
@@ -271,14 +392,230 @@ function formatDebtDataToTelegraphNodes(data) {
 }
 
 /**
+ * Farqlarni Telegraph Node array formatiga o'tkazish
+ * @param {Object} data - Farqlar ma'lumotlari
+ * @param {Array} data.differences - Farqlar ro'yxati
+ * @param {string} data.request_uid - So'rov UID
+ * @param {string} data.brand_name - Brend nomi
+ * @param {string} data.filial_name - Filial nomi
+ * @param {string} data.svr_name - SVR nomi
+ * @param {string} data.month_name - Oy nomi
+ * @returns {Array} - Telegraph Node array
+ */
+function formatDifferencesToTelegraphNodes(data) {
+    const {
+        differences,
+        request_uid,
+        brand_name,
+        filial_name,
+        svr_name,
+        month_name,
+        input_type // 'agent', 'total' yoki 'client'
+    } = data;
+    
+    const nodes = [];
+    
+    // Agar umumiy summa bo'lsa, SVR bo'yicha farqni ko'rsatish
+    if (input_type === 'total' && differences && differences.length > 0) {
+        const totalDiff = differences.find(diff => diff.type === 'total');
+        if (totalDiff) {
+            const originalSumma = Math.abs(totalDiff.original_summa || 0);
+            const newSumma = Math.abs(totalDiff.new_summa || 0);
+            const difference = totalDiff.difference || 0;
+            
+            // Formatlash: faqat bo'shliqlar bilan (vergul bo'lmasligi uchun)
+            const formattedOriginal = originalSumma.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            const formattedNew = newSumma.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            const formattedDiff = Math.abs(difference).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            
+            nodes.push({ tag: 'p', children: [`<b>${svr_name || 'SVR'}</b> || ${formattedOriginal} || ${formattedNew} || Farq: ${difference > 0 ? '+' : '-'}${formattedDiff}`] });
+            
+            return nodes;
+        }
+    }
+    
+    // Agent bo'yicha farqlar (yoki oddiy farqlar)
+    if (differences && differences.length > 0) {
+        // Agent bo'yicha: faqat agent nomi bo'lgan farqlarni ko'rsatish
+        // Client bo'yicha: faqat klient ID va nomi bo'lgan farqlarni ko'rsatish
+        let filteredDiffs = differences;
+        if (input_type === 'agent') {
+            // Faqat agent nomi bo'lgan farqlarni ko'rsatish
+            filteredDiffs = differences.filter(diff => diff.agent_name || diff.agent);
+        } else if (input_type === 'client') {
+            // Faqat klient ID va nomi bo'lgan farqlarni ko'rsatish
+            filteredDiffs = differences.filter(diff => diff.id || diff.name);
+        }
+        
+        if (filteredDiffs.length === 0) {
+            nodes.push({ tag: 'p', children: ['Farqlar topilmadi.'] });
+            return nodes;
+        }
+        
+        // Sarlavha: input_type bo'yicha
+        let sectionTitle = '📋 Farq qilgan klientlar';
+        if (input_type === 'agent') {
+            sectionTitle = '📋 Farq qilgan agentlar';
+        } else if (input_type === 'client') {
+            sectionTitle = '📋 Farq qilgan klientlar';
+        }
+        nodes.push({ tag: 'h4', children: [sectionTitle] });
+        nodes.push({ tag: 'br' });
+        
+        // Farqlarni turiga qarab guruhlash va filtrlash
+        // ✅ MUHIM: Faqat kattaroq yoki yangi bo'lganlar ko'rsatiladi
+        const changedDiffs = filteredDiffs.filter(diff => {
+            if (diff.type === 'changed') {
+                const originalSumma = Math.abs(diff.original_summa || 0);
+                const newSumma = Math.abs(diff.new_summa || 0);
+                return newSumma > originalSumma;
+            }
+            return false;
+        });
+        
+        // Yangilar: hammasi ko'rsatiladi
+        const newDiffs = filteredDiffs.filter(diff => diff.type === 'new');
+        
+        // Telegraph API 64KB gacha ma'lumotni qabul qiladi, shuning uchun ma'lumotlarni cheklaymiz (maksimal 1000 qator)
+        const MAX_ROWS = 1000;
+        let currentIndex = 0;
+        
+        // 1. Avval o'zgarganlar (changed) - faqat kattaroq bo'lganlar
+        const limitedChanged = changedDiffs.slice(0, MAX_ROWS);
+        limitedChanged.forEach((diff) => {
+            currentIndex++;
+            const originalSumma = Math.abs(diff.original_summa || 0);
+            const newSumma = Math.abs(diff.new_summa || 0);
+            const difference = diff.difference || 0;
+            
+            // Agent bo'yicha: Agent nomi || Menejer summa || Kassir summa || Farq
+            if (input_type === 'agent') {
+                const agentName = diff.agent_name || diff.agent || 'Noma\'lum agent';
+                // Formatlash: faqat bo'shliqlar bilan (vergul bo'lmasligi uchun)
+                const formattedOriginal = originalSumma.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                const formattedNew = newSumma.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                const formattedDiff = Math.abs(difference).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                nodes.push({ 
+                    tag: 'p', 
+                    children: [`${currentIndex}. <b>${agentName}</b> || ${formattedOriginal} || ${formattedNew} || Farq: ${difference > 0 ? '+' : '-'}${formattedDiff}`] 
+                });
+            } else {
+                // Client yoki oddiy: ID - Nomi || Menejer summa || Operator/Kassir summa || Farq
+                // Formatlash: faqat bo'shliqlar bilan (vergul bo'lmasligi uchun)
+                const formattedOriginal = originalSumma.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                const formattedNew = newSumma.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                const formattedDiff = Math.abs(difference).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                nodes.push({ 
+                    tag: 'p', 
+                    children: [`${currentIndex}. ${diff.id || 'N/A'} - ${diff.name || 'N/A'} || ${formattedOriginal} || ${formattedNew} || Farq: ${difference > 0 ? '+' : '-'}${formattedDiff}`] 
+                });
+            }
+        });
+        
+        // 2. Keyin yangilar (new)
+        const remainingRows = MAX_ROWS - limitedChanged.length;
+        const limitedNew = newDiffs.slice(0, remainingRows);
+        limitedNew.forEach((diff) => {
+            currentIndex++;
+            const summa = Math.abs(diff.summa || 0);
+            
+            // Agent bo'yicha: Agent nomi || Summa
+            if (input_type === 'agent') {
+                const agentName = diff.agent_name || diff.agent || 'Noma\'lum agent';
+                // Formatlash: faqat bo'shliqlar bilan (vergul bo'lmasligi uchun)
+                const formattedSumma = summa.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                nodes.push({ 
+                    tag: 'p', 
+                    children: [`${currentIndex}. ➕ <b>${agentName}</b> || ${formattedSumma}`] 
+                });
+            } else {
+                // Client yoki oddiy: ID - Nomi || Summa
+                // Formatlash: faqat bo'shliqlar bilan (vergul bo'lmasligi uchun)
+                const formattedSumma = summa.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                nodes.push({ 
+                    tag: 'p', 
+                    children: [`${currentIndex}. ➕ ${diff.id || 'N/A'} - ${diff.name || 'N/A'} || ${formattedSumma}`] 
+                });
+            }
+        });
+        
+        // Agar ma'lumotlar cheklangan bo'lsa, xabar qo'shish
+        const totalShown = limitedChanged.length + limitedNew.length;
+        const totalFiltered = changedDiffs.length + newDiffs.length;
+        if (totalFiltered > totalShown) {
+            nodes.push({ tag: 'br' });
+            nodes.push({ tag: 'p', children: [`... va yana ${totalFiltered - totalShown} ta farq`] });
+        }
+    } else {
+        nodes.push({ tag: 'p', children: ['Farqlar topilmadi.'] });
+    }
+    
+    return nodes;
+}
+
+/**
+ * Farqlar uchun Telegraph sahifa yaratish
+ * @param {Object} data - Farqlar ma'lumotlari
+ * @returns {Promise<string|null>} - Telegraph sahifa URL'i yoki null
+ */
+async function createDifferencesPage(data) {
+    try {
+        const title = `Farqlar - ${data.request_uid || 'N/A'}`;
+        log.info(`[TELEGRAPH] Farqlar sahifasini yaratish boshlanmoqda: requestUID=${data.request_uid}, differencesCount=${data.differences?.length || 0}`);
+        
+        // Telegraph Node array formatiga o'tkazish
+        const telegraphContent = formatDifferencesToTelegraphNodes(data);
+        log.info(`[TELEGRAPH] Telegraph Node array formatiga o'tkazildi: nodesCount=${telegraphContent.length}`);
+        
+        const pageUrl = await createTelegraphPage({
+            title: title,
+            content: telegraphContent,
+            author_name: 'Debt Approval System'
+        });
+        
+        if (pageUrl) {
+            log.info(`[TELEGRAPH] ✅ Farqlar sahifasi muvaffaqiyatli yaratildi: requestUID=${data.request_uid}, URL=${pageUrl}`);
+        }
+        
+        return pageUrl;
+    } catch (error) {
+        log.error(`[TELEGRAPH] Farqlar sahifasini yaratishda xatolik: ${error.message}`);
+        return null;
+    }
+}
+
+/**
  * Qarzdorlik ma'lumotlarini Telegraph sahifasiga yuborish
  * @param {Object} data - Qarzdorlik ma'lumotlari
+ * @param {number} data.request_id - So'rov ID (ixtiyoriy, mavjud URL'ni tekshirish uchun)
+ * @param {string} data.request_uid - So'rov UID
  * @returns {Promise<string|null>} - Telegraph sahifa URL'i yoki null
  */
 async function createDebtDataPage(data) {
     try {
-        const title = `Muddat uzaytirilishi kerak bo'lgan klientlar - ${data.request_uid || 'N/A'}`;
-        log.info(`[TELEGRAPH] Qarzdorlik sahifasini yaratish boshlanmoqda: requestUID=${data.request_uid}, excelDataLength=${data.excel_data?.length || 0}`);
+        const { request_id, request_uid } = data;
+        
+        // ✅ MUHIM: Agar request_id mavjud bo'lsa, database'dan mavjud URL'ni tekshirish
+        if (request_id) {
+            try {
+                const db = require('./db.js').db;
+                const existingRequest = await db('debt_requests')
+                    .select('telegraph_url')
+                    .where('id', request_id)
+                    .first();
+                
+                if (existingRequest && existingRequest.telegraph_url) {
+                    log.info(`[TELEGRAPH] ✅ Mavjud Telegraph URL qayta ishlatilmoqda: requestId=${request_id}, URL=${existingRequest.telegraph_url}`);
+                    return existingRequest.telegraph_url;
+                }
+            } catch (dbError) {
+                // Database xatoliklarini silent qilamiz va yangi sahifa yaratamiz
+                log.debug(`[TELEGRAPH] Database'dan URL olishda xatolik (yangi sahifa yaratiladi): ${dbError.message}`);
+            }
+        }
+        
+        const title = `Muddat uzaytirilishi kerak bo'lgan klientlar - ${request_uid || 'N/A'}`;
+        log.info(`[TELEGRAPH] Qarzdorlik sahifasini yaratish boshlanmoqda: requestUID=${request_uid}, excelDataLength=${data.excel_data?.length || 0}`);
         
         // Telegraph Node array formatiga o'tkazish
         const telegraphContent = formatDebtDataToTelegraphNodes(data);
@@ -291,14 +628,28 @@ async function createDebtDataPage(data) {
         });
         
         if (pageUrl) {
-            log.info(`[TELEGRAPH] ✅ Qarzdorlik sahifasi muvaffaqiyatli yaratildi: requestUID=${data.request_uid}, URL=${pageUrl}`);
-        } else {
-            log.warn(`[TELEGRAPH] ⚠️ Qarzdorlik sahifasi yaratilmadi (URL null): requestUID=${data.request_uid}`);
+            log.info(`[TELEGRAPH] ✅ Qarzdorlik sahifasi muvaffaqiyatli yaratildi: requestUID=${request_uid}, URL=${pageUrl}`);
+            
+            // ✅ MUHIM: Yangi yaratilgan URL'ni database'ga saqlash (agar request_id mavjud bo'lsa)
+            if (request_id) {
+                try {
+                    const db = require('./db.js').db;
+                    await db('debt_requests')
+                        .where('id', request_id)
+                        .update({ telegraph_url: pageUrl });
+                    log.debug(`[TELEGRAPH] ✅ Telegraph URL database'ga saqlandi: requestId=${request_id}`);
+                } catch (dbError) {
+                    // Database xatoliklarini silent qilamiz (ixtiyoriy)
+                    log.debug(`[TELEGRAPH] Database'ga URL saqlashda xatolik (ignored): ${dbError.message}`);
+                }
+            }
         }
+        // Agar sahifa yaratilmagan bo'lsa, log qilmaymiz (ixtiyoriy xizmat)
         
         return pageUrl;
     } catch (error) {
-        log.error(`[TELEGRAPH] Qarzdorlik sahifasini yaratishda xatolik: requestUID=${data.request_uid}`, error);
+        // Xatoliklarni silent qilamiz (ixtiyoriy xizmat)
+        log.debug(`[TELEGRAPH] Qarzdorlik sahifasini yaratishda xatolik (ixtiyoriy xizmat): requestUID=${data.request_uid}`);
         return null;
     }
 }
@@ -363,7 +714,9 @@ function htmlToTelegraphNodes(html) {
 module.exports = {
     createTelegraphPage,
     createDebtDataPage,
+    createDifferencesPage,
     formatDebtDataToHTML,
-    formatDebtDataToTelegraphNodes
+    formatDebtDataToTelegraphNodes,
+    formatDifferencesToTelegraphNodes
 };
 

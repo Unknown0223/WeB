@@ -568,112 +568,164 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             }
         }
 
-        // Agar farqlar bo'lsa, barcha operatorlarga notification yaratish
+        // Agar farqlar bo'lsa, har bir filialga biriktirilgan kassirlarga notification yaratish
         if (differences.length > 0) {
             log.debug(`🔔 [COMPARISON] Farqlar topildi: ${differences.length} ta filial, Brand: ${brandName}, Date: ${date}`);
             
             try {
-                // Operatorlarni qidirish (telegram_chat_id bilan)
-                let operators = await db('users')
-                    .where('role', 'operator')
-                    .where('status', 'active')
-                    .whereNotNull('telegram_chat_id')
-                    .select('id', 'username', 'role', 'telegram_chat_id', 'fullname');
+                // Har bir farq uchun tegishli filialga biriktirilgan kassirlarni topish
+                const cashierNotifications = []; // Web notification uchun
+                const telegramPromises = []; // Telegram xabarlar uchun
+                const allNotifiedCashierIds = new Set(); // Barcha xabar yuborilgan kassirlar ID'lari
                 
-                // Agar 'operator' bilan topilmasa, 'kassir' yoki boshqa variantlarni tekshirish
-                if (operators.length === 0) {
-                    const kassirUsers = await db('users')
-                        .where('role', 'kassir')
-                        .where('status', 'active')
-                        .whereNotNull('telegram_chat_id')
-                        .select('id', 'username', 'role', 'telegram_chat_id', 'fullname');
+                for (const diff of differences) {
+                    const locationName = diff.location;
                     
-                    if (kassirUsers.length === 0) {
-                        const allActiveUsers = await db('users')
-                            .where('status', 'active')
-                            .whereNotNull('telegram_chat_id')
-                            .select('id', 'username', 'role', 'telegram_chat_id', 'fullname');
-                        operators = allActiveUsers.map(u => ({ 
-                            id: u.id, 
-                            username: u.username, 
-                            role: u.role,
-                            telegram_chat_id: u.telegram_chat_id,
-                            fullname: u.fullname
-                        }));
-                    } else {
-                        operators = kassirUsers;
+                    // Location nomiga mos keladigan filiallarni topish
+                    const branches = await db('debt_branches')
+                        .where('name', locationName)
+                        .select('id', 'name');
+                    
+                    if (branches.length === 0) {
+                        log.warn(`⚠️ [COMPARISON] Filial topilmadi: location=${locationName}`);
+                        continue;
                     }
-                }
+                    
+                    const branchIds = branches.map(b => b.id);
+                    
+                    // Bu filiallarga biriktirilgan kassirlarni topish
+                    // 1. debt_cashiers jadvalidan
+                    const cashiersFromTable = await db('debt_cashiers')
+                        .join('users', 'debt_cashiers.user_id', 'users.id')
+                        .whereIn('debt_cashiers.branch_id', branchIds)
+                        .where('debt_cashiers.is_active', true)
+                        .where('users.status', 'active')
+                        .whereNotNull('users.telegram_chat_id')
+                        .select('users.id', 'users.username', 'users.telegram_chat_id', 'users.fullname', 'users.role')
+                        .distinct();
                 
-                if (operators.length === 0) {
-                    log.warn(`⚠️ [COMPARISON] Hech qanday aktiv operator topilmadi, notification yuborilmaydi`);
-                } else {
-                    // Har bir operator uchun notification yaratish
-                    const notificationData = operators.map(operator => ({
-                        user_id: operator.id,
+                    // 2. debt_user_branches jadvalidan
+                    const cashiersFromBindings = await db('debt_user_branches')
+                        .join('users', 'debt_user_branches.user_id', 'users.id')
+                        .whereIn('debt_user_branches.branch_id', branchIds)
+                        .whereIn('users.role', ['kassir', 'cashier'])
+                        .where('users.status', 'active')
+                        .whereNotNull('users.telegram_chat_id')
+                        .select('users.id', 'users.username', 'users.telegram_chat_id', 'users.fullname', 'users.role')
+                        .distinct();
+                    
+                    // 3. debt_user_tasks jadvalidan (agar branch_id null bo'lsa, barcha filiallar)
+                    const cashiersFromTasks = await db('debt_user_tasks')
+                        .join('users', 'debt_user_tasks.user_id', 'users.id')
+                        .where(function() {
+                            this.where(function() {
+                                this.whereIn('debt_user_tasks.branch_id', branchIds)
+                                    .orWhereNull('debt_user_tasks.branch_id');
+                            })
+                            .where(function() {
+                                this.where('debt_user_tasks.task_type', 'approve_cashier')
+                                    .orWhere('debt_user_tasks.task_type', 'debt:approve_cashier');
+                            });
+                        })
+                        .where('users.status', 'active')
+                        .whereNotNull('users.telegram_chat_id')
+                        .select('users.id', 'users.username', 'users.telegram_chat_id', 'users.fullname', 'users.role')
+                        .distinct();
+                    
+                    // Barcha kassirlarni birlashtirish (dublikatlarni olib tashlash)
+                    const allCashiersMap = new Map();
+                    
+                    [...cashiersFromTable, ...cashiersFromBindings, ...cashiersFromTasks].forEach(cashier => {
+                        if (!allCashiersMap.has(cashier.id)) {
+                            allCashiersMap.set(cashier.id, cashier);
+                        }
+                    });
+                    
+                    const cashiers = Array.from(allCashiersMap.values());
+                    
+                    if (cashiers.length === 0) {
+                        log.warn(`⚠️ [COMPARISON] Filial "${locationName}" ga biriktirilgan kassir topilmadi`);
+                        continue;
+                    }
+                    
+                    log.debug(`✅ [COMPARISON] Filial "${locationName}" ga biriktirilgan kassirlar: ${cashiers.length} ta`);
+                    
+                    // Har bir kassir uchun faqat o'z filialidagi farq haqida xabar yuborish
+                    for (const cashier of cashiers) {
+                        // Web notification yaratish
+                        if (!allNotifiedCashierIds.has(cashier.id)) {
+                            cashierNotifications.push({
+                                user_id: cashier.id,
                         type: 'comparison_difference',
                         title: `Solishtirishda farqlar aniqlandi`,
-                        message: `${brandName} brendi uchun ${date} sanasida ${differences.length} ta filialda farqlar topildi.`,
+                                message: `${brandName} brendi uchun ${date} sanasida "${locationName}" filialida farq topildi.`,
                         details: JSON.stringify({
                             date,
                             brand_id: brandId,
                             brand_name: brandName,
-                            differences: differences,
-                            total_differences: differences.length
+                                    location: locationName,
+                                    differences: [diff], // Faqat bu filialdagi farq
+                                    total_differences: 1
                         }),
                         is_read: false,
                         created_at: db.fn.now()
-                    }));
-
-                if (notificationData.length > 0) {
+                            });
+                            allNotifiedCashierIds.add(cashier.id);
+                    }
+                    
+                        // Telegram xabar yuborish
+                        if (cashier.telegram_chat_id) {
+                            const diffSign = diff.difference > 0 ? '▲' : diff.difference < 0 ? '▼' : '=';
+                            const diffValue = Math.abs(diff.difference).toLocaleString('uz-UZ');
+                            
+                            const telegramMessage = `🔔 <b>Solishtirishda farq aniqlandi</b>\n\n` +
+                                        `📅 <b>Sana:</b> ${date}\n` +
+                                        `🏷️ <b>Brend:</b> ${brandName}\n` +
+                                `📍 <b>Filial:</b> ${locationName}\n\n` +
+                                `<b>Farq:</b> ${diffSign} ${diffValue}\n` +
+                                `💰 <b>Operator summasi:</b> ${diff.operator_amount.toLocaleString('uz-UZ')}\n` +
+                                `💵 <b>Solishtirish summasi:</b> ${diff.comparison_amount.toLocaleString('uz-UZ')}\n` +
+                                (diff.percentage ? `📊 <b>Foiz:</b> ${diff.percentage}%\n` : '') +
+                                `\n⚠️ Iltimos, tizimga kirib batafsil ma'lumotlarni ko'ring.`;
+                                    
+                            telegramPromises.push(
+                                safeSendMessage(cashier.telegram_chat_id, telegramMessage)
+                                    .then(result => {
+                                    if (result) {
+                                            log.debug(`✅ [COMPARISON] Telegram xabari kassir ${cashier.username} (ID: ${cashier.id}) ga yuborildi: location=${locationName}`);
+                                            return { success: true, cashierId: cashier.id, location: locationName };
+                                    } else {
+                                            log.warn(`⚠️ [COMPARISON] Telegram xabari kassir ${cashier.username} (ID: ${cashier.id}) ga yuborilmadi: location=${locationName}`);
+                                            return { success: false, cashierId: cashier.id, location: locationName };
+                                    }
+                                    })
+                                    .catch(telegramError => {
+                                        log.error(`❌ [COMPARISON] Telegram xabari kassir ${cashier.username} (ID: ${cashier.id}) ga yuborishda xatolik: location=${locationName}, error=${telegramError.message}`);
+                                        return { success: false, cashierId: cashier.id, location: locationName, error: telegramError.message };
+                                    })
+                            );
+                        }
+                    }
+                }
+                
+                // Web notification'larni saqlash
+                if (cashierNotifications.length > 0) {
                     try {
-                        await db('notifications').insert(notificationData);
-                        log.debug(`✅ [COMPARISON] ${notificationData.length} ta notification yaratildi`);
+                        await db('notifications').insert(cashierNotifications);
+                        log.debug(`✅ [COMPARISON] ${cashierNotifications.length} ta notification yaratildi`);
                     } catch (insertError) {
                         log.error(`❌ [COMPARISON] Notification'lar bazaga yozishda xatolik:`, insertError.message);
                     }
-                    
-                    // Telegram orqali har bir operatorga xabar yuborish
+                }
+                
+                // Telegram xabarlarni parallel yuborish
+                if (telegramPromises.length > 0) {
                     try {
+                        const telegramResults = await Promise.allSettled(telegramPromises);
                         let telegramSuccessCount = 0;
                         let telegramErrorCount = 0;
                         
-                        // Farqlar ro'yxatini formatlash
-                        const differencesList = differences.map((diff, index) => {
-                            const diffSign = diff.difference > 0 ? '▲' : diff.difference < 0 ? '▼' : '=';
-                            const diffValue = Math.abs(diff.difference).toLocaleString('uz-UZ');
-                            return `${index + 1}. ${diff.location}: ${diffSign} ${diffValue}`;
-                        }).join('\n');
-                        
-                        // Parallel Telegram xabarlar yuborish (N+1 Query muammosini hal qilish)
-                        const telegramPromises = operators
-                            .filter(operator => operator.telegram_chat_id) // Faqat telegram_chat_id bor operatorlar
-                            .map(async (operator) => {
-                                try {
-                                    const telegramMessage = `🔔 <b>Solishtirishda farqlar aniqlandi</b>\n\n` +
-                                        `📅 <b>Sana:</b> ${date}\n` +
-                                        `🏷️ <b>Brend:</b> ${brandName}\n` +
-                                        `📊 <b>Farqlar soni:</b> ${differences.length} ta filial\n\n` +
-                                        `<b>Farqlar ro'yxati:</b>\n${differencesList}\n\n` +
-                                        `⚠️ Iltimos, tizimga kirib batafsil ma'lumotlarni ko'ring.`;
-                                    
-                                    const result = await safeSendMessage(operator.telegram_chat_id, telegramMessage);
-                                    if (result) {
-                                        log.debug(`✅ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborildi`);
-                                        return { success: true, operatorId: operator.id };
-                                    } else {
-                                        log.warn(`⚠️ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborilmadi`);
-                                        return { success: false, operatorId: operator.id };
-                                    }
-                                } catch (telegramError) {
-                                    log.error(`❌ [COMPARISON] Telegram xabari operator ${operator.username} (ID: ${operator.id}) ga yuborishda xatolik:`, telegramError.message);
-                                    return { success: false, operatorId: operator.id, error: telegramError.message };
-                                }
-                            });
-                        
-                        // Barcha xabarlarni parallel yuborish
-                        const telegramResults = await Promise.allSettled(telegramPromises);
-                        telegramResults.forEach((result, index) => {
+                        telegramResults.forEach((result) => {
                             if (result.status === 'fulfilled' && result.value.success) {
                                 telegramSuccessCount++;
                             } else {
@@ -685,19 +737,19 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                         });
                         
                         if (telegramSuccessCount > 0) {
-                            log.debug(`✅ [COMPARISON] Telegram: ${telegramSuccessCount} ta operatorga xabar yuborildi`);
+                            log.debug(`✅ [COMPARISON] Telegram: ${telegramSuccessCount} ta kassirga xabar yuborildi`);
                         }
                         if (telegramErrorCount > 0) {
-                            log.warn(`⚠️ [COMPARISON] Telegram: ${telegramErrorCount} ta operatorga xabar yuborilmadi`);
+                            log.warn(`⚠️ [COMPARISON] Telegram: ${telegramErrorCount} ta kassirga xabar yuborilmadi`);
                         }
                     } catch (telegramError) {
                         log.error(`❌ [COMPARISON] Telegram yuborishda umumiy xatolik:`, telegramError.message);
                     }
+                    }
                     
-                    // WebSocket orqali realtime yuborish (optimizatsiya: bir marta broadcast)
+                // WebSocket orqali realtime yuborish
                     try {
-                        if (global.broadcastWebSocket) {
-                            // Barcha operatorlar uchun bir marta broadcast (N+1 Query muammosini hal qilish)
+                    if (global.broadcastWebSocket && allNotifiedCashierIds.size > 0) {
                             const wsPayload = {
                                 type: 'comparison_difference',
                                 payload: {
@@ -706,17 +758,15 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                                     brand_name: brandName,
                                     differences: differences,
                                     total_differences: differences.length,
-                                    operator_ids: operators.map(op => op.id)
+                                cashier_ids: Array.from(allNotifiedCashierIds)
                                 }
                             };
                             
                             global.broadcastWebSocket('notification', wsPayload);
-                            log.debug(`✅ [COMPARISON] WebSocket yuborildi: ${operators.length} ta operatorga`);
+                        log.debug(`✅ [COMPARISON] WebSocket yuborildi: ${allNotifiedCashierIds.size} ta kassirga`);
                         }
                     } catch (wsError) {
                         log.error(`❌ [COMPARISON] WebSocket yuborishda xatolik:`, wsError.message);
-                    }
-                }
                 }
             } catch (error) {
                 log.error(`❌ [COMPARISON] Notification yaratishda xatolik:`, error.message);
