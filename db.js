@@ -38,6 +38,18 @@ function getDbConfig() {
         };
     }
     
+    // Railway.com'da lekin DATABASE_URL bo'lmasa, xatolik chiqarish
+    if (isRailway && !hasDatabaseUrl && !hasPostgresConfig) {
+        log.error('❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
+        log.error('❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
+        log.error('❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
+        throw new Error(
+            'Railway.com\'da DATABASE_URL sozlanmagan!\n' +
+            'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
+            'PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.'
+        );
+    }
+    
     // Boshqa holatda knexfile.js dan config olish
     const config = require('./knexfile.js');
     const env = process.env.NODE_ENV || 'development';
