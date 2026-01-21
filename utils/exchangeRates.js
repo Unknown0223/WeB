@@ -31,6 +31,28 @@ const EXCHANGE_RATE_APIS = {
 };
 
 /**
+ * Axios so'rovini retry bilan bajarish
+ */
+async function axiosWithRetry(url, options = {}, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await axios.get(url, {
+                ...options,
+                timeout: options.timeout || 20000 // Default 20 soniya
+            });
+            return response;
+        } catch (error) {
+            if (attempt === maxRetries) {
+                throw error;
+            }
+            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff, max 5s
+            log.debug(`API so'rovi muvaffaqiyatsiz (${attempt}/${maxRetries}), ${delay}ms dan keyin qayta urinilmoqda...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
+
+/**
  * Kurslarni API dan olish
  */
 async function fetchExchangeRatesFromAPI() {
@@ -38,8 +60,8 @@ async function fetchExchangeRatesFromAPI() {
         // O'zbekiston Markaziy bank API (agar mavjud bo'lsa)
         // Keling, avval oddiy variant bilan boshlaymiz - ExchangeRate-API (bepul)
         
-        const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', {
-            timeout: 10000
+        const response = await axiosWithRetry('https://api.exchangerate-api.com/v4/latest/USD', {
+            timeout: 20000 // 20 soniyaga oshirildi
         });
         
         if (response.data && response.data.rates) {
@@ -88,30 +110,67 @@ async function fetchExchangeRatesFromAPI() {
  * Alternativ API dan kurslarni olish
  */
 async function fetchFromAlternativeAPI() {
-    try {
-        // O'zbekiston Markaziy bank veb-saytidan scraping (agar API bo'lmasa)
-        // Yoki boshqa bepul API
-        
-        // Hozircha default kurslar (keyinchalik real API bilan almashtiriladi)
-        // Bu faqat fallback
-        const response = await axios.get('https://api.exchangerate-api.com/v4/latest/UZS', {
-            timeout: 10000
-        });
-        
-        if (response.data && response.data.rates) {
-            const rates = response.data.rates;
-            return {
-                USD: rates.USD || 12500, // 1 USD = 12500 UZS (default)
-                EUR: rates.EUR || 13500, // 1 EUR = 13500 UZS (default)
-                RUB: rates.RUB || 140,   // 1 RUB = 140 UZS (default)
-                KZT: rates.KZT || 28     // 1 KZT = 28 UZS (default)
-            };
+    // Bir nechta alternativ API larni sinab ko'ramiz
+    const alternativeAPIs = [
+        {
+            name: 'ExchangeRate-API (UZS base)',
+            url: 'https://api.exchangerate-api.com/v4/latest/UZS',
+            parser: (data) => {
+                if (data && data.rates) {
+                    return {
+                        USD: data.rates.USD || null,
+                        EUR: data.rates.EUR || null,
+                        RUB: data.rates.RUB || null,
+                        KZT: data.rates.KZT || null
+                    };
+                }
+                return null;
+            }
+        },
+        {
+            name: 'ExchangeRate-API (EUR base)',
+            url: 'https://api.exchangerate-api.com/v4/latest/EUR',
+            parser: (data) => {
+                if (data && data.rates && data.rates.UZS) {
+                    const uzsPerEur = data.rates.UZS;
+                    return {
+                        USD: data.rates.USD ? uzsPerEur / data.rates.USD : null,
+                        EUR: uzsPerEur,
+                        RUB: data.rates.RUB ? uzsPerEur / data.rates.RUB : null,
+                        KZT: data.rates.KZT ? uzsPerEur / data.rates.KZT : null
+                    };
+                }
+                return null;
+            }
         }
-    } catch (error) {
-        log.error('Alternativ API xatolik:', error.message);
+    ];
+    
+    // Har bir alternativ API ni sinab ko'ramiz
+    for (const api of alternativeAPIs) {
+        try {
+            log.debug(`Alternativ API sinanmoqda: ${api.name}`);
+            const response = await axiosWithRetry(api.url, {
+                timeout: 20000 // 20 soniya
+            }, 2); // 2 marta urinib ko'ramiz
+            
+            const rates = api.parser(response.data);
+            if (rates && (rates.USD || rates.EUR || rates.RUB || rates.KZT)) {
+                log.debug(`✅ ${api.name} muvaffaqiyatli ishladi`);
+                return {
+                    USD: rates.USD || 12500,
+                    EUR: rates.EUR || 13500,
+                    RUB: rates.RUB || 140,
+                    KZT: rates.KZT || 28
+                };
+            }
+        } catch (error) {
+            log.debug(`❌ ${api.name} xatolik: ${error.message}`);
+            continue; // Keyingi API ga o'tamiz
+        }
     }
     
-    // Eng oxirgi fallback - default kurslar
+    // Barcha API lar muvaffaqiyatsiz bo'lsa, default kurslarni qaytaramiz
+    log.warn('⚠️ Barcha API lar muvaffaqiyatsiz, default kurslar ishlatilmoqda');
     return {
         USD: 12500,
         EUR: 13500,

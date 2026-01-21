@@ -24,6 +24,20 @@ router.use('/exchange-rates', require('./exchangeRates.js'));
 router.use('/comparison', require('./comparison.js'));
 router.use('/notifications', require('./notifications.js'));
 
+// Debt-approval routes
+router.use('/debt-approval/brands', require('./debt-approval/brands.js'));
+router.use('/debt-approval/requests', require('./debt-approval/requests.js'));
+router.use('/debt-approval/settings', require('./debt-approval/settings.js'));
+router.use('/debt-approval/buttons', require('./debt-approval/buttons.js'));
+router.use('/debt-approval/bindings', require('./debt-approval/bindings.js'));
+router.use('/debt-approval/users', require('./debt-approval/users.js'));
+router.use('/debt-approval/excel-import', require('./debt-approval/excel-import.js'));
+router.use('/debt-approval/groups', require('./debt-approval/groups.js'));
+router.use('/debt-approval/excel-template', require('./debt-approval/excel-template.js'));
+router.use('/debt-approval/archive', require('./debt-approval/archive.js'));
+router.use('/debt-approval/export', require('./debt-approval/export.js'));
+router.use('/debt-approval/blocked', require('./debt-approval/blocked.js'));
+
 const { isAuthenticated, hasPermission } = require('../middleware/auth.js');
 const { db } = require('../db.js');
 const { createLogger } = require('../utils/logger.js');

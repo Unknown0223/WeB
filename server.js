@@ -54,6 +54,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 const { db, initializeDB } = require('./db.js');
 const { isAuthenticated, hasPermission } = require('./middleware/auth.js');
 const { initializeBot, getBot } = require('./utils/bot.js');
+const { startCleanupInterval } = require('./utils/cleanup.js');
 const axios = require('axios');
 
 // --- WEBHOOK UCHUN ENDPOINT (MIDDLEWARE'DAN OLDIN) ---
@@ -101,7 +102,40 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Sessiyani sozlash
 const session = require('express-session');
-const SQLiteStore = require('connect-sqlite3')(session);
+const { isPostgres, isSqlite } = require('./db.js');
+
+// Session store sozlash (SQLite yoki PostgreSQL)
+let sessionStore;
+if (isPostgres) {
+    // PostgreSQL session store
+    const PostgreSQLStore = require('connect-pg-simple')(session);
+    const config = require('./knexfile.js');
+    const env = process.env.NODE_ENV || 'development';
+    const dbConfig = config[env] || config.development;
+    
+    // PostgreSQL connection string yoki object
+    let pgConnection;
+    if (typeof dbConfig.connection === 'string') {
+        pgConnection = dbConfig.connection;
+    } else {
+        const conn = dbConfig.connection;
+        pgConnection = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+    }
+    
+    sessionStore = new PostgreSQLStore({
+        conString: pgConnection,
+        tableName: 'sessions',
+        createTableIfMissing: true
+    });
+} else {
+    // SQLite session store
+    const SQLiteStore = require('connect-sqlite3')(session);
+    sessionStore = new SQLiteStore({
+        db: 'database.db',
+        dir: path.join(__dirname),
+        table: 'sessions'
+    });
+}
 
 // Production yoki development rejimini aniqlash
 const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production';
@@ -112,14 +146,7 @@ const isSecure = isProduction ||
                  process.env.HTTPS === 'true';
 
 app.use(session({
-    store: new SQLiteStore({ 
-        db: 'database.db', 
-        dir: './',
-        // SQLite BUSY xatoliklarini hal qilish
-        table: 'sessions',
-        // Connection pool sozlamalari
-        busyTimeout: 5000 // 5 soniya kutish
-    }),
+    store: sessionStore,
     secret: process.env.SESSION_SECRET || 'a-very-strong-and-long-secret-key-for-session',
     resave: false,
     saveUninitialized: false,
@@ -234,11 +261,11 @@ wss.on('connection', (ws, req) => {
     });
     
     ws.on('close', (code, reason) => {
-        // Connection closed
+        // Connection closed (log removed for production)
     });
     
     ws.on('error', (error) => {
-        wsLog.error(`Xatolik. IP: ${clientIp}`, error.message);
+        wsLog.error(`WebSocket xatolik. IP: ${clientIp}`, error.message);
     });
     
     // Ping/Pong uchun
@@ -286,6 +313,10 @@ global.broadcastWebSocket = (type, payload) => {
     try {
         await initializeDB();
         
+        // Vaqtinchalik fayllarni tozalash mexanizmini ishga tushirish
+        // Har 1 soatda bir marta, 1 soatdan eski fayllarni o'chirish
+        startCleanupInterval(1, 1);
+        
         // Orphaned yozuvlarni tozalash (server ishga tushganda)
         try {
             const existingUserIds = new Set();
@@ -316,7 +347,6 @@ global.broadcastWebSocket = (type, payload) => {
                             .del();
                         if (deleted > 0) {
                             totalDeleted += deleted;
-                            log.info(`✅ [CLEANUP] ${table}: ${deleted} ta orphaned yozuv o'chirildi`);
                         }
                     }
                 } catch (err) {
@@ -324,16 +354,13 @@ global.broadcastWebSocket = (type, payload) => {
                 }
             }
             
-            if (totalDeleted > 0) {
-                log.info(`✅ [CLEANUP] Jami ${totalDeleted} ta orphaned yozuv tozalandi`);
-            } else {
-                log.debug('✅ [CLEANUP] Orphaned yozuvlar topilmadi');
-            }
+            // Cleanup to'liq bajarildi (log olib tashlandi)
         } catch (cleanupError) {
-            log.warn('⚠️ [CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
+            log.error('[CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
         }
         
         const { getSetting } = require('./utils/settingsCache.js');
+        // Bot token: faqat telegram_bot_token ishlatiladi (bot bitta)
         const botToken = await getSetting('telegram_bot_token', null);
         const telegramEnabled = await getSetting('telegram_enabled', 'false');
 
@@ -344,10 +371,9 @@ global.broadcastWebSocket = (type, payload) => {
                 process.send('ready');
             }
 
-            // Bot token mavjud bo'lsa VA telegram aktiv bo'lsa, webhookni o'rnatish (async, lekin server bloklanmaydi)
-            // Bot initialization'ni alohida async funksiya sifatida ishga tushirish
-            // Shunda server darhol javob bera oladi va healthcheck muvaffaqiyatli bo'ladi
-            if (botToken && (telegramEnabled === 'true' || telegramEnabled === true)) {
+            // Bot token mavjud bo'lsa, bot'ni ishga tushirish
+            // telegram_enabled sozlamasiga bog'liq emas, chunki debt_bot_token alohida bot uchun
+            if (botToken && botToken.trim() !== '') {
                 (async () => {
                 // Deploy uchun webhook rejimida ishga tushirish
                 const appBaseUrl = process.env.APP_BASE_URL;
@@ -375,7 +401,7 @@ global.broadcastWebSocket = (type, payload) => {
                             // Webhook rejimida botni ishga tushirish
                             await initializeBot(botToken, { polling: false });
                         } else {
-                            botLog.error('Telegram webhookni o\'rnatishda xatolik:', response.data.description);
+                            botLog.error('[INIT] Telegram webhookni o\'rnatishda xatolik:', response.data.description);
                             
                             // Fallback: polling rejimi (faqat development uchun)
                             if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
@@ -383,7 +409,7 @@ global.broadcastWebSocket = (type, payload) => {
                             }
                         }
                     } catch (error) {
-                        botLog.error('Telegram API\'ga ulanishda xatolik:', error.message);
+                        botLog.error('[INIT] Telegram API\'ga ulanishda xatolik:', error.message);
                         
                         // Fallback: polling rejimi (faqat development uchun)
                         if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
@@ -392,9 +418,7 @@ global.broadcastWebSocket = (type, payload) => {
                     }
                 } else {
                     // Lokal yoki webhook sozlanmagan - polling rejimi (faqat development uchun)
-                    if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
-                        await initializeBot(botToken, { polling: true });
-                    }
+                    await initializeBot(botToken, { polling: true });
                 }
                 })(); // Async IIFE - bot initialization server bloklamaydi
             }

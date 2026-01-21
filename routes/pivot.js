@@ -122,6 +122,24 @@ router.get('/data', isAuthenticated, hasPermission('reports:view_all'), async (r
         const flatDataArrays = await Promise.all(flatDataPromises);
         const flatData = flatDataArrays.flat(); // Barcha array'larni birlashtirish
 
+        // Ma'lumotlar hajmini tekshirish (WebDataRocks 1MB cheklovi)
+        const dataSize = Buffer.byteLength(JSON.stringify(flatData), 'utf8');
+        const maxSize = 1024 * 1024; // 1MB = 1,048,576 bytes
+        const dataSizeMB = (dataSize / (1024 * 1024)).toFixed(2);
+        
+        log.debug(`[PIVOT] Ma'lumotlar hajmi: ${dataSizeMB} MB (${flatData.length} ta yozuv)`);
+        
+        if (dataSize > maxSize) {
+            log.warn(`[PIVOT] Ma'lumotlar hajmi cheklovdan oshib ketdi: ${dataSizeMB} MB (${flatData.length} ta yozuv)`);
+            return res.status(413).json({ 
+                message: `Ma'lumotlar hajmi juda katta (${dataSizeMB} MB). WebDataRocks maksimal 1 MB ma'lumotlarni qabul qiladi. Iltimos, sana oralig'ini qisqartiring yoki filial/brend bo'yicha filtrlash qo'llang.`,
+                dataSize: dataSize,
+                maxSize: maxSize,
+                dataSizeMB: dataSizeMB,
+                recordCount: flatData.length
+            });
+        }
+
         res.json(flatData);
 
     } catch (error) {
@@ -192,12 +210,36 @@ router.post('/templates', isManagerOrAdmin, async (req, res) => {
         // Только админы могут создавать публичные шаблоны
         const canMakePublic = req.session.user.role === 'admin' && isPublic === true;
         
-        const [templateId] = await db('pivot_templates').insert({
+        // Database turini aniqlash
+        const dbConfig = require('../knexfile.js');
+        const env = process.env.NODE_ENV || 'development';
+        const config = dbConfig[env] || dbConfig.development;
+        const isPostgres = config.client === 'pg';
+        
+        let templateId;
+        
+        if (isPostgres) {
+            // PostgreSQL uchun returning ishlatish
+            const result = await db('pivot_templates')
+                .insert({
+                    name: name,
+                    report: JSON.stringify(report),
+                    created_by: req.session.user.id,
+                    is_public: canMakePublic
+                })
+                .returning('id');
+            templateId = result[0].id;
+        } else {
+            // SQLite uchun
+            const result = await db('pivot_templates').insert({
             name: name,
             report: JSON.stringify(report),
             created_by: req.session.user.id,
             is_public: canMakePublic
         });
+            // SQLite'da insert() qaytaradi array yoki number
+            templateId = Array.isArray(result) ? result[0] : result;
+        }
         
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {

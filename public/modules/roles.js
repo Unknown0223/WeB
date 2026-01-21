@@ -704,27 +704,40 @@ export async function handleBackupDb() {
             throw new Error(error.message || 'Baza nusxasini olib bo\'lmadi');
         }
         
-        const blob = await response.blob();
+        // Content-Type ni tekshirish - JSON yoki .db
+        const contentType = response.headers.get('content-type');
+        const isJson = contentType && contentType.includes('application/json');
+        
+        let blob;
+        let fileName;
+        
+        if (isJson) {
+            // PostgreSQL JSON backup
+            const data = await response.json();
+            blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const disposition = response.headers.get('content-disposition');
+            fileName = disposition 
+                ? disposition.match(/filename="?([^"]+)"?/)?.[1] || `postgresql_backup_${new Date().toISOString().split('T')[0]}.json`
+                : `postgresql_backup_${new Date().toISOString().split('T')[0]}.json`;
+        } else {
+            // SQLite .db backup
+            blob = await response.blob();
+            const disposition = response.headers.get('content-disposition');
+            fileName = disposition 
+                ? disposition.match(/filename="?([^"]+)"?/)?.[1] || `database_backup_${new Date().toISOString().split('T')[0]}.db`
+                : `database_backup_${new Date().toISOString().split('T')[0]}.db`;
+        }
+        
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        
-        const disposition = response.headers.get('content-disposition');
-        let fileName = `database_backup_${new Date().toISOString().split('T')[0]}.db`;
-        if (disposition && disposition.indexOf('attachment') !== -1) {
-            const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-            const matches = filenameRegex.exec(disposition);
-            if (matches != null && matches[1]) { 
-                fileName = matches[1].replace(/['"]/g, '');
-            }
-        }
-        
         a.download = fileName;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
         a.remove();
+        
         showToast("✅ Baza nusxasi muvaffaqiyatli yuklab olindi.");
     } catch (error) {
         showToast(error.message, true);
@@ -958,7 +971,10 @@ function getTableDisplayName(tableName) {
         'ostatki_analysis': '📊 Ostatki Tahlili',
         'ostatki_imports': '📥 Ostatki Importlari',
         'blocked_filials': '🚫 Bloklangan Filiallar',
-        'imports_log': '📝 Import Jurnallari'
+        'imports_log': '📝 Import Jurnallari',
+        'debt_brands': '📋 Qarz Tasdiqlash Brendlari',
+        'debt_branches': '📋 Qarz Tasdiqlash Filiallari',
+        'debt_svrs': '📋 Qarz Tasdiqlash SVRlari'
     };
     return translations[tableName] || `📋 ${tableName}`;
 }
@@ -987,6 +1003,9 @@ function getTableCategory(tableName) {
     }
     if (['pending_registrations'].includes(tableName)) {
         return 'Ro\'yxatdan O\'tish';
+    }
+    if (['debt_brands', 'debt_branches', 'debt_svrs'].includes(tableName)) {
+        return 'Qarz Tasdiqlash';
     }
     return 'Boshqa';
 }
@@ -1322,6 +1341,187 @@ function hideProgress() {
 }
 
 /**
+ * PostgreSQL JSON export
+ */
+async function exportPostgresJSON() {
+    try {
+        showProgress('📥 PostgreSQL JSON export boshlandi...', 10);
+        showToast('📥 PostgreSQL ma\'lumotlari yuklanmoqda...');
+        
+        const response = await safeFetch('/api/admin/export-postgres-json');
+        
+        if (!response || !response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Export qilishda xatolik');
+        }
+        
+        const data = await response.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `postgresql_export_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showProgress('✅ Export muvaffaqiyatli!', 100);
+        showToast('✅ PostgreSQL JSON export muvaffaqiyatli!', false);
+        
+        setTimeout(() => hideProgress(), 2000);
+    } catch (error) {
+        showToast('❌ Export xatolik: ' + error.message, true);
+        hideProgress();
+    }
+}
+
+/**
+ * PostgreSQL SQL export
+ */
+async function exportPostgresSQL() {
+    try {
+        showProgress('📥 PostgreSQL SQL dump boshlandi...', 10);
+        showToast('📥 PostgreSQL SQL dump yuklanmoqda...');
+        
+        const response = await safeFetch('/api/admin/export-postgres-sql');
+        
+        if (!response || !response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Export qilishda xatolik');
+        }
+        
+        const data = await response.text();
+        const blob = new Blob([data], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `postgresql_dump_${new Date().toISOString().split('T')[0]}.sql`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showProgress('✅ Export muvaffaqiyatli!', 100);
+        showToast('✅ PostgreSQL SQL dump muvaffaqiyatli!', false);
+        
+        setTimeout(() => hideProgress(), 2000);
+    } catch (error) {
+        showToast('❌ Export xatolik: ' + error.message, true);
+        hideProgress();
+    }
+}
+
+/**
+ * PostgreSQL JSON import
+ */
+async function importPostgresJSON(file) {
+    if (!file) return;
+    
+    try {
+        showProgress('📤 PostgreSQL JSON import boshlandi...', 10);
+        showToast('📤 Fayl o\'qilmoqda...');
+        
+        const fileText = await file.text();
+        const importData = JSON.parse(fileText);
+        
+        showProgress('🔄 PostgreSQL ga yuklash...', 50);
+        
+        const response = await safeFetch('/api/admin/import-full-db', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(importData)
+        });
+        
+        if (!response || !response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Import qilishda xatolik');
+        }
+        
+        showProgress('✅ Import muvaffaqiyatli!', 100);
+        const result = await response.json();
+        showToast('✅ PostgreSQL JSON import muvaffaqiyatli!', false);
+        
+        setTimeout(() => hideProgress(), 2000);
+    } catch (error) {
+        showToast('❌ Import xatolik: ' + error.message, true);
+        hideProgress();
+    }
+}
+
+/**
+ * PostgreSQL SQL import
+ */
+async function importPostgresSQL(file) {
+    if (!file) return;
+    
+    try {
+        showProgress('📤 PostgreSQL SQL import boshlandi...', 10);
+        showToast('📤 SQL fayl yuklanmoqda...');
+        
+        const formData = new FormData();
+        formData.append('sqlfile', file);
+        
+        showProgress('🔄 SQL execute qilinmoqda...', 50);
+        
+        const response = await safeFetch('/api/admin/import-postgres-sql', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response || !response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Import qilishda xatolik');
+        }
+        
+        showProgress('✅ Import muvaffaqiyatli!', 100);
+        const result = await response.json();
+        showToast(`✅ PostgreSQL SQL import muvaffaqiyatli! (${result.executed_statements} ta statement)`, false);
+        
+        setTimeout(() => hideProgress(), 2000);
+    } catch (error) {
+        showToast('❌ Import xatolik: ' + error.message, true);
+        hideProgress();
+    }
+}
+
+/**
+ * SQLite database import
+ */
+async function importSqliteDB(file) {
+    if (!file) return;
+    
+    try {
+        showProgress('📤 SQLite import boshlandi...', 10);
+        showToast('📤 SQLite fayl yuklanmoqda...');
+        
+        const formData = new FormData();
+        formData.append('database', file);
+        
+        showProgress('🔄 PostgreSQL ga konvertatsiya qilinmoqda...', 50);
+        
+        const response = await safeFetch('/api/admin/import-sqlite-db', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response || !response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Import qilishda xatolik');
+        }
+        
+        showProgress('✅ Import muvaffaqiyatli!', 100);
+        const result = await response.json();
+        showToast(`✅ SQLite import muvaffaqiyatli! (${result.total_imported} ta yozuv)`, false);
+        
+        setTimeout(() => hideProgress(), 2000);
+    } catch (error) {
+        showToast('❌ Import xatolik: ' + error.message, true);
+        hideProgress();
+    }
+}
+
+/**
  * Event listener'larni ulash
  */
 export function initExportImport() {
@@ -1431,20 +1631,138 @@ export function initExportImport() {
             });
         }
     }
+    
+    // PostgreSQL Export/Import event listener'lar
+    const exportPostgresJSONBtn = document.getElementById('export-postgres-json-btn');
+    if (exportPostgresJSONBtn) {
+        exportPostgresJSONBtn.addEventListener('click', exportPostgresJSON);
+    }
+    
+    const exportPostgresSQLBtn = document.getElementById('export-postgres-sql-btn');
+    if (exportPostgresSQLBtn) {
+        exportPostgresSQLBtn.addEventListener('click', exportPostgresSQL);
+    }
+    
+    const importPostgresJSONBtn = document.getElementById('import-postgres-json-btn');
+    const importPostgresJSONInput = document.getElementById('import-postgres-json-input');
+    const selectedPostgresFileInfo = document.getElementById('selected-postgres-file-info');
+    
+    if (importPostgresJSONBtn && importPostgresJSONInput) {
+        importPostgresJSONBtn.addEventListener('click', () => {
+            importPostgresJSONInput.click();
+        });
+        
+        importPostgresJSONInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (selectedPostgresFileInfo) {
+                    const fileName = selectedPostgresFileInfo.querySelector('.file-name');
+                    if (fileName) {
+                        fileName.textContent = file.name;
+                    }
+                    selectedPostgresFileInfo.classList.remove('hidden');
+                }
+                importPostgresJSON(file);
+                importPostgresJSONInput.value = '';
+                setTimeout(() => {
+                    if (selectedPostgresFileInfo) {
+                        selectedPostgresFileInfo.classList.add('hidden');
+                    }
+                }, 3000);
+            }
+        });
+    }
+    
+    const importPostgresSQLBtn = document.getElementById('import-postgres-sql-btn');
+    const importPostgresSQLInput = document.getElementById('import-postgres-sql-input');
+    
+    if (importPostgresSQLBtn && importPostgresSQLInput) {
+        importPostgresSQLBtn.addEventListener('click', () => {
+            importPostgresSQLInput.click();
+        });
+        
+        importPostgresSQLInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (selectedPostgresFileInfo) {
+                    const fileName = selectedPostgresFileInfo.querySelector('.file-name');
+                    if (fileName) {
+                        fileName.textContent = file.name;
+                    }
+                    selectedPostgresFileInfo.classList.remove('hidden');
+                }
+                importPostgresSQL(file);
+                importPostgresSQLInput.value = '';
+                setTimeout(() => {
+                    if (selectedPostgresFileInfo) {
+                        selectedPostgresFileInfo.classList.add('hidden');
+                    }
+                }, 3000);
+            }
+        });
+    }
+    
+    // SQLite Import event listener
+    const importSqliteDBBtn = document.getElementById('import-sqlite-db-btn');
+    const importSqliteDBInput = document.getElementById('import-sqlite-db-input');
+    const selectedSqliteFileInfo = document.getElementById('selected-sqlite-file-info');
+    
+    if (importSqliteDBBtn && importSqliteDBInput) {
+        importSqliteDBBtn.addEventListener('click', () => {
+            importSqliteDBInput.click();
+        });
+        
+        importSqliteDBInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (selectedSqliteFileInfo) {
+                    const fileName = selectedSqliteFileInfo.querySelector('.file-name');
+                    if (fileName) {
+                        fileName.textContent = file.name;
+                    }
+                    selectedSqliteFileInfo.classList.remove('hidden');
+                }
+                importSqliteDB(file);
+                importSqliteDBInput.value = '';
+                setTimeout(() => {
+                    if (selectedSqliteFileInfo) {
+                        selectedSqliteFileInfo.classList.add('hidden');
+                    }
+                }, 3000);
+            }
+        });
+    }
+    
+    // PostgreSQL va SQLite bo'limlarini ko'rsatish/yashirish
+    // (PostgreSQL tekshiruvi uchun API so'rov yuborish kerak)
+    // Hozircha barcha bo'limlar ko'rinadi, keyinchalik dinamik tekshiruv qo'shish mumkin
 }
 
 // Add New Role Functionality
 export function setupAddNewRole() {
+    // Faqat superadmin uchun ko'rsatish
+    const isSuperAdmin = state.currentUser && (state.currentUser.role === 'superadmin' || state.currentUser.role === 'super_admin');
+    
     // Header'dagi tugma (eski)
     const addRoleBtn = document.getElementById('add-new-role-btn');
     if (addRoleBtn) {
+        if (isSuperAdmin) {
+            addRoleBtn.style.display = 'block';
         addRoleBtn.addEventListener('click', openAddRoleModal);
+        } else {
+            addRoleBtn.style.display = 'none';
+        }
     }
     
     // Inline tugma (yangi - roles list panel ichida)
     const addRoleInlineBtn = document.getElementById('add-new-role-inline-btn');
     if (addRoleInlineBtn) {
+        if (isSuperAdmin) {
+            addRoleInlineBtn.style.display = 'block';
         addRoleInlineBtn.addEventListener('click', openAddRoleModal);
+        } else {
+            addRoleInlineBtn.style.display = 'none';
+        }
     }
 }
 
@@ -1679,4 +1997,433 @@ async function createNewRole() {
         btn.disabled = false;
         btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/></svg> Yaratish';
     }
+}
+
+// ===== CATEGORIES (BO'LIMLAR) MANAGEMENT =====
+
+// Categories ro'yxatini yuklash va ko'rsatish
+export async function loadCategories() {
+    log.debug('loadCategories chaqirildi');
+    
+    try {
+        const response = await safeFetch('/api/roles/categories');
+        if (!response || !response.ok) {
+            throw new Error('Categories yuklashda xatolik');
+        }
+        
+        const categories = await response.json();
+        log.debug('Categories yuklandi:', categories);
+        
+        renderCategories(categories);
+    } catch (error) {
+        log.error('loadCategories xatolik:', error);
+        showToast('Bo\'limlarni yuklashda xatolik', 'error');
+    }
+}
+
+// Categories ro'yxatini render qilish
+function renderCategories(categories) {
+    const grid = document.getElementById('categories-grid');
+    if (!grid) return;
+    
+    if (!categories || categories.length === 0) {
+        grid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1; text-align: center; padding: 40px;">
+                <i data-feather="folder-x" style="width: 64px; height: 64px; color: rgba(255,255,255,0.3); margin-bottom: 16px;"></i>
+                <p style="color: rgba(255,255,255,0.6); font-size: 16px;">Hozircha bo'limlar mavjud emas</p>
+            </div>
+        `;
+        if (window.feather) window.feather.replace();
+        return;
+    }
+    
+    grid.innerHTML = categories.map(cat => `
+        <div class="category-card" data-category="${cat.name}">
+            <div class="category-card-header">
+                <div class="category-icon">📁</div>
+                <div class="category-info">
+                    <h4 class="category-name">${escapeHtml(cat.name)}</h4>
+                    <p class="category-count">${cat.permissions_count} ta huquq</p>
+                </div>
+            </div>
+            <div class="category-card-actions">
+                <button class="btn btn-sm btn-primary category-edit-btn" onclick="editCategory('${escapeHtml(cat.name)}')" title="Tahrirlash">
+                    <i data-feather="edit-2"></i>
+                    <span>Tahrirlash</span>
+                </button>
+                <button class="btn btn-sm btn-danger category-delete-btn" onclick="deleteCategory('${escapeHtml(cat.name)}')" title="O'chirish">
+                    <i data-feather="trash-2"></i>
+                    <span>O'chirish</span>
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    if (window.feather) window.feather.replace();
+}
+
+// Category yaratish modal
+window.showAddCategoryModal = function() {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'add-category-modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>
+                    <i data-feather="plus"></i>
+                    <span>Yangi Bo'lim Qo'shish</span>
+                </h3>
+                <button class="btn-close close-modal-btn" onclick="this.closest('.modal').remove()">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="add-category-form">
+                    <div class="form-group">
+                        <label>Bo'lim nomi *</label>
+                        <input type="text" id="category-name-input" class="form-control" placeholder="Masalan: Yangi Bo'lim" required>
+                        <small>Bu nom barcha huquqlar bo'limida ko'rinadi</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Izoh (ixtiyoriy)</label>
+                        <textarea id="category-description-input" class="form-control" rows="3" placeholder="Bo'lim haqida qisqa ma'lumot..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">Bekor qilish</button>
+                <button type="button" class="btn btn-primary" id="create-category-btn" onclick="createCategory()">
+                    <i data-feather="check"></i>
+                    <span>Yaratish</span>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    if (window.feather) window.feather.replace();
+    
+    // Enter bosilganda yaratish
+    const nameInput = document.getElementById('category-name-input');
+    if (nameInput) {
+        nameInput.focus();
+        nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                createCategory();
+            }
+        });
+    }
+};
+
+// Category yaratish
+window.createCategory = async function() {
+    const nameInput = document.getElementById('category-name-input');
+    const descInput = document.getElementById('category-description-input');
+    
+    if (!nameInput) return;
+    
+    const categoryName = nameInput.value.trim();
+    const description = descInput ? descInput.value.trim() : '';
+    
+    if (!categoryName) {
+        showToast('Bo\'lim nomi kiritilishi shart', 'error');
+        nameInput.focus();
+        return;
+    }
+    
+    const btn = document.getElementById('create-category-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Yaratilmoqda...';
+    
+    try {
+        const response = await safeFetch('/api/roles/categories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                category_name: categoryName,
+                description: description,
+                icon: '📁'
+            })
+        });
+        
+        if (!response || !response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Category yaratishda xatolik');
+        }
+        
+        showToast('Yangi bo\'lim muvaffaqiyatli yaratildi!', 'success');
+        
+        // Modal yopish
+        const modal = document.getElementById('add-category-modal');
+        if (modal) modal.remove();
+        
+        // Categories ro'yxatini yangilash
+        await loadCategories();
+        
+        // Roles ro'yxatini ham yangilash (chunki yangi category qo'shildi)
+        const rolesResponse = await safeFetch('/api/roles');
+        if (rolesResponse && rolesResponse.ok) {
+            const rolesData = await rolesResponse.json();
+            if (rolesData && rolesData.roles && rolesData.all_permissions) {
+                state.roles = rolesData.roles;
+                state.allPermissions = rolesData.all_permissions;
+                renderRoles();
+            }
+        }
+        
+    } catch (error) {
+        log.error('Create category error:', error);
+        showToast(error.message || 'Bo\'lim yaratishda xatolik!', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i data-feather="check"></i><span>Yaratish</span>';
+        if (window.feather) window.feather.replace();
+    }
+};
+
+// Category tahrirlash modal
+window.editCategory = async function(categoryName) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'edit-category-modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>
+                    <i data-feather="edit-2"></i>
+                    <span>Bo'limni Tahrirlash</span>
+                </h3>
+                <button class="btn-close close-modal-btn" onclick="this.closest('.modal').remove()">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="edit-category-form">
+                    <div class="form-group">
+                        <label>Bo'lim nomi *</label>
+                        <input type="text" id="edit-category-name-input" class="form-control" value="${escapeHtml(categoryName)}" required>
+                        <small>Eski nom: <strong>${escapeHtml(categoryName)}</strong></small>
+                    </div>
+                    <div class="form-group">
+                        <label>Izoh (ixtiyoriy)</label>
+                        <textarea id="edit-category-description-input" class="form-control" rows="3" placeholder="Bo'lim haqida qisqa ma'lumot..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">Bekor qilish</button>
+                <button type="button" class="btn btn-primary" id="update-category-btn" onclick="updateCategory('${escapeHtml(categoryName)}')">
+                    <i data-feather="save"></i>
+                    <span>Saqlash</span>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    if (window.feather) window.feather.replace();
+    
+    const nameInput = document.getElementById('edit-category-name-input');
+    if (nameInput) nameInput.focus();
+};
+
+// Category yangilash
+window.updateCategory = async function(oldName) {
+    const nameInput = document.getElementById('edit-category-name-input');
+    const descInput = document.getElementById('edit-category-description-input');
+    
+    if (!nameInput) return;
+    
+    const newName = nameInput.value.trim();
+    const description = descInput ? descInput.value.trim() : '';
+    
+    if (!newName) {
+        showToast('Bo\'lim nomi kiritilishi shart', 'error');
+        nameInput.focus();
+        return;
+    }
+    
+    if (newName === oldName) {
+        showToast('Bo\'lim nomi o\'zgarmagan', 'info');
+        return;
+    }
+    
+    const confirmed = await showConfirmDialog(
+        'Bo\'lim nomini o\'zgartirish',
+        `"${oldName}" bo\'limi "${newName}" ga o\'zgartiriladi. Barcha huquqlar yangi nomga ko\'chiriladi. Davom etasizmi?`
+    );
+    
+    if (!confirmed) return;
+    
+    const btn = document.getElementById('update-category-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saqlanmoqda...';
+    
+    try {
+        const response = await safeFetch(`/api/roles/categories/${encodeURIComponent(oldName)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                new_name: newName,
+                description: description
+            })
+        });
+        
+        if (!response || !response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Category yangilashda xatolik');
+        }
+        
+        showToast('Bo\'lim nomi muvaffaqiyatli o\'zgartirildi!', 'success');
+        
+        // Modal yopish
+        const modal = document.getElementById('edit-category-modal');
+        if (modal) modal.remove();
+        
+        // Categories ro'yxatini yangilash
+        await loadCategories();
+        
+        // Roles ro'yxatini ham yangilash
+        const rolesResponse = await safeFetch('/api/roles');
+        if (rolesResponse && rolesResponse.ok) {
+            const rolesData = await rolesResponse.json();
+            if (rolesData && rolesData.roles && rolesData.all_permissions) {
+                state.roles = rolesData.roles;
+                state.allPermissions = rolesData.all_permissions;
+                renderRoles();
+            }
+        }
+        
+    } catch (error) {
+        log.error('Update category error:', error);
+        showToast(error.message || 'Bo\'lim nomini o\'zgartirishda xatolik!', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i data-feather="save"></i><span>Saqlash</span>';
+        if (window.feather) window.feather.replace();
+    }
+};
+
+// Category o'chirish
+window.deleteCategory = async function(categoryName) {
+    const confirmed = await showConfirmDialog(
+        'Bo\'limni o\'chirish',
+        `"${categoryName}" bo\'limini o\'chirmoqchimisiz?\n\nEslatma: Barcha huquqlar boshqa bo\'limga ko\'chirilishi yoki o\'chirilishi kerak.`,
+        'warning'
+    );
+    
+    if (!confirmed) return;
+    
+    // Boshqa category'ga ko'chirish uchun modal
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'delete-category-modal';
+    
+    // Barcha category'larni olish
+    const categoriesResponse = await safeFetch('/api/roles/categories');
+    let categories = [];
+    if (categoriesResponse && categoriesResponse.ok) {
+        categories = await categoriesResponse.json();
+        categories = categories.filter(cat => cat.name !== categoryName);
+    }
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>
+                    <i data-feather="trash-2"></i>
+                    <span>Bo'limni O'chirish</span>
+                </h3>
+                <button class="btn-close close-modal-btn" onclick="this.closest('.modal').remove()">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning">
+                    <i data-feather="alert-triangle"></i>
+                    <div>
+                        <strong>Diqqat!</strong> "${categoryName}" bo'limidagi barcha huquqlar boshqa bo'limga ko'chirilishi yoki o'chirilishi kerak.
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Huquqlarni ko'chirish (ixtiyoriy)</label>
+                    <select id="move-to-category-select" class="form-control">
+                        <option value="">O'chirish (faqat superadmin)</option>
+                        ${categories.map(cat => `<option value="${escapeHtml(cat.name)}">${escapeHtml(cat.name)} (${cat.permissions_count} ta huquq)</option>`).join('')}
+                    </select>
+                    <small>Bo'sh qoldirilsa, barcha huquqlar o'chiriladi (faqat superadmin uchun)</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">Bekor qilish</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-category-btn" onclick="confirmDeleteCategory('${escapeHtml(categoryName)}')">
+                    <i data-feather="trash-2"></i>
+                    <span>O'chirish</span>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    if (window.feather) window.feather.replace();
+};
+
+// Category o'chirishni tasdiqlash
+window.confirmDeleteCategory = async function(categoryName) {
+    const select = document.getElementById('move-to-category-select');
+    const moveToCategory = select ? select.value.trim() : '';
+    
+    const btn = document.getElementById('confirm-delete-category-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> O\'chirilmoqda...';
+    
+    try {
+        const response = await safeFetch(`/api/roles/categories/${encodeURIComponent(categoryName)}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                move_to_category: moveToCategory
+            })
+        });
+        
+        if (!response || !response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Category o\'chirishda xatolik');
+        }
+        
+        const result = await response.json();
+        showToast(result.message || 'Bo\'lim muvaffaqiyatli o\'chirildi!', 'success');
+        
+        // Modal yopish
+        const modal = document.getElementById('delete-category-modal');
+        if (modal) modal.remove();
+        
+        // Categories ro'yxatini yangilash
+        await loadCategories();
+        
+        // Roles ro'yxatini ham yangilash
+        const rolesResponse = await safeFetch('/api/roles');
+        if (rolesResponse && rolesResponse.ok) {
+            const rolesData = await rolesResponse.json();
+            if (rolesData && rolesData.roles && rolesData.all_permissions) {
+                state.roles = rolesData.roles;
+                state.allPermissions = rolesData.all_permissions;
+                renderRoles();
+            }
+        }
+        
+    } catch (error) {
+        log.error('Delete category error:', error);
+        showToast(error.message || 'Bo\'limni o\'chirishda xatolik!', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i data-feather="trash-2"></i><span>O\'chirish</span>';
+        if (window.feather) window.feather.replace();
+    }
+};
+
+// Helper function - HTML escape
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

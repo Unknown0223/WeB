@@ -463,6 +463,50 @@ export function setupPivot() {
         DOM.publicTemplateOption.style.display = 'block';
     }
     
+    // Oxirgi kirish vaqtini tekshirish va default sana o'rnatish
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Vaqtni 00:00:00 ga o'rnatish
+    
+    const lastVisitKey = 'pivot_last_visit';
+    const lastVisitStr = localStorage.getItem(lastVisitKey);
+    let defaultStartDate, defaultEndDate;
+    
+    if (lastVisitStr) {
+        const lastVisit = new Date(lastVisitStr);
+        lastVisit.setHours(0, 0, 0, 0);
+        
+        // Kecha va bugun orasidagi farqni hisoblash
+        const diffTime = today - lastVisit;
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        
+        if (diffDays === 0) {
+            // Bugun kirgan - bugungi sana
+            defaultStartDate = new Date(today);
+            defaultEndDate = new Date(today);
+            console.log('[PIVOT] 📅 Bugun kirilgan - bugungi sana default');
+        } else if (diffDays === 1) {
+            // Kecha kirgan - kechagi sana
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            defaultStartDate = new Date(yesterday);
+            defaultEndDate = new Date(yesterday);
+            console.log('[PIVOT] 📅 Kecha kirilgan - kechagi sana default');
+        } else {
+            // 2 kun yoki ko'proq o'tgan - bugungi sana
+            defaultStartDate = new Date(today);
+            defaultEndDate = new Date(today);
+            console.log('[PIVOT] 📅 Uzoq vaqt o\'tgan - bugungi sana default');
+        }
+    } else {
+        // Birinchi marta kirilgan - bugungi sana
+        defaultStartDate = new Date(today);
+        defaultEndDate = new Date(today);
+        console.log('[PIVOT] 📅 Birinchi marta kirilgan - bugungi sana default');
+    }
+    
+    // Oxirgi kirish vaqtini yangilash
+    localStorage.setItem(lastVisitKey, today.toISOString());
+    
     // Shablonlar ro'yxatini yuklash
     renderTemplatesAsTags();
 
@@ -472,18 +516,13 @@ export function setupPivot() {
         mode: "range",
         dateFormat: "Y-m-d",
         locale: 'ru',
-        defaultDate: [ 
-            new Date(new Date().setDate(new Date().getDate() - 29)), 
-            new Date() 
-        ],
+        defaultDate: [defaultStartDate, defaultEndDate],
         plugins: [createQuickSelectPlugin()] // Tezkor variantlar plugin'i
     });
     
     setPivotDatePicker(fpInstance);
     
     // Default sana bilan avtomatik yuklanish
-    const defaultStartDate = new Date(new Date().setDate(new Date().getDate() - 29));
-    const defaultEndDate = new Date();
     fpInstance.setDate([defaultStartDate, defaultEndDate], false);
     
     // Avtomatik ma'lumotlar yuklash (sahifa yuklanganda yoki bo'limga o'tilganda)
@@ -493,12 +532,11 @@ export function setupPivot() {
     
     // Dastlabki holatda barcha maydonlar bilan minimal ma'lumot yaratish
     // Bu Fields panelida barcha maydonlarni ko'rsatish uchun kerak
-    const today = new Date();
-    const todayStr = flatpickr.formatDate(today, 'Y-m-d');
+    const todayStr = flatpickr.formatDate(defaultEndDate, 'Y-m-d');
     const initialEmptyData = [{
         "ID": null,
         "Дата": todayStr,
-        "День": today.getDate(),
+        "День": defaultEndDate.getDate(),
         "Бренд": null,
         "Филиал": null,
         "Сотрудник": null,
@@ -508,11 +546,6 @@ export function setupPivot() {
         "Сумма_число": 0,
         "Комментарий": ""
     }];
-    
-    console.log('[PIVOT] 🚀 setupPivot() - Dastlabki holatda minimal ma\'lumotlar yaratilmoqda:', {
-        fields: Object.keys(initialEmptyData[0]),
-        sampleData: initialEmptyData[0]
-    });
 
     // Global flag - Fields panelini bir marta yopish uchun
     let fieldsPanelClosed = false;
@@ -569,7 +602,6 @@ export function setupPivot() {
             }]
         },
         reportcomplete: function() {
-            console.log('[PIVOT] ✅ reportcomplete callback chaqirildi');
             hidePivotLoader();
             
             // DOM asosida ruscha tarjimani qo'llash
@@ -632,13 +664,64 @@ export function setupPivot() {
             }, 100);
         }
     });
-    
-    console.log('[PIVOT] ✅ WebDataRocks dastlabki holatda yaratildi, minimal ma\'lumotlar bilan');
 
     // Avtomatik yuklanish - async funksiya sifatida
     // Bu ma'lumotlarni yuklaydi, lekin agar ma'lumotlar bo'lmasa, minimal ma'lumotlar qoladi
     (async () => {
-        console.log('[PIVOT] 🔄 Avtomatik ma\'lumotlar yuklanmoqda...');
+        // Default shablonni yuklash (agar mavjud bo'lsa)
+        const defaultTemplateKey = 'pivot_default_template_id';
+        const defaultTemplateId = localStorage.getItem(defaultTemplateKey);
+        
+        if (defaultTemplateId && state.pivotTemplates && state.pivotTemplates.length > 0) {
+            // Shablonlar ro'yxatini kutish
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            const defaultTemplate = state.pivotTemplates.find(t => t.id === parseInt(defaultTemplateId));
+            
+            if (defaultTemplate && state.pivotGrid) {
+                try {
+                    console.log('[PIVOT] 📋 Default shablon yuklanmoqda:', defaultTemplate.name);
+                    
+                    const res = await safeFetch(`/api/pivot/templates/${defaultTemplateId}`);
+                    
+                    if (res && res.ok) {
+                        const report = await res.json();
+                        
+                        // Shablon yuklanganda Fields panelini yopib-qochirish
+                        if (report.options) {
+                            report.options.configuratorActive = false;
+                        } else {
+                            report.options = { configuratorActive: false };
+                        }
+                        
+                        // Shablon ichida ma'lumotlar bo'lmasligi kerak
+                        if (report.dataSource && report.dataSource.data) {
+                            report.dataSource = { data: [] };
+                        }
+                        
+                        // Shablon konfiguratsiyasini saqlash
+                        const templateConfig = {
+                            slice: report.slice,
+                            options: report.options,
+                            formats: report.formats
+                        };
+                        
+                        state.pivotGrid.setReport(report);
+                        
+                        // Tanlangan sana bilan ma'lumotlarni yuklash
+                        await updatePivotData(startDateStr, endDateStr, defaultCurrency, true, templateConfig);
+                        await loadExchangeRates(startDateStr, endDateStr);
+                        
+                        console.log('[PIVOT] ✅ Default shablon yuklandi:', defaultTemplate.name);
+                        return;
+                    }
+                } catch (error) {
+                    console.error('[PIVOT] ❌ Default shablon yuklashda xatolik:', error);
+                }
+            }
+        }
+        
+        // Agar default shablon bo'lmasa yoki yuklanmagan bo'lsa, oddiy yuklash
         await updatePivotData(startDateStr, endDateStr, defaultCurrency);
         await loadExchangeRates(startDateStr, endDateStr);
     })();
@@ -694,20 +777,16 @@ export function setupPivot() {
  * @param {string} currency - tanlangan valyuta (UZS, USD, EUR, RUB, KZT)
  */
 export async function updatePivotData(startDate, endDate, currency = 'UZS', preserveReportConfig = false, templateConfig = null) {
-    console.log('[PIVOT] 🔄 updatePivotData() chaqirildi:', { startDate, endDate, currency, preserveReportConfig, hasTemplateConfig: !!templateConfig });
-    
     if (!state.pivotGrid) {
         console.error('[PIVOT] ❌ state.pivotGrid topilmadi!');
         return;
     }
     
-    console.log('[PIVOT] ✅ state.pivotGrid mavjud');
     showPivotLoader();
     
     try {
         const params = new URLSearchParams({ startDate, endDate, currency });
         const url = `/api/pivot/data?${params.toString()}`;
-        console.log('[PIVOT] 📡 API so\'rovi yuborilmoqda:', url);
         
         const res = await safeFetch(url);
         
@@ -717,30 +796,26 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 status: res?.status,
                 statusText: res?.statusText
             });
+            
+            // 413 Payload Too Large - ma'lumotlar hajmi juda katta
+            if (res?.status === 413) {
+                const errorData = await res.json().catch(() => ({}));
+                const errorMessage = errorData.message || 'Ma\'lumotlar hajmi juda katta. Iltimos, sana oralig\'ini qisqartiring.';
+                showToast(errorMessage, true);
+                hidePivotLoader();
+                throw new Error(errorMessage);
+            }
+            
             throw new Error('Не удалось загрузить данные для сводной таблицы');
         }
         
         const data = await res.json();
-        console.log('[PIVOT] 📥 API javob:', {
-            dataType: typeof data,
-            isArray: Array.isArray(data),
-            dataLength: Array.isArray(data) ? data.length : 'N/A',
-            firstItem: Array.isArray(data) && data.length > 0 ? Object.keys(data[0]) : [],
-            dataPreview: Array.isArray(data) ? JSON.stringify(data.slice(0, 2)) : 'N/A'
-        });
         
         // Agar ma'lumotlar bo'lmasa, barcha maydonlar bilan minimal namuna ma'lumot yaratish
         let dataToProcess = data;
         const isEmpty = !data || data.length === 0;
-        console.log('[PIVOT] 📊 Ma\'lumotlar holati:', {
-            isEmpty: isEmpty,
-            dataLength: Array.isArray(data) ? data.length : 'N/A',
-            dataIsNull: data === null,
-            dataIsUndefined: data === undefined
-        });
         
         if (isEmpty) {
-            console.log('[PIVOT] ⚠️ Ma\'lumotlar bo\'sh, minimal namuna ma\'lumot yaratilmoqda...');
             const today = new Date();
             const todayStr = flatpickr.formatDate(today, 'Y-m-d');
             dataToProcess = [{
@@ -759,7 +834,6 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
         }
         
         // Ma'lumotlarni qayta ishlash
-        console.log('[PIVOT] 🔄 Ma\'lumotlar qayta ishlanmoqda...');
         const processedData = dataToProcess.map(item => {
             const dateStr = item["Дата"];
             let dayNumber = null;
@@ -786,29 +860,32 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
             };
         });
         
-        console.log('[PIVOT] ✅ Qayta ishlangan ma\'lumotlar:', {
-            processedDataLength: processedData.length,
-            firstItemFields: processedData.length > 0 ? Object.keys(processedData[0]) : [],
-            firstItemSample: processedData.length > 0 ? processedData[0] : null
-        });
+        // Ma'lumotlar hajmini tekshirish (WebDataRocks 1MB cheklovi)
+        const dataSize = new Blob([JSON.stringify(processedData)]).size;
+        const maxSize = 1024 * 1024; // 1MB = 1,048,576 bytes
+        const dataSizeMB = (dataSize / (1024 * 1024)).toFixed(2);
+        
+        console.log(`[PIVOT] 📊 Ma'lumotlar hajmi: ${dataSizeMB} MB (${processedData.length} ta yozuv)`);
+        
+        if (dataSize > maxSize) {
+            const errorMessage = `Ma'lumotlar hajmi juda katta (${dataSizeMB} MB). WebDataRocks maksimal 1 MB ma'lumotlarni qabul qiladi. Iltimos, sana oralig'ini qisqartiring yoki filial/brend bo'yicha filtrlash qo'llang.`;
+            console.error('[PIVOT] ❌ Ma\'lumotlar hajmi cheklovdan oshib ketdi:', {
+                dataSize: dataSize,
+                maxSize: maxSize,
+                dataSizeMB: dataSizeMB,
+                recordCount: processedData.length
+            });
+            showToast(errorMessage, true);
+            hidePivotLoader();
+            throw new Error(errorMessage);
+        }
         
         // Agar preserveReportConfig true bo'lsa, hozirgi report konfiguratsiyasini saqlaymiz
         if (preserveReportConfig) {
-            console.log('[PIVOT] 🔒 Report konfiguratsiyasi saqlanmoqda...');
-            
             // Agar templateConfig uzatilgan bo'lsa, uni ishlatamiz
             // Aks holda getReport() dan olamiz
             let currentReport;
             if (templateConfig) {
-                console.log('[PIVOT] 📋 Template konfiguratsiyasi ishlatilmoqda...');
-                console.log('[PIVOT] 📋 Template konfiguratsiyasi tafsilotlari:', {
-                    hasSlice: !!templateConfig.slice,
-                    hasOptions: !!templateConfig.options,
-                    hasFormats: !!templateConfig.formats,
-                    sliceRows: templateConfig.slice?.rows?.length || 0,
-                    sliceColumns: templateConfig.slice?.columns?.length || 0,
-                    sliceMeasures: templateConfig.slice?.measures?.length || 0
-                });
                 
                 // Template konfiguratsiyasidan to'liq report yaratamiz
                 currentReport = {
@@ -827,31 +904,18 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 throw new Error('Hozirgi report konfiguratsiyasi topilmadi');
             }
             
-            console.log('[PIVOT] 📋 Hozirgi report konfiguratsiyasi:', {
-                hasSlice: !!currentReport.slice,
-                hasOptions: !!currentReport.options,
-                hasFormats: !!currentReport.formats,
-                sliceRows: currentReport.slice?.rows?.length || 0,
-                sliceColumns: currentReport.slice?.columns?.length || 0,
-                sliceMeasures: currentReport.slice?.measures?.length || 0,
-                usingTemplateConfig: !!templateConfig
-            });
-            
             // Agar slice yo'q bo'lsa va templateConfig mavjud bo'lsa, uni ishlatamiz
             if (!currentReport.slice && templateConfig?.slice) {
-                console.log('[PIVOT] ⚠️ getReport() slice topilmadi, templateConfig.slice ishlatilmoqda...');
                 currentReport.slice = JSON.parse(JSON.stringify(templateConfig.slice));
             }
             
             // Agar formats yo'q bo'lsa va templateConfig mavjud bo'lsa, uni ishlatamiz
             if (!currentReport.formats && templateConfig?.formats) {
-                console.log('[PIVOT] ⚠️ getReport() formats topilmadi, templateConfig.formats ishlatilmoqda...');
                 currentReport.formats = JSON.parse(JSON.stringify(templateConfig.formats));
             }
             
             // Agar options yo'q bo'lsa va templateConfig mavjud bo'lsa, uni ishlatamiz
             if (!currentReport.options && templateConfig?.options) {
-                console.log('[PIVOT] ⚠️ getReport() options topilmadi, templateConfig.options ishlatilmoqda...');
                 currentReport.options = JSON.parse(JSON.stringify(templateConfig.options));
             }
             
@@ -981,15 +1045,6 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                            ? currentSlice 
                            : defaultSlice;
         
-        console.log('[PIVOT] 📋 Report konfiguratsiyasi yaratilmoqda:', {
-            hasRealData: hasRealData,
-            processedDataLength: processedData.length,
-            hasCurrentSlice: !!currentSlice,
-            currentSliceRows: currentSlice?.rows?.length || 0,
-            usingCurrentSlice: finalSlice === currentSlice,
-            configuratorActive: false
-        });
-        
         const pivotReport = {
             dataSource: { 
                 data: processedData 
@@ -1030,28 +1085,11 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
             ]
         };
         
-        console.log('[PIVOT] 📊 Pivot report konfiguratsiyasi:', {
-            hasDataSource: !!pivotReport.dataSource,
-            dataSourceDataLength: pivotReport.dataSource?.data?.length || 0,
-            hasSlice: !!pivotReport.slice,
-            sliceRows: pivotReport.slice?.rows?.length || 0,
-            sliceColumns: pivotReport.slice?.columns?.length || 0,
-            sliceMeasures: pivotReport.slice?.measures?.length || 0,
-            sliceFilters: pivotReport.slice?.reportFilters?.length || 0,
-            configuratorActive: pivotReport.options?.configuratorActive,
-            optionsKeys: Object.keys(pivotReport.options || {}),
-            reportPreview: JSON.stringify(pivotReport).substring(0, 500)
-        });
-        
         // Обновляем отчет полностью
-        console.log('[PIVOT] 🎯 setReport() chaqirilmoqda...');
         state.pivotGrid.setReport(pivotReport);
-        console.log('[PIVOT] ✅ setReport() muvaffaqiyatli chaqirildi');
         
         setTimeout(() => {
-            console.log('[PIVOT] 🔍 setReport() dan keyin tekshirish...');
             hidePivotLoader();
-            console.log('[PIVOT] ✅ updatePivotData() muvaffaqiyatli yakunlandi');
         }, 500);
         
     } catch (error) {
@@ -1074,24 +1112,13 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
  * Отобразить список сохраненных шаблонов в виде тегов
  */
 export async function renderTemplatesAsTags() {
-    console.log('[PIVOT] 🔍 renderTemplatesAsTags() chaqirildi');
-    console.log('[PIVOT] DOM.templatesTagList mavjudligi:', !!DOM.templatesTagList);
-    console.log('[PIVOT] DOM.templatesTagList element:', DOM.templatesTagList);
-    
     if (!DOM.templatesTagList) {
         console.error('[PIVOT] ❌ DOM.templatesTagList topilmadi!');
         return;
     }
     
     try {
-        console.log('[PIVOT] 📡 API so\'rovi yuborilmoqda: /api/pivot/templates');
         const res = await safeFetch('/api/pivot/templates');
-        
-        console.log('[PIVOT] 📥 API javob:', {
-            ok: res?.ok,
-            status: res?.status,
-            statusText: res?.statusText
-        });
         
         if (!res || !res.ok) {
             const errorText = await res.text().catch(() => 'Noma\'lum xatolik');
@@ -1104,15 +1131,9 @@ export async function renderTemplatesAsTags() {
         }
         
         const templates = await res.json();
-        console.log('[PIVOT] ✅ Shablonlar yuklandi:', {
-            count: templates?.length || 0,
-            templates: templates
-        });
-        
         state.pivotTemplates = templates;
         
         if (state.pivotTemplates.length === 0) {
-            console.log('[PIVOT] ⚠️ Shablonlar ro\'yxati bo\'sh');
             DOM.templatesTagList.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; color: var(--text-secondary);">
                     <i data-feather="bookmark" style="width: 48px; height: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
@@ -1124,27 +1145,12 @@ export async function renderTemplatesAsTags() {
             return;
         }
         
-        console.log('[PIVOT] 🎨 HTML generatsiya qilinmoqda...');
-        console.log('[PIVOT] 📋 Current user:', {
-            id: state.currentUser?.id,
-            role: state.currentUser?.role,
-            username: state.currentUser?.username
-        });
-        
         // Генерируем HTML для каждого шаблона
         const html = state.pivotTemplates.map(template => {
             const canModify = state.currentUser.role === 'admin' || state.currentUser.id === template.created_by;
             const isPublic = template.is_public;
             const publicClass = isPublic ? 'template-tag-public' : '';
             const publicBadge = isPublic ? `<span class="public-badge" title="Публичный шаблон"><i class="fas fa-globe"></i></span>` : '';
-            
-            console.log('[PIVOT] 📋 Template ma\'lumotlari:', {
-                id: template.id,
-                name: template.name,
-                isPublic: isPublic,
-                createdBy: template.created_by,
-                canModify: canModify
-            });
             
             const actionsHtml = canModify ? `
                 <div class="tag-actions">
@@ -1178,26 +1184,13 @@ export async function renderTemplatesAsTags() {
                 </div>`;
         }).join('');
         
-        console.log('[PIVOT] 📝 HTML uzunligi:', html.length, 'simvol');
-        console.log('[PIVOT] 🎯 DOM.templatesTagList.innerHTML o\'rnatilmoqda...');
-        console.log('[PIVOT] 🎯 DOM.templatesTagList mavjudligi (o\'rnatishdan oldin):', !!DOM.templatesTagList);
-        
         DOM.templatesTagList.innerHTML = html;
-        
-        console.log('[PIVOT] ✅ HTML o\'rnatildi. Elementlar soni:', DOM.templatesTagList.querySelectorAll('.template-tag').length);
-        console.log('[PIVOT] 🔍 Yaratilgan elementlar:', Array.from(DOM.templatesTagList.querySelectorAll('.template-tag')).map(el => ({
-            id: el.dataset.id,
-            name: el.querySelector('.tag-name')?.textContent,
-            hasActions: !!el.querySelector('.tag-actions')
-        })));
         
         // Обновляем иконки Feather - endi kerak emas, chunki to'g'ridan-to'g'ri SVG ishlatamiz
         // Lekin boshqa joylarda feather iconlar bo'lishi mumkin, shuning uchun qoldiramiz
-        console.log('[PIVOT] 🎨 Feather iconlar yangilanmoqda...');
         if (typeof feather !== 'undefined') {
             feather.replace();
         }
-        console.log('[PIVOT] ✅ renderTemplatesAsTags() muvaffaqiyatli yakunlandi');
         
     } catch (error) {
         console.error('[PIVOT] ❌ renderTemplatesAsTags() xatolik:', error);
@@ -1251,15 +1244,6 @@ export async function savePivotTemplate() {
         formats: fullReport.formats || []
     };
     
-    // dataSource saqlanmaydi - har safar kalendardagi sana bilan yuklanadi
-    console.log('[PIVOT] 💾 Shablon saqlanmoqda:', {
-        name: name,
-        hasSlice: !!templateReport.slice,
-        hasOptions: !!templateReport.options,
-        hasFormats: !!templateReport.formats,
-        dataSourceExcluded: true  // Ma'lumotlar saqlanmaydi
-    });
-    
     // Admin uchun public flag
     const isPublic = DOM.templateIsPublicCheckbox && DOM.templateIsPublicCheckbox.checked;
     
@@ -1275,6 +1259,8 @@ export async function savePivotTemplate() {
             throw new Error(errorData.message || 'Ошибка сохранения шаблона');
         }
         
+        const savedTemplate = await res.json();
+        
         showToast("Шаблон успешно сохранен!");
         DOM.saveTemplateModal.classList.add('hidden');
         DOM.templateNameInput.value = '';
@@ -1283,7 +1269,16 @@ export async function savePivotTemplate() {
         }
         
         // Обновляем список шаблонов
-        renderTemplatesAsTags();
+        await renderTemplatesAsTags();
+        
+        // Agar bu birinchi shablon bo'lsa yoki default shablon bo'lmasa, uni default shablon sifatida saqlash
+        const defaultTemplateKey = 'pivot_default_template_id';
+        const currentDefaultTemplateId = localStorage.getItem(defaultTemplateKey);
+        
+        if (!currentDefaultTemplateId || state.pivotTemplates.length === 1) {
+            localStorage.setItem(defaultTemplateKey, savedTemplate.templateId.toString());
+            console.log('[PIVOT] ✅ Default shablon o\'rnatildi:', savedTemplate.templateId);
+        }
         
     } catch (error) {
         showToast(error.message, true);
@@ -1358,31 +1353,18 @@ export async function renderTemplatesList() {
  * @param {Event} e - событие клика
  */
 export async function handleTemplateModalActions(e) {
-    console.log('[PIVOT] 🔍 handleTemplateModalActions() chaqirildi');
-    console.log('[PIVOT] 📍 Event target:', e.target);
-    console.log('[PIVOT] 📍 Event currentTarget:', e.currentTarget);
-    
     const listItem = e.target.closest('.template-list-item');
-    console.log('[PIVOT] 🏷️ Template list item topildi:', !!listItem);
     
     if (!listItem) {
-        console.log('[PIVOT] ⚠️ Template list item topilmadi, funksiya to\'xtatildi');
         return;
     }
     
     const deleteButton = e.target.closest('.delete-template-modal-btn');
     const templateId = listItem.dataset.id;
-    
-    console.log('[PIVOT] 📋 Template ma\'lumotlari:', {
-        templateId: templateId,
-        hasDeleteButton: !!deleteButton,
-        listItemHTML: listItem.outerHTML.substring(0, 200)
-    });
 
     if (deleteButton) {
         // Предотвращаем загрузку шаблона при клике на кнопку удаления
         e.stopPropagation();
-        console.log('[PIVOT] 🗑️ Delete tugmasi bosildi (modal)');
         
         const confirmed = await showConfirmDialog({
             title: 'Удаление шаблона',
@@ -1395,7 +1377,6 @@ export async function handleTemplateModalActions(e) {
         
         if (confirmed) {
             try {
-                console.log('[PIVOT] 📡 Shablonni o\'chirish so\'rovi yuborilmoqda (modal)...');
                 const res = await safeFetch(`/api/pivot/templates/${templateId}`, { 
                     method: 'DELETE' 
                 });
@@ -1406,7 +1387,6 @@ export async function handleTemplateModalActions(e) {
                     throw new Error(errorData.message || 'Ошибка удаления шаблона');
                 }
                 
-                console.log('[PIVOT] ✅ Shablon o\'chirildi (modal)');
                 showToast("Шаблон успешно удален.");
                 
                 // Обновляем оба списка
@@ -1420,10 +1400,6 @@ export async function handleTemplateModalActions(e) {
         }
     } else {
         // Загрузка шаблона (клик по элементу списка)
-        console.log('[PIVOT] 📥 Shablon yuklash boshlandi (modal)...');
-        console.log('[PIVOT] 📋 Template ID:', templateId);
-        console.log('[PIVOT] 🔍 state.pivotGrid mavjudligi:', !!state.pivotGrid);
-        
         if (!state.pivotGrid) {
             console.error('[PIVOT] ❌ state.pivotGrid topilmadi!');
             showToast('Сводная таблица не инициализирована', true);
@@ -1431,14 +1407,7 @@ export async function handleTemplateModalActions(e) {
         }
         
         try {
-            console.log('[PIVOT] 📡 API so\'rovi yuborilmoqda: /api/pivot/templates/' + templateId);
             const res = await safeFetch(`/api/pivot/templates/${templateId}`);
-            
-            console.log('[PIVOT] 📥 API javob:', {
-                ok: res?.ok,
-                status: res?.status,
-                statusText: res?.statusText
-            });
             
             if (!res || !res.ok) {
                 const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
@@ -1447,14 +1416,6 @@ export async function handleTemplateModalActions(e) {
             }
             
             const report = await res.json();
-            console.log('[PIVOT] ✅ Shablon ma\'lumotlari yuklandi (modal):', {
-                hasDataSource: !!report.dataSource,
-                hasSlice: !!report.slice,
-                hasOptions: !!report.options,
-                reportKeys: Object.keys(report)
-            });
-            
-            console.log('[PIVOT] 🎯 setReport() chaqirilmoqda (modal)...');
             
             // Shablon yuklanganda Fields panelini yopib-qochirish
             if (report.options) {
@@ -1466,7 +1427,6 @@ export async function handleTemplateModalActions(e) {
             // Shablon ichida ma'lumotlar bo'lmasligi kerak - har safar kalendardagi sana bilan yuklanadi
             // Agar shablon ichida ma'lumotlar bo'lsa, ularni olib tashlaymiz
             if (report.dataSource && report.dataSource.data) {
-                console.log('[PIVOT] ⚠️ Shablon ichida eski ma\'lumotlar topildi, olib tashlanmoqda...');
                 report.dataSource = { data: [] };  // Bo'sh ma'lumotlar
             }
             
@@ -1478,52 +1438,38 @@ export async function handleTemplateModalActions(e) {
             };
             
             state.pivotGrid.setReport(report);
-            console.log('[PIVOT] ✅ setReport() muvaffaqiyatli chaqirildi (modal)');
             
             // Tanlangan kalendar kuni bilan ma'lumotlarni yuklash
             const selectedDates = pivotDatePickerFP?.selectedDates || [];
             const selectedCurrency = DOM.pivotCurrencySelect?.value || 'UZS';
             
-            console.log('[PIVOT] 📅 Sana ma\'lumotlari (modal):', {
-                selectedDatesCount: selectedDates.length,
-                selectedCurrency: selectedCurrency,
-                dates: selectedDates.map(d => flatpickr.formatDate(d, 'Y-m-d'))
-            });
-            
             if (selectedDates.length === 1) {
                 const singleDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
-                console.log('[PIVOT] 📊 Shablon konfiguratsiyasi + bitta sana bilan ma\'umotlar yuklanmoqda (modal):', singleDate);
                 await updatePivotData(singleDate, singleDate, selectedCurrency, true, templateConfig);
                 await loadExchangeRates(singleDate, singleDate);
             } else if (selectedDates.length === 2) {
                 const startDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
                 const endDate = flatpickr.formatDate(selectedDates[1], 'Y-m-d');
-                console.log('[PIVOT] 📊 Shablon konfiguratsiyasi + sana oralig\'i bilan ma\'umotlar yuklanmoqda (modal):', { startDate, endDate });
                 await updatePivotData(startDate, endDate, selectedCurrency, true, templateConfig);
                 await loadExchangeRates(startDate, endDate);
             } else {
                 const defaultStartDate = flatpickr.formatDate(new Date(new Date().setDate(new Date().getDate() - 29)), 'Y-m-d');
                 const defaultEndDate = flatpickr.formatDate(new Date(), 'Y-m-d');
-                console.log('[PIVOT] 📊 Shablon konfiguratsiyasi + default sana oralig\'i bilan ma\'umotlar yuklanmoqda (modal):', { defaultStartDate, defaultEndDate });
                 await updatePivotData(defaultStartDate, defaultEndDate, selectedCurrency, true, templateConfig);
                 await loadExchangeRates(defaultStartDate, defaultEndDate);
             }
             
             const templateName = listItem.querySelector('.template-list-name')?.textContent || 'Noma\'lum';
-            console.log('[PIVOT] ✅ Shablon muvaffaqiyatli yuklandi (modal):', templateName);
             showToast(`Шаблон "${templateName}" загружен.`);
             
             // Templates panelini yig'ish
             const templatesPanel = document.getElementById('templates-panel');
             if (templatesPanel) {
                 templatesPanel.classList.add('collapsed');
-                console.log('[PIVOT] ✅ Templates panel yig\'ildi (modal)');
             }
             
             // Закрываем модальное окно
-            console.log('[PIVOT] 🚪 Modal oyna yopilmoqda...');
             DOM.loadTemplateModal.classList.add('hidden');
-            console.log('[PIVOT] ✅ Modal oyna yopildi');
             
         } catch (error) {
             console.error('[PIVOT] ❌ Shablon yuklashda xatolik (modal):', error);
@@ -1542,42 +1488,26 @@ export async function handleTemplateModalActions(e) {
  * @param {Event} e - событие клика
  */
 export async function handleTemplateActions(e) {
-    console.log('[PIVOT] 🔍 handleTemplateActions() chaqirildi');
-    console.log('[PIVOT] 📍 Event target:', e.target);
-    console.log('[PIVOT] 📍 Event currentTarget:', e.currentTarget);
-    
     const tag = e.target.closest('.template-tag');
-    console.log('[PIVOT] 🏷️ Template tag topildi:', !!tag);
     
     if (!tag) {
-        console.log('[PIVOT] ⚠️ Template tag topilmadi, funksiya to\'xtatildi');
         return;
     }
     
     const button = e.target.closest('button');
     const templateId = tag.dataset.id;
     
-    console.log('[PIVOT] 📋 Template ma\'lumotlari:', {
-        templateId: templateId,
-        hasButton: !!button,
-        buttonClass: button ? button.className : null,
-        tagHTML: tag.outerHTML.substring(0, 200)
-    });
-    
     if (button) {
         // Предотвращаем загрузку шаблона при клике на кнопки действий
         e.stopPropagation();
-        console.log('[PIVOT] 🔘 Tugma bosildi, shablon yuklanmaydi');
         
         // Изменение названия шаблона
         if (button.classList.contains('edit-template-btn')) {
-            console.log('[PIVOT] ✏️ Edit tugmasi bosildi');
             const currentName = button.dataset.name;
             const newName = prompt("Введите новое название для шаблона:", currentName);
             
             if (newName && newName.trim() && newName.trim() !== currentName) {
                 try {
-                    console.log('[PIVOT] 📡 Shablon nomini yangilash so\'rovi yuborilmoqda...');
                     const res = await safeFetch(`/api/pivot/templates/${templateId}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
@@ -1590,7 +1520,6 @@ export async function handleTemplateActions(e) {
                         throw new Error(errorData.message || 'Ошибка обновления шаблона');
                     }
                     
-                    console.log('[PIVOT] ✅ Shablon nomi yangilandi');
                     showToast("Название шаблона успешно изменено.");
                     renderTemplatesAsTags();
                     
@@ -1602,7 +1531,6 @@ export async function handleTemplateActions(e) {
         } 
         // Удаление шаблона
         else if (button.classList.contains('delete-template-btn')) {
-            console.log('[PIVOT] 🗑️ Delete tugmasi bosildi');
             const confirmed = await showConfirmDialog({
                 title: 'Удаление шаблона',
                 message: 'Вы действительно хотите удалить этот шаблон?',
@@ -1614,7 +1542,6 @@ export async function handleTemplateActions(e) {
             
             if (confirmed) {
                 try {
-                    console.log('[PIVOT] 📡 Shablonni o\'chirish so\'rovi yuborilmoqda...');
                     const res = await safeFetch(`/api/pivot/templates/${templateId}`, { 
                         method: 'DELETE' 
                     });
@@ -1625,7 +1552,6 @@ export async function handleTemplateActions(e) {
                         throw new Error(errorData.message || 'Ошибка удаления шаблона');
                     }
                     
-                    console.log('[PIVOT] ✅ Shablon o\'chirildi');
                     showToast("Шаблон успешно удален.");
                     renderTemplatesAsTags();
                     
@@ -1637,12 +1563,6 @@ export async function handleTemplateActions(e) {
         }
     } else {
         // Загрузка шаблона (клик по самому тегу)
-        console.log('[PIVOT] 📥 Shablon yuklash boshlandi...');
-        console.log('[PIVOT] 📋 Template ID:', templateId);
-        console.log('[PIVOT] 🔍 state.pivotGrid mavjudligi:', !!state.pivotGrid);
-        console.log('[PIVOT] 🔍 state.pivotGrid type:', typeof state.pivotGrid);
-        console.log('[PIVOT] 🔍 state.pivotGrid setReport mavjudligi:', typeof state.pivotGrid?.setReport);
-        
         if (!state.pivotGrid) {
             console.error('[PIVOT] ❌ state.pivotGrid topilmadi!');
             showToast('Сводная таблица не инициализирована', true);
@@ -1657,14 +1577,7 @@ export async function handleTemplateActions(e) {
         }
         
         try {
-            console.log('[PIVOT] 📡 API so\'rovi yuborilmoqda: /api/pivot/templates/' + templateId);
             const res = await safeFetch(`/api/pivot/templates/${templateId}`);
-            
-            console.log('[PIVOT] 📥 API javob:', {
-                ok: res?.ok,
-                status: res?.status,
-                statusText: res?.statusText
-            });
             
             if (!res || !res.ok) {
                 const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
@@ -1673,27 +1586,6 @@ export async function handleTemplateActions(e) {
             }
             
             const report = await res.json();
-            console.log('[PIVOT] ✅ Shablon ma\'lumotlari yuklandi:', {
-                hasDataSource: !!report.dataSource,
-                hasSlice: !!report.slice,
-                hasOptions: !!report.options,
-                hasFormats: !!report.formats,
-                reportKeys: Object.keys(report),
-                dataSourceType: typeof report.dataSource,
-                dataSourceKeys: report.dataSource ? Object.keys(report.dataSource) : [],
-                sliceKeys: report.slice ? Object.keys(report.slice) : [],
-                sliceRows: report.slice?.rows?.length || 0,
-                sliceColumns: report.slice?.columns?.length || 0,
-                sliceMeasures: report.slice?.measures?.length || 0,
-                reportString: JSON.stringify(report).substring(0, 500)
-            });
-            
-            console.log('[PIVOT] 🎯 setReport() chaqirilmoqda...');
-            console.log('[PIVOT] 🎯 setReport() argument:', {
-                type: typeof report,
-                keys: Object.keys(report),
-                preview: JSON.stringify(report).substring(0, 200)
-            });
             
             try {
                 // Shablon yuklanganda Fields panelini yopib-qochirish
@@ -1706,7 +1598,6 @@ export async function handleTemplateActions(e) {
                 // Shablon ichida ma'lumotlar bo'lmasligi kerak - har safar kalendardagi sana bilan yuklanadi
                 // Agar shablon ichida ma'lumotlar bo'lsa, ularni olib tashlaymiz
                 if (report.dataSource && report.dataSource.data) {
-                    console.log('[PIVOT] ⚠️ Shablon ichida eski ma\'lumotlar topildi, olib tashlanmoqda...');
                     report.dataSource = { data: [] };  // Bo'sh ma'lumotlar
                 }
                 
@@ -1718,33 +1609,23 @@ export async function handleTemplateActions(e) {
                 };
                 
                 state.pivotGrid.setReport(report);
-                console.log('[PIVOT] ✅ setReport() muvaffaqiyatli chaqirildi');
                 
                 // Tanlangan kalendar kuni bilan ma'lumotlarni yuklash
                 const selectedDates = pivotDatePickerFP?.selectedDates || [];
                 const selectedCurrency = DOM.pivotCurrencySelect?.value || 'UZS';
                 
-                console.log('[PIVOT] 📅 Sana ma\'lumotlari:', {
-                    selectedDatesCount: selectedDates.length,
-                    selectedCurrency: selectedCurrency,
-                    dates: selectedDates.map(d => flatpickr.formatDate(d, 'Y-m-d'))
-                });
-                
                 if (selectedDates.length === 1) {
                     const singleDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
-                    console.log('[PIVOT] 📊 Shablon konfiguratsiyasi + bitta sana bilan ma\'umotlar yuklanmoqda:', singleDate);
                     await updatePivotData(singleDate, singleDate, selectedCurrency, true, templateConfig);
                     await loadExchangeRates(singleDate, singleDate);
                 } else if (selectedDates.length === 2) {
                     const startDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
                     const endDate = flatpickr.formatDate(selectedDates[1], 'Y-m-d');
-                    console.log('[PIVOT] 📊 Shablon konfiguratsiyasi + sana oralig\'i bilan ma\'umotlar yuklanmoqda:', { startDate, endDate });
                     await updatePivotData(startDate, endDate, selectedCurrency, true, templateConfig);
                     await loadExchangeRates(startDate, endDate);
                 } else {
                     const defaultStartDate = flatpickr.formatDate(new Date(new Date().setDate(new Date().getDate() - 29)), 'Y-m-d');
                     const defaultEndDate = flatpickr.formatDate(new Date(), 'Y-m-d');
-                    console.log('[PIVOT] 📊 Shablon konfiguratsiyasi + default sana oralig\'i bilan ma\'umotlar yuklanmoqda:', { defaultStartDate, defaultEndDate });
                     await updatePivotData(defaultStartDate, defaultEndDate, selectedCurrency, true, templateConfig);
                     await loadExchangeRates(defaultStartDate, defaultEndDate);
                 }
@@ -1759,14 +1640,12 @@ export async function handleTemplateActions(e) {
             }
             
             const templateName = tag.querySelector('.tag-name')?.textContent || 'Noma\'lum';
-            console.log('[PIVOT] ✅ Shablon muvaffaqiyatli yuklandi:', templateName);
             showToast(`Шаблон "${templateName}" загружен.`);
             
             // Templates panelini yig'ish
             const templatesPanel = document.getElementById('templates-panel');
             if (templatesPanel) {
                 templatesPanel.classList.add('collapsed');
-                console.log('[PIVOT] ✅ Templates panel yig\'ildi');
             }
             
         } catch (error) {

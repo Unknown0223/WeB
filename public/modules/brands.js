@@ -163,12 +163,15 @@ export function openBrandModal(brandId = null) {
         updateModalBorder(e.target.value);
     });
     
+    const sortOrderInput = document.getElementById('brand-sort-order-input');
+    
     if (brandId) {
         // Tahrirlash rejimi
         const brand = allBrands.find(b => b.id === brandId);
         title.textContent = 'Brendni Tahrirlash';
         nameInput.value = brand.name;
         colorInput.value = brand.color || '#4facfe';
+        sortOrderInput.value = brand.sort_order || '';
         updateModalBorder(brand.color || '#4facfe');
         renderLocationCheckboxes(brand.locations || []);
     } else {
@@ -176,6 +179,7 @@ export function openBrandModal(brandId = null) {
         title.textContent = 'Yangi Brend';
         nameInput.value = '';
         colorInput.value = '#4facfe';
+        sortOrderInput.value = '';
         updateModalBorder('#4facfe');
         renderLocationCheckboxes([]);
     }
@@ -274,6 +278,7 @@ function renderLocationCheckboxes(selectedLocations = []) {
 export async function saveBrand() {
     const nameInput = document.getElementById('brand-name-input');
     const colorInput = document.getElementById('brand-color-input');
+    const sortOrderInput = document.getElementById('brand-sort-order-input');
     
     const name = nameInput.value.trim();
     if (!name) {
@@ -285,10 +290,12 @@ export async function saveBrand() {
         document.querySelectorAll('input[name="brand-location"]:checked')
     ).map(cb => cb.value);
 
+    const sortOrder = sortOrderInput.value.trim();
     const data = {
         name,
         color: colorInput.value || '#4facfe',
-        locations: selectedLocations
+        locations: selectedLocations,
+        sort_order: sortOrder ? parseInt(sortOrder) : null
     };
 
     try {

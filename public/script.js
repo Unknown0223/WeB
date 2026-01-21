@@ -361,6 +361,71 @@ const renderKpiCards = (stats) => {
         
         // Avatar yuklash
         loadUserAvatar();
+        
+        // Tema yuklash
+        loadTheme();
+    }
+    
+    // Tema yuklash va qo'llash
+    async function loadTheme() {
+        try {
+            const res = await fetch('/api/users/me/theme');
+            if (res.ok) {
+                const data = await res.json();
+                const theme = data.theme || 'dark';
+                applyTheme(theme);
+                updateThemeUI(theme);
+            }
+        } catch (error) {
+            console.error('Tema yuklashda xatolik:', error);
+            applyTheme('dark'); // Default dark theme
+        }
+    }
+    
+    // Tema qo'llash
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+    }
+    
+    // Tema UI ni yangilash
+    function updateThemeUI(theme) {
+        const themeIcon = document.getElementById('theme-icon');
+        const themeText = document.getElementById('theme-text');
+        
+        if (themeIcon) {
+            themeIcon.setAttribute('data-feather', theme === 'dark' ? 'sun' : 'moon');
+            feather.replace();
+        }
+        
+        if (themeText) {
+            themeText.textContent = theme === 'dark' ? 'Kunduzgi rejim' : 'Tungi rejim';
+        }
+    }
+    
+    // Tema o'zgartirish
+    async function toggleTheme() {
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        try {
+            const res = await fetch('/api/users/me/theme', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ theme: newTheme })
+            });
+            
+            if (res.ok) {
+                applyTheme(newTheme);
+                updateThemeUI(newTheme);
+            } else {
+                console.error('Tema saqlashda xatolik');
+            }
+        } catch (error) {
+            console.error('Tema o\'zgartirishda xatolik:', error);
+        }
     }
     
     async function loadUserAvatar() {
@@ -2240,6 +2305,7 @@ const renderKpiCards = (stats) => {
         const changePasswordBtn = document.getElementById('change-password-btn');
         const sessionsBtn = document.getElementById('sessions-btn');
         const notificationsBtn = document.getElementById('notifications-btn');
+        const themeToggleBtn = document.getElementById('theme-toggle-btn');
         const dropdownLogoutBtn = document.getElementById('dropdown-logout-btn');
         
         const avatarModal = document.getElementById('avatar-modal');
@@ -2310,6 +2376,14 @@ const renderKpiCards = (stats) => {
             notificationsBtn.addEventListener('click', () => {
                 closeDropdown();
                 openNotificationsModal();
+            });
+        }
+        
+        if (themeToggleBtn) {
+            themeToggleBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                closeDropdown();
+                await toggleTheme();
             });
         }
         

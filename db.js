@@ -4,6 +4,8 @@ const knex = require('knex');
 const config = require('./knexfile.js');
 const bcrypt = require('bcrypt');
 const { createLogger } = require('./utils/logger.js');
+const path = require('path');
+const fs = require('fs').promises;
 
 const log = createLogger('DB');
 const saltRounds = 10;
@@ -12,7 +14,28 @@ const saltRounds = 10;
 const env = process.env.NODE_ENV || 'development';
 const dbConfig = config[env] || config.development;
 
+// Asosiy database connection
 const db = knex(dbConfig);
+
+// Database turini aniqlash (avtomatik)
+const isPostgres = dbConfig.client === 'pg';
+const isSqlite = dbConfig.client === 'sqlite3';
+
+// Yordamchi funksiya: Constraint xatolikni tekshirish
+const isConstraintError = (error) => {
+    if (!error) return false;
+    
+    // PostgreSQL xatoliklari
+    if (error.code === '23505') return true; // unique_violation
+    if (error.code === '23503') return true; // foreign_key_violation
+    if (error.code === '23502') return true; // not_null_violation
+    
+    // SQLite xatoliklari
+    if (error.code === 'SQLITE_CONSTRAINT') return true;
+    if (error.message && error.message.includes('UNIQUE constraint failed')) return true;
+    
+    return false;
+};
 
 // Yordamchi funksiya: Audit jurnaliga yozish
 const logAction = async (userId, action, targetType = null, targetId = null, details = {}) => {
@@ -32,7 +55,15 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
             user_agent: userAgent,
         };
         
-        const [logId] = await db('audit_logs').insert(logEntry);
+        // SQLite uchun .returning() ishlamaydi
+        let logId;
+        if (isSqlite) {
+            const insertedIds = await db('audit_logs').insert(logEntry);
+            logId = Array.isArray(insertedIds) ? insertedIds[0] : insertedIds;
+        } else {
+            const result = await db('audit_logs').insert(logEntry).returning('id');
+            logId = result[0]?.id || result[0];
+        }
         
         // Muhim event'lar uchun WebSocket orqali realtime yuborish
         const importantActions = [
@@ -62,7 +93,6 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
 const initializeDB = async () => {
     
     await db.migrate.latest();
-    
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
     // YANGI LOGIKA: Faqat superadmin standart rol bo'ladi, boshqa rollar superadmin tomonidan yaratiladi
@@ -125,7 +155,7 @@ const initializeDB = async () => {
                         .ignore();
                 } catch (insertError) {
                     // Agar insert xatolik bo'lsa, ignore qilish (chunki onConflict.ignore() ishlashi kerak)
-                    if (insertError.code !== 'SQLITE_CONSTRAINT') {
+                    if (!isConstraintError(insertError)) {
                         throw insertError;
                     }
                 }
@@ -174,8 +204,8 @@ const initializeDB = async () => {
             lastError = error;
             retries--;
             
-            if (error.code === 'SQLITE_BUSY' && retries > 0) {
-                // Qisqa kutish va qayta urinish
+            if (error.code === '23505' && retries > 0) {
+                // Qisqa kutish va qayta urinish (PostgreSQL lock)
                 await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries))); // 100ms, 200ms, 300ms
             } else {
                 // Boshqa xatolik yoki retry'lar tugagan
@@ -236,7 +266,6 @@ const initializeDB = async () => {
         // Mavjud bo'lsa, o'zgartirmaymiz - foydalanuvchi sozlamalar orqali boshqaradi
     }
     
-    log.info('Database ishga tushirildi va boshlang\'ich ma\'lumotlar tekshirildi');
 };
 
-module.exports = { db, initializeDB, logAction };
+module.exports = { db, initializeDB, logAction, isPostgres, isSqlite, isConstraintError };

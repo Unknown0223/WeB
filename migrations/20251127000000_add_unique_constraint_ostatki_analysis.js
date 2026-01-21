@@ -2,22 +2,42 @@
  * @param { import('knex').Knex } knex
  */
 exports.up = async function(knex) {
+  // Database client turini aniqlash
+  const client = knex.client.config.client;
+  const isPostgres = client === 'pg';
+  
   // Avval mavjud duplicate'larni tozalash
   try {
-    const duplicatesResult = await knex.raw(`
-      SELECT smart_code, filial, COUNT(*) as count, GROUP_CONCAT(id) as ids
-      FROM ostatki_analysis
-      GROUP BY smart_code, filial
-      HAVING COUNT(*) > 1
-    `);
+    // PostgreSQL yoki SQLite ga qarab so'rov
+    let duplicatesResult;
+    if (isPostgres) {
+      // PostgreSQL uchun STRING_AGG ishlatamiz
+      duplicatesResult = await knex.raw(`
+        SELECT smart_code, filial, COUNT(*) as count, STRING_AGG(id::text, ',') as ids
+        FROM ostatki_analysis
+        GROUP BY smart_code, filial
+        HAVING COUNT(*) > 1
+      `);
+    } else {
+      // SQLite uchun GROUP_CONCAT
+      duplicatesResult = await knex.raw(`
+        SELECT smart_code, filial, COUNT(*) as count, GROUP_CONCAT(id) as ids
+        FROM ostatki_analysis
+        GROUP BY smart_code, filial
+        HAVING COUNT(*) > 1
+      `);
+    }
     
-    // SQLite uchun natijani to'g'ri olish
+    // Natijani to'g'ri olish
     let dupRows = [];
-    if (duplicatesResult && duplicatesResult.length > 0) {
-      dupRows = Array.isArray(duplicatesResult) ? duplicatesResult : (duplicatesResult[0] || []);
-    } else if (duplicatesResult && !Array.isArray(duplicatesResult)) {
-      // SQLite natijasi object ko'rinishida bo'lishi mumkin
+    if (isPostgres) {
       dupRows = duplicatesResult.rows || [];
+    } else {
+      if (duplicatesResult && duplicatesResult.length > 0) {
+        dupRows = Array.isArray(duplicatesResult) ? duplicatesResult : (duplicatesResult[0] || []);
+      } else if (duplicatesResult && !Array.isArray(duplicatesResult)) {
+        dupRows = duplicatesResult.rows || [];
+      }
     }
     
     if (dupRows && dupRows.length > 0) {

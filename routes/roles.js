@@ -70,6 +70,173 @@ router.get('/', isAuthenticated, hasPermission('roles:manage'), async (req, res)
 
 // ===== STATIK ROUTE'LAR (dinamik :role_name dan OLDIN bo'lishi kerak) =====
 
+// ===== CATEGORIES (BO'LIMLAR) MANAGEMENT =====
+
+// Barcha category'larni olish
+router.get('/categories', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const categories = await db('permissions')
+            .select('category')
+            .distinct()
+            .orderBy('category');
+        
+        // Har bir category uchun huquqlar sonini hisoblash
+        const categoriesWithCount = await Promise.all(
+            categories.map(async (cat) => {
+                const count = await db('permissions')
+                    .where('category', cat.category)
+                    .count('* as count')
+                    .first();
+                return {
+                    name: cat.category,
+                    permissions_count: count ? parseInt(count.count) : 0
+                };
+            })
+        );
+        
+        res.json(categoriesWithCount);
+    } catch (error) {
+        log.error('Get categories error:', error);
+        res.status(500).json({ message: 'Bo\'limlarni yuklashda xatolik' });
+    }
+});
+
+// Yangi category yaratish
+router.post('/categories', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const { category_name, description, icon } = req.body;
+        
+        if (!category_name || category_name.trim() === '') {
+            return res.status(400).json({ message: 'Bo\'lim nomi kiritilishi shart' });
+        }
+        
+        // Category allaqachon mavjudmi?
+        const existing = await db('permissions')
+            .where('category', category_name.trim())
+            .first();
+        
+        if (existing) {
+            return res.status(400).json({ message: 'Bu bo\'lim allaqachon mavjud' });
+        }
+        
+        // Category yaratish - aslida bu faqat ma'lumot sifatida saqlanadi
+        // Chunki category permissions jadvalidagi category ustunida saqlanadi
+        res.json({ 
+            message: 'Bo\'lim yaratildi',
+            category: {
+                name: category_name.trim(),
+                description: description || '',
+                icon: icon || '📁'
+            }
+        });
+    } catch (error) {
+        log.error('Create category error:', error);
+        res.status(500).json({ message: 'Bo\'lim yaratishda xatolik' });
+    }
+});
+
+// Category nomini o'zgartirish
+router.put('/categories/:old_name', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const { old_name } = req.params;
+        const { new_name, description, icon } = req.body;
+        
+        if (!new_name || new_name.trim() === '') {
+            return res.status(400).json({ message: 'Yangi bo\'lim nomi kiritilishi shart' });
+        }
+        
+        // Eski category mavjudmi?
+        const existing = await db('permissions')
+            .where('category', old_name)
+            .first();
+        
+        if (!existing) {
+            return res.status(404).json({ message: 'Bo\'lim topilmadi' });
+        }
+        
+        // Yangi category allaqachon mavjudmi?
+        const newExists = await db('permissions')
+            .where('category', new_name.trim())
+            .first();
+        
+        if (newExists && new_name.trim() !== old_name) {
+            return res.status(400).json({ message: 'Bu nom bilan bo\'lim allaqachon mavjud' });
+        }
+        
+        // Barcha huquqlarni yangi category'ga ko'chirish
+        await db('permissions')
+            .where('category', old_name)
+            .update({ category: new_name.trim() });
+        
+        log.info(`Category o'zgartirildi: ${old_name} -> ${new_name.trim()}`);
+        
+        res.json({ 
+            message: 'Bo\'lim nomi muvaffaqiyatli o\'zgartirildi',
+            old_name: old_name,
+            new_name: new_name.trim()
+        });
+    } catch (error) {
+        log.error('Update category error:', error);
+        res.status(500).json({ message: 'Bo\'lim nomini o\'zgartirishda xatolik' });
+    }
+});
+
+// Category o'chirish
+router.delete('/categories/:category_name', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+    try {
+        const { category_name } = req.params;
+        const { move_to_category } = req.body; // Optional: boshqa category'ga ko'chirish
+        
+        // Category mavjudmi?
+        const permissions = await db('permissions')
+            .where('category', category_name)
+            .select('*');
+        
+        if (permissions.length === 0) {
+            return res.status(404).json({ message: 'Bo\'lim topilmadi' });
+        }
+        
+        // Agar move_to_category berilgan bo'lsa, barcha huquqlarni o'sha category'ga ko'chirish
+        if (move_to_category && move_to_category.trim() !== '') {
+            await db('permissions')
+                .where('category', category_name)
+                .update({ category: move_to_category.trim() });
+            
+            log.info(`Category o'chirildi va huquqlar ko'chirildi: ${category_name} -> ${move_to_category.trim()}`);
+            
+            res.json({ 
+                message: `Bo'lim o'chirildi va ${permissions.length} ta huquq "${move_to_category.trim()}" bo'limiga ko'chirildi`,
+                moved_permissions_count: permissions.length
+            });
+        } else {
+            // Agar ko'chirish category berilmagan bo'lsa, huquqlarni o'chirish
+            // Eslatma: Bu xavfli, chunki bu barcha huquqlarni o'chiradi
+            // Shuning uchun faqat superadmin yoki maxsus ruxsat bilan
+            const adminRole = req.session.user?.role;
+            if (adminRole !== 'super_admin' && adminRole !== 'superadmin') {
+                return res.status(403).json({ 
+                    message: 'Bo\'limni huquqlarsiz o\'chirish faqat superadmin uchun ruxsat etilgan. Iltimos, boshqa bo\'limga ko\'chirishni belgilang.' 
+                });
+            }
+            
+            // Barcha huquqlarni o'chirish
+            await db('permissions')
+                .where('category', category_name)
+                .del();
+            
+            log.warn(`Category va barcha huquqlar o'chirildi: ${category_name}`);
+            
+            res.json({ 
+                message: `Bo'lim va ${permissions.length} ta huquq o'chirildi`,
+                deleted_permissions_count: permissions.length
+            });
+        }
+    } catch (error) {
+        log.error('Delete category error:', error);
+        res.status(500).json({ message: 'Bo\'limni o\'chirishda xatolik' });
+    }
+});
+
 // Get all available permissions
 router.get('/permissions', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
     try {
@@ -236,7 +403,12 @@ router.put('/:role_name', isAuthenticated, hasPermission('roles:manage'), async 
 });
 
 // Create new role
-router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res) => {
+router.post('/', isAuthenticated, async (req, res) => {
+    // Faqat superadmin rol yarata oladi
+    if (req.session.user.role !== 'superadmin' && req.session.user.role !== 'super_admin') {
+        return res.status(403).json({ message: 'Rol yaratish faqat superadmin uchun ruxsat berilgan.' });
+    }
+    
     const { role_name, requires_brands = null, requires_locations = null, locations = [], brands = [], permissions = [] } = req.body;
     
     if (!role_name || !/^[a-z0-9_]+$/.test(role_name)) {
@@ -318,7 +490,7 @@ router.post('/', isAuthenticated, hasPermission('roles:manage'), async (req, res
             user_id: adminId,
             action: 'create_role',
             target_type: 'role',
-            target_id: role_name,
+            target_id: null, // target_id integer, rol nomi string bo'lgani uchun null qilamiz (rol nomi details'da mavjud)
             details: JSON.stringify({ 
                 role_name, 
                 requires_brands: requires_brands,
@@ -426,8 +598,9 @@ router.put('/:role_name/requirements', isAuthenticated, hasPermission('roles:man
             user_id: adminId,
             action: 'update_role_requirements',
             target_type: 'role',
-            target_id: role_name,
+            target_id: null, // target_id integer, rol nomi string bo'lgani uchun null qilamiz (rol nomi details'da mavjud)
             details: JSON.stringify({ 
+                role_name,
                 requires_brands: requires_brands,
                 requires_locations: requires_locations,
                 locations_count: locations.length,
@@ -489,7 +662,7 @@ router.delete('/:role_name', isAuthenticated, hasPermission('roles:manage'), asy
             user_id: adminId,
             action: 'delete_role',
             target_type: 'role',
-            target_id: role_name,
+            target_id: null, // target_id integer, rol nomi string bo'lgani uchun null qilamiz (rol nomi details'da mavjud)
             details: JSON.stringify({ role_name }),
             ip_address: req.session.ip_address,
             user_agent: req.session.user_agent

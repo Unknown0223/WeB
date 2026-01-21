@@ -20,6 +20,7 @@ router.get('/', isAuthenticated, async (req, res) => {
                 'brands.name',
                 'brands.color',
                 'brands.emoji',
+                'brands.sort_order',
                 'brands.created_by',
                 'brands.created_at',
                 'brands.updated_at',
@@ -88,7 +89,7 @@ router.get('/for-user', isAuthenticated, async (req, res) => {
 // POST /api/brands - Yangi brend yaratish
 router.post('/', isAuthenticated, hasPermission('settings:edit_table'), async (req, res) => {
     try {
-        const { name, locations, color, emoji } = req.body;
+        const { name, locations, color, emoji, sort_order } = req.body;
 
         if (!name || !name.trim()) {
             return res.status(400).json({ message: "Brend nomi kiritilmagan" });
@@ -105,6 +106,7 @@ router.post('/', isAuthenticated, hasPermission('settings:edit_table'), async (r
             name: name.trim(),
             color: color || '#4facfe',
             emoji: emoji || '🏢',
+            sort_order: sort_order !== undefined && sort_order !== null && sort_order !== '' ? parseInt(sort_order) : null,
             created_by: req.user?.id || null,
             created_at: new Date().toISOString()
         });
@@ -148,7 +150,7 @@ router.post('/', isAuthenticated, hasPermission('settings:edit_table'), async (r
 router.put('/:id', isAuthenticated, hasPermission('settings:edit_table'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, locations, color, emoji, description } = req.body;
+        const { name, locations, color, emoji, description, sort_order } = req.body;
 
         if (!name || !name.trim()) {
             return res.status(400).json({ message: "Brend nomi kiritilmagan" });
@@ -170,6 +172,7 @@ router.put('/:id', isAuthenticated, hasPermission('settings:edit_table'), async 
                 name: name.trim(),
                 color: color || '#4facfe',
                 emoji: emoji || '🏢',
+                sort_order: sort_order !== undefined && sort_order !== null && sort_order !== '' ? parseInt(sort_order) : null,
                 updated_at: new Date().toISOString()
             });
 
