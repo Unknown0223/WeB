@@ -112,17 +112,24 @@ let sessionStore;
 if (isPostgres) {
     // PostgreSQL session store
     const PostgreSQLStore = require('connect-pg-simple')(session);
-    const config = require('./knexfile.js');
-    const env = process.env.NODE_ENV || 'development';
-    const dbConfig = config[env] || config.development;
     
-    // PostgreSQL connection string yoki object
+    // Railway.com'da DATABASE_URL mavjud bo'lsa, uni to'g'ridan-to'g'ri ishlatish
     let pgConnection;
-    if (typeof dbConfig.connection === 'string') {
-        pgConnection = dbConfig.connection;
+    if (process.env.DATABASE_URL) {
+        pgConnection = process.env.DATABASE_URL;
     } else {
-        const conn = dbConfig.connection;
-        pgConnection = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+        // Boshqa holatda knexfile.js dan config olish
+        const config = require('./knexfile.js');
+        const env = process.env.NODE_ENV || 'development';
+        const dbConfig = config[env] || config.development;
+        
+        // PostgreSQL connection string yoki object
+        if (typeof dbConfig.connection === 'string') {
+            pgConnection = dbConfig.connection;
+        } else {
+            const conn = dbConfig.connection;
+            pgConnection = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+        }
     }
     
     sessionStore = new PostgreSQLStore({

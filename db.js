@@ -1,7 +1,6 @@
 // db.js (TO'LIQ FAYL)
 
 const knex = require('knex');
-const config = require('./knexfile.js');
 const bcrypt = require('bcrypt');
 const { createLogger } = require('./utils/logger.js');
 const path = require('path');
@@ -10,9 +9,44 @@ const fs = require('fs').promises;
 const log = createLogger('DB');
 const saltRounds = 10;
 
+// Database config'ni dynamic olish (har safar environment variable'larni qayta o'qish)
+function getDbConfig() {
+    // Railway.com'da DATABASE_URL mavjud bo'lsa, uni to'g'ridan-to'g'ri ishlatish
+    const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
+    const hasDatabaseUrl = !!process.env.DATABASE_URL;
+    const hasPostgresConfig = !!(process.env.POSTGRES_HOST && process.env.POSTGRES_DB);
+    
+    // Railway.com'da va DATABASE_URL mavjud bo'lsa, to'g'ridan-to'g'ri PostgreSQL config qaytarish
+    if (isRailway && hasDatabaseUrl) {
+        return {
+            client: 'pg',
+            connection: process.env.DATABASE_URL,
+            migrations: {
+                directory: path.resolve(__dirname, 'migrations')
+            },
+            pool: {
+                min: 2,
+                max: 10,
+                acquireTimeoutMillis: 30000,
+                idleTimeoutMillis: 30000,
+                createTimeoutMillis: 10000,
+                destroyTimeoutMillis: 5000
+            },
+            acquireConnectionTimeout: 10000,
+            asyncStackTraces: false,
+            debug: false
+        };
+    }
+    
+    // Boshqa holatda knexfile.js dan config olish
+    const config = require('./knexfile.js');
+    const env = process.env.NODE_ENV || 'development';
+    return config[env] || config.development;
+}
+
 // NODE_ENV ga qarab development yoki production sozlamasini tanlash
 const env = process.env.NODE_ENV || 'development';
-const dbConfig = config[env] || config.development;
+const dbConfig = getDbConfig();
 
 // Asosiy database connection
 const db = knex(dbConfig);
