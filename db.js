@@ -13,14 +13,16 @@ const saltRounds = 10;
 function getDbConfig() {
     // Railway.com'da DATABASE_URL mavjud bo'lsa, uni to'g'ridan-to'g'ri ishlatish
     const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
-    const hasDatabaseUrl = !!process.env.DATABASE_URL;
+    const databaseUrl = process.env.DATABASE_URL;
+    const hasDatabaseUrl = !!databaseUrl;
     const hasPostgresConfig = !!(process.env.POSTGRES_HOST && process.env.POSTGRES_DB);
     
-    // Railway.com'da va DATABASE_URL mavjud bo'lsa, to'g'ridan-to'g'ri PostgreSQL config qaytarish
+    // Railway.com'da va DATABASE_URL mavjud bo'lsa (reference yoki oddiy), to'g'ridan-to'g'ri PostgreSQL config qaytarish
+    // Railway runtime'da reference'lar avtomatik resolve qilinadi
     if (isRailway && hasDatabaseUrl) {
         return {
             client: 'pg',
-            connection: process.env.DATABASE_URL,
+            connection: databaseUrl, // Reference yoki oddiy connection string bo'lishi mumkin
             migrations: {
                 directory: path.resolve(__dirname, 'migrations')
             },
@@ -40,9 +42,9 @@ function getDbConfig() {
     
     // Railway.com'da lekin DATABASE_URL bo'lmasa, xatolik chiqarish
     if (isRailway && !hasDatabaseUrl && !hasPostgresConfig) {
-        log.error('❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
-        log.error('❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
-        log.error('❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
+        log.error('❌ [DB] ❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
+        log.error('❌ [DB] ❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
+        log.error('❌ [DB] ❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
         throw new Error(
             'Railway.com\'da DATABASE_URL sozlanmagan!\n' +
             'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
@@ -51,9 +53,19 @@ function getDbConfig() {
     }
     
     // Boshqa holatda knexfile.js dan config olish
-    const config = require('./knexfile.js');
-    const env = process.env.NODE_ENV || 'development';
-    return config[env] || config.development;
+    try {
+        const config = require('./knexfile.js');
+        const env = process.env.NODE_ENV || 'development';
+        return config[env] || config.development;
+    } catch (error) {
+        // knexfile.js da xatolik bo'lsa (masalan, Railway.com'da DATABASE_URL bo'lmasa)
+        // va Railway.com'da bo'lsa, xatolikni qayta chiqarish
+        if (isRailway) {
+            throw error;
+        }
+        // Boshqa holatda, xatolikni qayta chiqarish
+        throw error;
+    }
 }
 
 // NODE_ENV ga qarab development yoki production sozlamasini tanlash
