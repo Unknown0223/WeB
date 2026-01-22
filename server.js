@@ -373,159 +373,152 @@ global.broadcastWebSocket = (type, payload) => {
             // Delay qo'shish connection'lar orasida
             await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Buzilgan session'larni tozalash (server ishga tushganda)
-        try {
-            const sessions = await db('sessions').select('sid', 'sess').limit(1000); // Limit qo'shish
-            let corruptedCount = 0;
-            
-            for (const session of sessions) {
-                try {
-                    if (!session.sess || session.sess.trim() === '') {
+            // Buzilgan session'larni tozalash (server ishga tushganda)
+            try {
+                const sessions = await db('sessions').select('sid', 'sess').limit(1000); // Limit qo'shish
+                let corruptedCount = 0;
+                
+                for (const session of sessions) {
+                    try {
+                        if (!session.sess || session.sess.trim() === '') {
+                            await db('sessions').where({ sid: session.sid }).del();
+                            corruptedCount++;
+                            continue;
+                        }
+                        
+                        const sessionData = JSON.parse(session.sess);
+                        if (!sessionData || typeof sessionData !== 'object') {
+                            await db('sessions').where({ sid: session.sid }).del();
+                            corruptedCount++;
+                        }
+                    } catch (e) {
+                        // Buzilgan session'ni o'chirish
                         await db('sessions').where({ sid: session.sid }).del();
                         corruptedCount++;
-                        continue;
+                    }
+                }
+                
+                if (corruptedCount > 0) {
+                    log.info(`✅ ${corruptedCount} ta buzilgan sessiya tozalandi.`);
+                }
+            } catch (cleanupError) {
+                log.warn('Buzilgan sessionlarni tozalashda xatolik:', cleanupError.message);
+            }
+            
+            // Delay qo'shish
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Vaqtinchalik fayllarni tozalash mexanizmini ishga tushirish
+            // Har 1 soatda bir marta, 1 soatdan eski fayllarni o'chirish
+            startCleanupInterval(1, 1);
+            
+            // Delay qo'shish
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Orphaned yozuvlarni tozalash (server ishga tushganda) - background'da
+            // Bu operatsiyani background'ga o'tkazish, server bloklamasligi uchun
+            setImmediate(async () => {
+                try {
+                    const existingUserIds = new Set();
+                    const users = await db('users').select('id');
+                    users.forEach(user => existingUserIds.add(user.id));
+                    
+                    const tablesToClean = [
+                        { table: 'user_permissions', fkColumn: 'user_id' },
+                        { table: 'user_locations', fkColumn: 'user_id' },
+                        { table: 'user_brands', fkColumn: 'user_id' },
+                        { table: 'reports', fkColumn: 'created_by' },
+                        { table: 'report_history', fkColumn: 'changed_by' },
+                        { table: 'audit_logs', fkColumn: 'user_id' },
+                        { table: 'password_change_requests', fkColumn: 'user_id' },
+                        { table: 'pivot_templates', fkColumn: 'created_by' },
+                        { table: 'magic_links', fkColumn: 'user_id' },
+                        { table: 'notifications', fkColumn: 'user_id' }
+                    ];
+                    
+                    let totalDeleted = 0;
+                    for (const { table, fkColumn } of tablesToClean) {
+                        try {
+                            const hasTable = await db.schema.hasTable(table);
+                            if (hasTable) {
+                                const deleted = await db(table)
+                                    .whereNotNull(fkColumn)
+                                    .whereNotIn(fkColumn, Array.from(existingUserIds))
+                                    .del();
+                                if (deleted > 0) {
+                                    totalDeleted += deleted;
+                                }
+                            }
+                            // Har bir jadvaldan keyin kichik delay
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        } catch (err) {
+                            // Jadval mavjud emas yoki xatolik - e'tiborsiz qoldirish
+                        }
                     }
                     
-                    const sessionData = JSON.parse(session.sess);
-                    if (!sessionData || typeof sessionData !== 'object') {
-                        await db('sessions').where({ sid: session.sid }).del();
-                        corruptedCount++;
-                    }
-                } catch (e) {
-                    // Buzilgan session'ni o'chirish
-                    await db('sessions').where({ sid: session.sid }).del();
-                    corruptedCount++;
+                    // Cleanup to'liq bajarildi (log olib tashlandi)
+                } catch (cleanupError) {
+                    log.error('[CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
                 }
-            }
+            });
             
-            if (corruptedCount > 0) {
-                log.info(`✅ ${corruptedCount} ta buzilgan sessiya tozalandi.`);
-            }
-        } catch (cleanupError) {
-            log.warn('Buzilgan sessionlarni tozalashda xatolik:', cleanupError.message);
-        }
-        
-        // Delay qo'shish
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Vaqtinchalik fayllarni tozalash mexanizmini ishga tushirish
-        // Har 1 soatda bir marta, 1 soatdan eski fayllarni o'chirish
-        startCleanupInterval(1, 1);
-        
-        // Delay qo'shish
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Orphaned yozuvlarni tozalash (server ishga tushganda) - background'da
-        // Bu operatsiyani background'ga o'tkazish, server bloklamasligi uchun
-        setImmediate(async () => {
-            try {
-                const existingUserIds = new Set();
-                const users = await db('users').select('id');
-                users.forEach(user => existingUserIds.add(user.id));
-                
-                const tablesToClean = [
-                    { table: 'user_permissions', fkColumn: 'user_id' },
-                    { table: 'user_locations', fkColumn: 'user_id' },
-                    { table: 'user_brands', fkColumn: 'user_id' },
-                    { table: 'reports', fkColumn: 'created_by' },
-                    { table: 'report_history', fkColumn: 'changed_by' },
-                    { table: 'audit_logs', fkColumn: 'user_id' },
-                    { table: 'password_change_requests', fkColumn: 'user_id' },
-                    { table: 'pivot_templates', fkColumn: 'created_by' },
-                    { table: 'magic_links', fkColumn: 'user_id' },
-                    { table: 'notifications', fkColumn: 'user_id' }
-                ];
-                
-                let totalDeleted = 0;
-                for (const { table, fkColumn } of tablesToClean) {
-                    try {
-                        const hasTable = await db.schema.hasTable(table);
-                        if (hasTable) {
-                            const deleted = await db(table)
-                                .whereNotNull(fkColumn)
-                                .whereNotIn(fkColumn, Array.from(existingUserIds))
-                                .del();
-                            if (deleted > 0) {
-                                totalDeleted += deleted;
-                            }
-                        }
-                        // Har bir jadvaldan keyin kichik delay
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                    } catch (err) {
-                        // Jadval mavjud emas yoki xatolik - e'tiborsiz qoldirish
-                    }
-                }
-                
-                // Cleanup to'liq bajarildi (log olib tashlandi)
-            } catch (cleanupError) {
-                log.error('[CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
-            }
-        });
-        
-        // Delay qo'shish
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        const { getSetting } = require('./utils/settingsCache.js');
-        // Bot token: faqat telegram_bot_token ishlatiladi (bot bitta)
-        const botToken = await getSetting('telegram_bot_token', null);
-        const telegramEnabled = await getSetting('telegram_enabled', 'false');
-
-        // Serverni ishga tushirish
-        server.listen(PORT, '0.0.0.0', () => {
-            // PM2 uchun ready signal
-            if (process.send) {
-                process.send('ready');
-            }
+            // Delay qo'shish
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            const { getSetting } = require('./utils/settingsCache.js');
+            // Bot token: faqat telegram_bot_token ishlatiladi (bot bitta)
+            const botToken = await getSetting('telegram_bot_token', null);
+            const telegramEnabled = await getSetting('telegram_enabled', 'false');
 
             // Bot token mavjud bo'lsa, bot'ni ishga tushirish
             // telegram_enabled sozlamasiga bog'liq emas, chunki debt_bot_token alohida bot uchun
             if (botToken && botToken.trim() !== '') {
                 (async () => {
-                // Deploy uchun webhook rejimida ishga tushirish
-                const appBaseUrl = process.env.APP_BASE_URL;
-                
-                if (appBaseUrl && appBaseUrl.startsWith('https://')) {
-                    // Webhook avtomatik o'rnatish
-                    const webhookUrl = `${appBaseUrl}/telegram-webhook/${botToken}`;
-                    const telegramApiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
+                    // Deploy uchun webhook rejimida ishga tushirish
+                    const appBaseUrl = process.env.APP_BASE_URL;
                     
-                    try {
-                        // Avval eski webhookni o'chirish (agar mavjud bo'lsa)
+                    if (appBaseUrl && appBaseUrl.startsWith('https://')) {
+                        // Webhook avtomatik o'rnatish
+                        const webhookUrl = `${appBaseUrl}/telegram-webhook/${botToken}`;
+                        const telegramApiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
+                        
                         try {
-                            await axios.post(`${telegramApiUrl}`, { url: '' });
-                        } catch (deleteError) {
-                            // Xatolik bo'lsa ham davom etamiz
-                        }
-                        
-                        // Yangi webhookni o'rnatish
-                        const response = await axios.post(telegramApiUrl, { 
-                            url: webhookUrl,
-                            allowed_updates: ['message', 'callback_query', 'my_chat_member']
-                        });
-                        
-                        if (response.data.ok) {
-                            // Webhook rejimida botni ishga tushirish
-                            await initializeBot(botToken, { polling: false });
-                        } else {
-                            botLog.error('[INIT] Telegram webhookni o\'rnatishda xatolik:', response.data.description);
+                            // Avval eski webhookni o'chirish (agar mavjud bo'lsa)
+                            try {
+                                await axios.post(`${telegramApiUrl}`, { url: '' });
+                            } catch (deleteError) {
+                                // Xatolik bo'lsa ham davom etamiz
+                            }
+                            
+                            // Yangi webhookni o'rnatish
+                            const response = await axios.post(telegramApiUrl, { 
+                                url: webhookUrl,
+                                allowed_updates: ['message', 'callback_query', 'my_chat_member']
+                            });
+                            
+                            if (response.data.ok) {
+                                // Webhook rejimida botni ishga tushirish
+                                await initializeBot(botToken, { polling: false });
+                            } else {
+                                botLog.error('[INIT] Telegram webhookni o\'rnatishda xatolik:', response.data.description);
+                                
+                                // Fallback: polling rejimi (faqat development uchun)
+                                if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
+                                    await initializeBot(botToken, { polling: true });
+                                }
+                            }
+                        } catch (error) {
+                            botLog.error('[INIT] Telegram API\'ga ulanishda xatolik:', error.message);
                             
                             // Fallback: polling rejimi (faqat development uchun)
                             if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
                                 await initializeBot(botToken, { polling: true });
                             }
                         }
-                    } catch (error) {
-                        botLog.error('[INIT] Telegram API\'ga ulanishda xatolik:', error.message);
-                        
-                        // Fallback: polling rejimi (faqat development uchun)
-                        if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
-                            await initializeBot(botToken, { polling: true });
-                        }
+                    } else {
+                        // Lokal yoki webhook sozlanmagan - polling rejimi (faqat development uchun)
+                        await initializeBot(botToken, { polling: true });
                     }
-                } else {
-                    // Lokal yoki webhook sozlanmagan - polling rejimi (faqat development uchun)
-                    await initializeBot(botToken, { polling: true });
-                }
                 })(); // Async IIFE - bot initialization server bloklamaydi
             }
             
