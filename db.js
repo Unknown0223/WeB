@@ -13,26 +13,40 @@ const saltRounds = 10;
 function getDbConfig() {
     // Railway.com'da DATABASE_URL mavjud bo'lsa, uni to'g'ridan-to'g'ri ishlatish
     const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
-    const databaseUrl = process.env.DATABASE_URL;
-    const hasDatabaseUrl = !!databaseUrl;
+    let databaseUrl = process.env.DATABASE_URL;
+    const databasePublicUrl = process.env.DATABASE_PUBLIC_URL; // Railway.com'da bu ham mavjud bo'lishi mumkin
+    
+    // Reference'ni tekshirish (${{Service.Variable}} formatida)
+    const isReference = databaseUrl && typeof databaseUrl === 'string' && databaseUrl.includes('${{');
+    const hasDatabaseUrl = !!databaseUrl && databaseUrl.trim() !== '';
+    const hasDatabasePublicUrl = !!databasePublicUrl && databasePublicUrl.trim() !== '';
     const hasPostgresConfig = !!(process.env.POSTGRES_HOST && process.env.POSTGRES_DB);
+    
+    // Railway.com'da DATABASE_PUBLIC_URL mavjud bo'lsa, uni ishlatish (agar DATABASE_URL bo'lmasa yoki reference bo'lsa)
+    if (isRailway && (!hasDatabaseUrl || isReference) && hasDatabasePublicUrl) {
+        // Agar DATABASE_URL reference bo'lsa yoki bo'lmasa, DATABASE_PUBLIC_URL ni ishlatish
+        databaseUrl = databasePublicUrl;
+        log.debug(`[DB] Using DATABASE_PUBLIC_URL as DATABASE_URL is ${isReference ? 'a reference (not resolved yet)' : 'not set'}`);
+    }
     
     // Debug ma'lumotlari (faqat Railway.com'da)
     if (isRailway) {
         log.debug(`[DB] Railway.com environment detected`);
         log.debug(`[DB] DATABASE_URL exists: ${hasDatabaseUrl}`);
-        log.debug(`[DB] DATABASE_URL value: ${databaseUrl ? (databaseUrl.includes('${{') ? 'Reference (will be resolved at runtime)' : 'Connection string') : 'NOT SET'}`);
+        log.debug(`[DB] DATABASE_URL is reference: ${isReference}`);
+        log.debug(`[DB] DATABASE_URL value: ${process.env.DATABASE_URL ? (isReference ? 'Reference (will be resolved at runtime)' : (process.env.DATABASE_URL.length > 50 ? process.env.DATABASE_URL.substring(0, 50) + '...' : process.env.DATABASE_URL)) : 'NOT SET'}`);
+        log.debug(`[DB] DATABASE_PUBLIC_URL exists: ${hasDatabasePublicUrl}`);
+        log.debug(`[DB] Using connection: ${databaseUrl ? (databaseUrl.length > 50 ? databaseUrl.substring(0, 50) + '...' : databaseUrl) : 'NOT SET'}`);
         log.debug(`[DB] POSTGRES_HOST exists: ${!!process.env.POSTGRES_HOST}`);
         log.debug(`[DB] POSTGRES_DB exists: ${!!process.env.POSTGRES_DB}`);
     }
     
-    // Railway.com'da va DATABASE_URL mavjud bo'lsa (reference yoki oddiy), to'g'ridan-to'g'ri PostgreSQL config qaytarish
-    // Railway runtime'da reference'lar avtomatik resolve qilinadi
-    if (isRailway && hasDatabaseUrl) {
-        // Reference bo'lsa ham, Railway runtime'da resolve qilinadi
+    // Railway.com'da va DATABASE_URL mavjud bo'lsa (reference bo'lmagan connection string), to'g'ridan-to'g'ri PostgreSQL config qaytarish
+    if (isRailway && databaseUrl && !isReference) {
+        // Faqat reference bo'lmagan connection string bo'lsa
         return {
             client: 'pg',
-            connection: databaseUrl, // Reference yoki oddiy connection string bo'lishi mumkin
+            connection: databaseUrl,
             migrations: {
                 directory: path.resolve(__dirname, 'migrations')
             },
@@ -50,14 +64,16 @@ function getDbConfig() {
         };
     }
     
-    // Railway.com'da lekin DATABASE_URL bo'lmasa, xatolik chiqarish
-    if (isRailway && !hasDatabaseUrl && !hasPostgresConfig) {
+    // Railway.com'da lekin DATABASE_URL bo'lmasa yoki faqat reference bo'lsa, xatolik chiqarish
+    if (isRailway && !databaseUrl && !hasPostgresConfig) {
         log.error('❌ [DB] ❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
         log.error('❌ [DB] ❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
         log.error('❌ [DB] ❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
         log.error(`[DB] Debug: RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT || 'NOT SET'}`);
         log.error(`[DB] Debug: RAILWAY_PROJECT_ID=${process.env.RAILWAY_PROJECT_ID || 'NOT SET'}`);
         log.error(`[DB] Debug: RAILWAY_SERVICE_NAME=${process.env.RAILWAY_SERVICE_NAME || 'NOT SET'}`);
+        log.error(`[DB] Debug: DATABASE_URL=${process.env.DATABASE_URL || 'NOT SET'}`);
+        log.error(`[DB] Debug: DATABASE_PUBLIC_URL=${process.env.DATABASE_PUBLIC_URL || 'NOT SET'}`);
         throw new Error(
             'Railway.com\'da DATABASE_URL sozlanmagan!\n' +
             'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
@@ -67,7 +83,7 @@ function getDbConfig() {
             '2. WeB service\'ning Variables bo\'limiga o\'ting\n' +
             '3. "+ New Variable" tugmasini bosing\n' +
             '4. Key: DATABASE_URL\n' +
-            '5. Value: ${{Postgres.DATABASE_URL}} (Postgres service nomi to\'g\'ri bo\'lishi kerak)\n' +
+            '5. Value: ${{Postgres.DATABASE_PUBLIC_URL}} yoki PostgreSQL service\'dan to\'g\'ridan-to\'g\'ri connection string\n' +
             '6. Saqlang va qayta deploy qiling'
         );
     }
