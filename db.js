@@ -69,16 +69,16 @@ function getDbConfig() {
             },
             pool: {
                 min: 1,
-                max: 10,
-                acquireTimeoutMillis: 60000,
+                max: 20,
+                acquireTimeoutMillis: 120000,
                 idleTimeoutMillis: 30000,
-                createTimeoutMillis: 30000,
+                createTimeoutMillis: 60000,
                 destroyTimeoutMillis: 5000,
                 reapIntervalMillis: 1000,
-                createRetryIntervalMillis: 200,
+                createRetryIntervalMillis: 500,
                 propagateCreateError: false
             },
-            acquireConnectionTimeout: 30000,
+            acquireConnectionTimeout: 120000,
             asyncStackTraces: false,
             debug: false
         };
@@ -116,16 +116,16 @@ function getDbConfig() {
                 },
                 pool: {
                     min: 1,
-                    max: 10,
-                    acquireTimeoutMillis: 60000,
+                    max: 20,
+                    acquireTimeoutMillis: 120000,
                     idleTimeoutMillis: 30000,
-                    createTimeoutMillis: 30000,
+                    createTimeoutMillis: 60000,
                     destroyTimeoutMillis: 5000,
                     reapIntervalMillis: 1000,
-                    createRetryIntervalMillis: 200,
+                    createRetryIntervalMillis: 500,
                     propagateCreateError: false
                 },
-                acquireConnectionTimeout: 30000,
+                acquireConnectionTimeout: 120000,
                 asyncStackTraces: false,
                 debug: false
             };
@@ -281,8 +281,15 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
 };
 
 const initializeDB = async () => {
-    
-    await db.migrate.latest();
+    // Migration'larni bajarish - connection pool to'lib qolmasligi uchun timeout qo'shish
+    try {
+        log.info('[DB] Migrationlarni bajarish boshlandi...');
+        await db.migrate.latest();
+        log.info('[DB] Migrationlar muvaffaqiyatli bajarildi');
+    } catch (migrationError) {
+        log.error('[DB] Migration xatolik:', migrationError.message);
+        throw migrationError;
+    }
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
     // YANGI LOGIKA: Faqat superadmin standart rol bo'ladi, boshqa rollar superadmin tomonidan yaratiladi
@@ -326,12 +333,13 @@ const initializeDB = async () => {
     };
 
     // Tranzaksiya ichida boshlang'ich ma'lumotlarni kiritish
-    // Retry mexanizmi bilan - SQLite BUSY xatoliklarini hal qilish
-    let retries = 3;
+    // Retry mexanizmi bilan - SQLite BUSY va PostgreSQL connection pool xatoliklarini hal qilish
+    let retries = 5;
     let lastError = null;
     
     while (retries > 0) {
         try {
+            // Connection pool to'lib qolmasligi uchun timeout qo'shish
             await db.transaction(async trx => {
                 // Import oldidan rollarni tekshirish
                 const rolesBefore = await trx('roles').select('role_name');
@@ -394,9 +402,18 @@ const initializeDB = async () => {
             lastError = error;
             retries--;
             
-            if (error.code === '23505' && retries > 0) {
-                // Qisqa kutish va qayta urinish (PostgreSQL lock)
-                await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries))); // 100ms, 200ms, 300ms
+            // Connection pool timeout yoki lock xatoliklari uchun retry
+            const isRetryableError = 
+                error.message?.includes('Timeout acquiring a connection') ||
+                error.message?.includes('pool is probably full') ||
+                error.code === '23505' ||
+                error.code === 'SQLITE_BUSY';
+            
+            if (isRetryableError && retries > 0) {
+                // Exponential backoff - har safar kutish vaqti oshadi
+                const delay = Math.min(1000 * (6 - retries), 5000); // 1s, 2s, 3s, 4s, 5s
+                log.warn(`[DB] Retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
             } else {
                 // Boshqa xatolik yoki retry'lar tugagan
                 throw error;
@@ -409,14 +426,20 @@ const initializeDB = async () => {
     }
 
     // Seeds faylini ishga tushirish (kengaytirilgan permission'lar)
+    // Connection pool to'lib qolmasligi uchun delay qo'shish
     try {
+        await new Promise(resolve => setTimeout(resolve, 200));
         const expandedPermissionsSeed = require('./seeds/02_expanded_permissions.js');
         await expandedPermissionsSeed.seed(db);
+        await new Promise(resolve => setTimeout(resolve, 200));
     } catch (error) {
         log.warn('Seeds faylini ishga tushirishda xatolik:', error.message);
         // Xatolik bo'lsa ham davom etamiz
     }
 
+    // Connection pool to'lib qolmasligi uchun delay
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
     // Superadmin yaratish (agar mavjud bo'lmasa)
     // Eski super_admin va yangi superadmin ni tekshirish
     const superAdminUser = await db('users').whereIn('role', ['super_admin', 'superadmin']).first();
@@ -446,14 +469,30 @@ const initializeDB = async () => {
         { key: 'telegram_enabled', value: 'false' } // Telegram aktiv/neaktiv holati
     ];
     
+    // Batch insert - barcha telegram sozlamalarini bir vaqtda
+    const settingsToInsert = [];
     for (const setting of telegramSettings) {
         const existing = await db('settings').where({ key: setting.key }).first();
         if (!existing) {
-            // Yangi setting yaratish (faqat mavjud bo'lmaganda)
-            await db('settings').insert(setting);
-            log.debug(`Telegram sozlamasi qo'shildi: ${setting.key}`);
+            settingsToInsert.push(setting);
         }
-        // Mavjud bo'lsa, o'zgartirmaymiz - foydalanuvchi sozlamalar orqali boshqaradi
+    }
+    
+    if (settingsToInsert.length > 0) {
+        try {
+            await db('settings').insert(settingsToInsert);
+            log.debug(`Telegram sozlamalari qo'shildi: ${settingsToInsert.length} ta`);
+        } catch (insertError) {
+            // Agar batch insert xatolik bersa, alohida insert qilish
+            log.warn('Batch settings insert xatolik, alohida insert qilinmoqda:', insertError.message);
+            for (const setting of settingsToInsert) {
+                try {
+                    await db('settings').insert(setting);
+                } catch (individualError) {
+                    log.warn(`Setting insert xatolik (${setting.key}):`, individualError.message);
+                }
+            }
+        }
     }
     
 };

@@ -158,16 +158,16 @@ if (useSqlite) {
         },
         pool: {
           min: 1,
-          max: 10,
-          acquireTimeoutMillis: 60000,
+          max: 20,
+          acquireTimeoutMillis: 120000,
           idleTimeoutMillis: 30000,
-          createTimeoutMillis: 30000,
+          createTimeoutMillis: 60000,
           destroyTimeoutMillis: 5000,
           reapIntervalMillis: 1000,
-          createRetryIntervalMillis: 200,
+          createRetryIntervalMillis: 500,
           propagateCreateError: false
         },
-        acquireConnectionTimeout: 30000,
+        acquireConnectionTimeout: 120000,
         asyncStackTraces: false,
         debug: false
       };
@@ -178,10 +178,10 @@ if (useSqlite) {
           ...mainDbConfig,
           pool: {
             ...mainDbConfig.pool,
-            min: 5,
+            min: 2,
             max: 25
           },
-          acquireConnectionTimeout: 30000
+          acquireConnectionTimeout: 120000
         }
       };
       return;
@@ -230,16 +230,16 @@ if (useSqlite) {
     },
         pool: {
           min: 1,
-          max: 10,
-          acquireTimeoutMillis: 60000,
+          max: 20,
+          acquireTimeoutMillis: 120000,
           idleTimeoutMillis: 30000,
-          createTimeoutMillis: 30000,
+          createTimeoutMillis: 60000,
           destroyTimeoutMillis: 5000,
           reapIntervalMillis: 1000,
-          createRetryIntervalMillis: 200,
+          createRetryIntervalMillis: 500,
           propagateCreateError: false
         },
-        acquireConnectionTimeout: 30000,
+        acquireConnectionTimeout: 120000,
     asyncStackTraces: false,
     debug: false
   };
@@ -251,9 +251,9 @@ if (useSqlite) {
       pool: {
         ...mainDbConfig.pool,
         min: 2,
-        max: 15
+        max: 25
       },
-      acquireConnectionTimeout: 30000
+      acquireConnectionTimeout: 120000
     }
   };
 }

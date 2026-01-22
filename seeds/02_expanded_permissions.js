@@ -436,12 +436,34 @@ exports.seed = async function(knex) {
     },
   ];
 
-  // Har bir permission uchun insert or update
-  for (const perm of permissions) {
-    await knex('permissions')
-      .insert(perm)
-      .onConflict('permission_key')
-      .merge(['description', 'category']);
+  // Batch insert/update - barcha permission'larni bir vaqtda ishlash
+  // Bu connection pool to'lib qolmasligi uchun muhim
+  if (permissions.length > 0) {
+    // PostgreSQL va SQLite uchun batch insert
+    try {
+      // Avval mavjud permission'larni o'chirish (conflict bo'lmasligi uchun)
+      // Lekin bu kerak emas, chunki onConflict.merge() ishlatilmoqda
+      
+      // Batch insert - barcha permission'larni bir vaqtda
+      await knex('permissions')
+        .insert(permissions)
+        .onConflict('permission_key')
+        .merge(['description', 'category']);
+    } catch (error) {
+      // Agar batch insert xatolik bersa, alohida insert qilish (fallback)
+      console.warn('Batch insert xatolik, alohida insert qilinmoqda:', error.message);
+      for (const perm of permissions) {
+        try {
+          await knex('permissions')
+            .insert(perm)
+            .onConflict('permission_key')
+            .merge(['description', 'category']);
+        } catch (individualError) {
+          // Alohida insert ham xatolik bersa, log qilish va davom etish
+          console.warn(`Permission insert xatolik (${perm.permission_key}):`, individualError.message);
+        }
+      }
+    }
   }
 
   // Production'da log qilmaymiz (faqat error loglar)
