@@ -66,8 +66,14 @@ if (useSqlite) {
   // PostgreSQL konfiguratsiyasi (Production)
   function getPostgresConnection() {
     // DATABASE_URL tekshirish
-    if (process.env.DATABASE_URL) {
-      return process.env.DATABASE_URL;
+    const databaseUrl = process.env.DATABASE_URL;
+    
+    // Railway.com'da reference bo'lsa (${{Service.Variable}}), uni qabul qilish
+    // Railway runtime'da reference'ni avtomatik resolve qiladi
+    if (databaseUrl) {
+      // Reference yoki oddiy connection string bo'lishi mumkin
+      // Railway runtime'da reference avtomatik resolve qilinadi
+      return databaseUrl;
     }
     
     // Alohida parametrlar tekshirish
@@ -91,20 +97,46 @@ if (useSqlite) {
   }
 
   const postgresConfig = getPostgresConnection();
+  const isRailway = process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID;
+  const databaseUrl = process.env.DATABASE_URL;
 
   if (!postgresConfig) {
-    throw new Error(
-      '❌ PostgreSQL sozlamalari topilmadi!\n' +
-      'Iltimos, .env faylida quyidagilarni qo\'shing:\n' +
-      'POSTGRES_HOST=localhost\n' +
-      'POSTGRES_PORT=5432\n' +
-      'POSTGRES_DB=hisobot_db\n' +
-      'POSTGRES_USER=postgres\n' +
-      'POSTGRES_PASSWORD=your_password\n' +
-      'yoki\n' +
-      'DATABASE_URL=postgresql://user:password@host:port/database\n' +
-      'yoki SQLite ishlatish uchun: DB_TYPE=sqlite'
-    );
+    // Railway.com'da DATABASE_URL tekshirish
+    if (isRailway) {
+      const error = new Error(
+        'Railway.com\'da DATABASE_URL sozlanmagan!\n' +
+        'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
+        'PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.'
+      );
+      // Logger ishlatish (agar mavjud bo'lsa)
+      if (typeof console !== 'undefined') {
+        console.error('❌ [DB] ❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
+        console.error('❌ [DB] ❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
+        console.error('❌ [DB] ❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
+      }
+      throw error;
+    } else {
+      throw new Error(
+        '❌ PostgreSQL sozlamalari topilmadi!\n' +
+        'Iltimos, .env faylida quyidagilarni qo\'shing:\n' +
+        'POSTGRES_HOST=localhost\n' +
+        'POSTGRES_PORT=5432\n' +
+        'POSTGRES_DB=hisobot_db\n' +
+        'POSTGRES_USER=postgres\n' +
+        'POSTGRES_PASSWORD=your_password\n' +
+        'yoki\n' +
+        'DATABASE_URL=postgresql://user:password@host:port/database\n' +
+        'yoki SQLite ishlatish uchun: DB_TYPE=sqlite'
+      );
+    }
+  }
+  
+  // Railway.com'da reference bo'lsa, runtime'da resolve qilinishini kutish
+  // Bu holatda connection string runtime'da to'g'ri bo'ladi
+  if (isRailway && databaseUrl && databaseUrl.includes('${{')) {
+    // Reference mavjud, lekin hali resolve qilinmagan
+    // Bu normal, Railway runtime'da resolve qiladi
+    // Faqat connection string to'g'ri formatda bo'lishi kerak
   }
 
   const mainDbConfig = {
