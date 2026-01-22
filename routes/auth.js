@@ -614,7 +614,6 @@ router.post('/login', async (req, res) => {
         // Ro'yxatdan o'tish jarayonida (pending_approval, pending_telegram_subscription) 
         // bot obunasi tekshiruvi o'tkazilmaydi, chunki bu jarayon allaqachon bot obunasi bilan boshlandi
         
-        const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
         const isTelegramConnected = user.is_telegram_connected === 1 || user.is_telegram_connected === true;
         const hasTelegramChatId = !!user.telegram_chat_id;
         const isActiveUser = user.status === 'active';
