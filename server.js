@@ -183,13 +183,37 @@ app.use(session({
 // Markaziy routerni ulash
 app.use('/api', require('./routes'));
 
+// Server initialization holati
+let serverInitialized = false;
+let serverInitError = null;
+
 // Health check endpoint (Railway va boshqa platformalar uchun)
 app.get('/health', (req, res) => {
-    res.status(200).json({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
-    });
+    if (!serverInitialized) {
+        // Agar server hali initialization jarayonida bo'lsa, 503 qaytarish
+        // Lekin Railway healthcheck uchun 200 qaytarish kerak
+        res.status(200).json({ 
+            status: 'starting', 
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            message: 'Server initialization in progress...'
+        });
+    } else if (serverInitError) {
+        // Agar initialization xatolik bilan tugagan bo'lsa
+        res.status(503).json({ 
+            status: 'error', 
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            error: serverInitError.message
+        });
+    } else {
+        // Server to'liq tayyor
+        res.status(200).json({ 
+            status: 'ok', 
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime()
+        });
+    }
 });
 
 // --- Sahifalarni ko'rsatish (HTML Routing) ---
@@ -329,12 +353,25 @@ global.broadcastWebSocket = (type, payload) => {
 // Serverni ishga tushirish
 (async () => {
     try {
-        // Database initialization
-        await initializeDB();
+        // Server'ni darhol listen qilish (healthcheck uchun)
+        // Initialization background'da davom etadi
+        server.listen(PORT, '0.0.0.0', () => {
+            log.info(`✅ Server ${PORT} portida ishga tushdi`);
+            log.info(`🌐 Healthcheck: http://0.0.0.0:${PORT}/health`);
+            
+            // PM2 uchun ready signal
+            if (process.send) {
+                process.send('ready');
+            }
+        });
         
-        // Startup operatsiyalarini ketma-ket qilish (connection pool to'lib qolmasligi uchun)
-        // Delay qo'shish connection'lar orasida
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Database initialization (background'da)
+        try {
+            await initializeDB();
+            
+            // Startup operatsiyalarini ketma-ket qilish (connection pool to'lib qolmasligi uchun)
+            // Delay qo'shish connection'lar orasida
+            await new Promise(resolve => setTimeout(resolve, 500));
         
         // Buzilgan session'larni tozalash (server ishga tushganda)
         try {
@@ -491,10 +528,19 @@ global.broadcastWebSocket = (type, payload) => {
                 }
                 })(); // Async IIFE - bot initialization server bloklamaydi
             }
-        });
+            
+            // Server initialization muvaffaqiyatli tugadi
+            serverInitialized = true;
+            log.info('✅ Server initialization muvaffaqiyatli tugadi');
+        } catch (initError) {
+            serverInitError = initError;
+            log.error('❌ Server initialization xatolik:', initError.message);
+            // Xatolik bo'lsa ham server ishlaydi, lekin ba'zi funksiyalar ishlamasligi mumkin
+        }
     } catch (err) {
+        serverInitError = err;
         log.error('Serverni ishga tushirishda xatolik:', err.message);
-        process.exit(1);
+        // Xatolik bo'lsa ham server ishlaydi, lekin ba'zi funksiyalar ishlamasligi mumkin
     }
 })();
 
