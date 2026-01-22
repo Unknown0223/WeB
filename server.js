@@ -437,7 +437,7 @@ global.broadcastWebSocket = (type, payload) => {
             await new Promise(resolve => setTimeout(resolve, 500));
         
             // Buzilgan session'larni tozalash (server ishga tushganda)
-            log.info('[INIT] Buzilgan session'larni tozalash boshlandi...');
+            log.info("[INIT] Buzilgan session'larni tozalash boshlandi...");
             const sessionCleanupStartTime = Date.now();
             try {
                 const sessions = await db('sessions').select('sid', 'sess').limit(1000); // Limit qo'shish
