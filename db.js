@@ -428,4 +428,16 @@ const initializeDB = async () => {
     
 };
 
-module.exports = { db, initializeDB, logAction, isPostgres, isSqlite, isConstraintError };
+// Connection string olish (session store uchun)
+function getDbConnectionString() {
+    const config = getDbConfig();
+    if (config.connection && typeof config.connection === 'string') {
+        return config.connection;
+    } else if (config.connection && typeof config.connection === 'object') {
+        const conn = config.connection;
+        return `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+    }
+    return null;
+}
+
+module.exports = { db, initializeDB, logAction, isPostgres, isSqlite, isConstraintError, getDbConnectionString };

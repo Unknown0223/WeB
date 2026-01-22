@@ -105,7 +105,7 @@ const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWA
 
 // Sessiyani sozlash
 const session = require('express-session');
-const { isPostgres, isSqlite } = require('./db.js');
+const { isPostgres, isSqlite, getDbConnectionString } = require('./db.js');
 
 // Session store sozlash (SQLite yoki PostgreSQL)
 let sessionStore;
@@ -113,22 +113,26 @@ if (isPostgres) {
     // PostgreSQL session store
     const PostgreSQLStore = require('connect-pg-simple')(session);
     
-    // Railway.com'da DATABASE_URL mavjud bo'lsa, uni to'g'ridan-to'g'ri ishlatish
-    let pgConnection;
-    if (process.env.DATABASE_URL) {
-        pgConnection = process.env.DATABASE_URL;
-    } else {
-        // Boshqa holatda knexfile.js dan config olish
-        const config = require('./knexfile.js');
-        const env = process.env.NODE_ENV || 'development';
-        const dbConfig = config[env] || config.development;
-        
-        // PostgreSQL connection string yoki object
-        if (typeof dbConfig.connection === 'string') {
-            pgConnection = dbConfig.connection;
+    // db.js dan connection string olish (Railway.com uchun to'g'ri config)
+    let pgConnection = getDbConnectionString();
+    
+    // Agar db.js dan connection string topilmasa, fallback sifatida DATABASE_URL yoki knexfile.js dan olish
+    if (!pgConnection) {
+        if (process.env.DATABASE_URL) {
+            pgConnection = process.env.DATABASE_URL;
         } else {
-            const conn = dbConfig.connection;
-            pgConnection = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+            // Boshqa holatda knexfile.js dan config olish
+            const config = require('./knexfile.js');
+            const env = process.env.NODE_ENV || 'development';
+            const dbConfig = config[env] || config.development;
+            
+            // PostgreSQL connection string yoki object
+            if (typeof dbConfig.connection === 'string') {
+                pgConnection = dbConfig.connection;
+            } else if (dbConfig.connection && typeof dbConfig.connection === 'object') {
+                const conn = dbConfig.connection;
+                pgConnection = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+            }
         }
     }
     
