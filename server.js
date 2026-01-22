@@ -136,11 +136,58 @@ if (isPostgres) {
         }
     }
     
-    sessionStore = new PostgreSQLStore({
+    // Railway.com'da SSL sozlamalarini qo'shish (self-signed certificate uchun)
+    const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
+    
+    // connect-pg-simple uchun config
+    let pgConnectionConfig = {
         conString: pgConnection,
         tableName: 'sessions',
         createTableIfMissing: true
-    });
+    };
+    
+    // Railway.com'da self-signed certificate uchun SSL sozlamalarini qo'shish
+    if (isRailway && typeof pgConnection === 'string' && pgConnection.startsWith('postgresql://')) {
+        // Connection string'ni parse qilib, pg client uchun SSL sozlamalarini qo'shish
+        try {
+            const { Pool } = require('pg');
+            const url = require('url');
+            const parsedUrl = new URL(pgConnection);
+            
+            // pg Pool yaratish SSL sozlamalari bilan
+            const pool = new Pool({
+                host: parsedUrl.hostname,
+                port: parseInt(parsedUrl.port) || 5432,
+                database: parsedUrl.pathname?.slice(1) || parsedUrl.pathname?.substring(1),
+                user: parsedUrl.username,
+                password: parsedUrl.password,
+                ssl: {
+                    rejectUnauthorized: false // Railway.com'da self-signed certificate uchun
+                }
+            });
+            
+            // connect-pg-simple'ga pool'ni berish
+            pgConnectionConfig = {
+                pool: pool,
+                tableName: 'sessions',
+                createTableIfMissing: true
+            };
+        } catch (parseError) {
+            // Parse xatolik bo'lsa, connection string'ni ishlatish
+            log.warn('[SESSION] Connection string parse qilishda xatolik, connection string ishlatilmoqda:', parseError.message);
+            // Connection string'ga SSL parametrlarini qo'shish
+            if (!pgConnection.includes('?ssl=') && !pgConnection.includes('?sslmode=')) {
+                pgConnection = pgConnection + (pgConnection.includes('?') ? '&' : '?') + 'sslmode=require';
+            }
+            pgConnectionConfig = {
+                conString: pgConnection,
+                tableName: 'sessions',
+                createTableIfMissing: true
+            };
+        }
+    }
+    
+    sessionStore = new PostgreSQLStore(pgConnectionConfig);
 } else {
     // SQLite session store (faqat development uchun)
     // Production'da (Railway, Render, Heroku) PostgreSQL ishlatiladi

@@ -550,11 +550,33 @@ const initializeDB = async () => {
 // Connection string olish (session store uchun)
 function getDbConnectionString() {
     const config = getDbConfig();
+    const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
+    
     if (config.connection && typeof config.connection === 'string') {
-        return config.connection;
+        // Connection string bo'lsa, SSL parametrlarini qo'shish (Railway.com uchun)
+        let connectionString = config.connection;
+        
+        if (isRailway && connectionString.startsWith('postgresql://')) {
+            // Railway.com'da SSL kerak, lekin self-signed certificate bo'lishi mumkin
+            // Connection string'ga SSL parametrlarini qo'shish
+            if (!connectionString.includes('?ssl=') && !connectionString.includes('?sslmode=')) {
+                // SSL mode'ni require qilish, lekin rejectUnauthorized false (self-signed certificate uchun)
+                connectionString = connectionString + (connectionString.includes('?') ? '&' : '?') + 'sslmode=require';
+                log.debug(`[DB] Added SSL parameter to connection string for session store`);
+            }
+        }
+        
+        return connectionString;
     } else if (config.connection && typeof config.connection === 'object') {
         const conn = config.connection;
-        return `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+        let connectionString = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+        
+        // Railway.com'da SSL parametrlarini qo'shish
+        if (isRailway) {
+            connectionString = connectionString + '?sslmode=require';
+        }
+        
+        return connectionString;
     }
     return null;
 }
