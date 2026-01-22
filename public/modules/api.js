@@ -103,6 +103,12 @@ export async function fetchPendingUsers() {
     return await res.json();
 }
 
+export async function fetchPasswordChangeRequests() {
+    const res = await safeFetch('/api/users/password-change-requests');
+    if (!res || !res.ok) return null;
+    return await res.json();
+}
+
 export async function fetchRoles() {
     const res = await safeFetch('/api/roles');
     if (!res || !res.ok) return null;

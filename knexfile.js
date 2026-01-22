@@ -158,13 +158,16 @@ if (useSqlite) {
         },
         pool: {
           min: 2,
-          max: 10,
-          acquireTimeoutMillis: 30000,
+          max: 15,
+          acquireTimeoutMillis: 60000,
           idleTimeoutMillis: 30000,
-          createTimeoutMillis: 10000,
-          destroyTimeoutMillis: 5000
+          createTimeoutMillis: 30000,
+          destroyTimeoutMillis: 5000,
+          reapIntervalMillis: 1000,
+          createRetryIntervalMillis: 200,
+          propagateCreateError: false
         },
-        acquireConnectionTimeout: 10000,
+        acquireConnectionTimeout: 30000,
         asyncStackTraces: false,
         debug: false
       };
@@ -176,9 +179,9 @@ if (useSqlite) {
           pool: {
             ...mainDbConfig.pool,
             min: 5,
-            max: 20
+            max: 25
           },
-          acquireConnectionTimeout: 15000
+          acquireConnectionTimeout: 30000
         }
       };
       return;
@@ -225,15 +228,18 @@ if (useSqlite) {
     migrations: {
       directory: path.resolve(__dirname, 'migrations')
     },
-    pool: {
-      min: 2,
-      max: 10,
-      acquireTimeoutMillis: 30000,
-      idleTimeoutMillis: 30000,
-      createTimeoutMillis: 10000,
-      destroyTimeoutMillis: 5000
-    },
-    acquireConnectionTimeout: 10000,
+        pool: {
+          min: 2,
+          max: 15,
+          acquireTimeoutMillis: 60000,
+          idleTimeoutMillis: 30000,
+          createTimeoutMillis: 30000,
+          destroyTimeoutMillis: 5000,
+          reapIntervalMillis: 1000,
+          createRetryIntervalMillis: 200,
+          propagateCreateError: false
+        },
+        acquireConnectionTimeout: 30000,
     asyncStackTraces: false,
     debug: false
   };
@@ -245,9 +251,9 @@ if (useSqlite) {
       pool: {
         ...mainDbConfig.pool,
         min: 5,
-        max: 20
+        max: 25
       },
-      acquireConnectionTimeout: 15000
+      acquireConnectionTimeout: 30000
     }
   };
 }

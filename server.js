@@ -331,6 +331,38 @@ global.broadcastWebSocket = (type, payload) => {
     try {
         await initializeDB();
         
+        // Buzilgan session'larni tozalash (server ishga tushganda)
+        try {
+            const sessions = await db('sessions').select('sid', 'sess');
+            let corruptedCount = 0;
+            
+            for (const session of sessions) {
+                try {
+                    if (!session.sess || session.sess.trim() === '') {
+                        await db('sessions').where({ sid: session.sid }).del();
+                        corruptedCount++;
+                        continue;
+                    }
+                    
+                    const sessionData = JSON.parse(session.sess);
+                    if (!sessionData || typeof sessionData !== 'object') {
+                        await db('sessions').where({ sid: session.sid }).del();
+                        corruptedCount++;
+                    }
+                } catch (e) {
+                    // Buzilgan session'ni o'chirish
+                    await db('sessions').where({ sid: session.sid }).del();
+                    corruptedCount++;
+                }
+            }
+            
+            if (corruptedCount > 0) {
+                log.info(`✅ ${corruptedCount} ta buzilgan sessiya tozalandi.`);
+            }
+        } catch (cleanupError) {
+            log.warn('Buzilgan sessionlarni tozalashda xatolik:', cleanupError.message);
+        }
+        
         // Vaqtinchalik fayllarni tozalash mexanizmini ishga tushirish
         // Har 1 soatda bir marta, 1 soatdan eski fayllarni o'chirish
         startCleanupInterval(1, 1);

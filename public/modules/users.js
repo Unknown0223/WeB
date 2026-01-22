@@ -3,7 +3,7 @@
 
 import { state } from './state.js';
 import { DOM } from './dom.js';
-import { safeFetch, fetchUsers, fetchPendingUsers } from './api.js';
+import { safeFetch, fetchUsers, fetchPendingUsers, fetchPasswordChangeRequests } from './api.js';
 import { showToast, parseUserAgent, showConfirmDialog, hasPermission, createLogger, getUserFriendlyErrorMessage } from './utils.js';
 import { getModal, openModal, closeModal } from './modal.js';
 
@@ -2687,6 +2687,12 @@ export async function openUserModalForEdit(userId) {
                         const selectAllBrands = document.getElementById('select-all-brands-checkbox');
                         if (selectAllLocations) selectAllLocations.checked = false;
                         if (selectAllBrands) selectAllBrands.checked = false;
+                        
+                        // Superadmin Telegram bo'limini tozalash
+                        const telegramSection = document.getElementById('superadmin-telegram-section');
+                        if (telegramSection) {
+                            telegramSection.remove();
+                        }
                     }
                 });
             }
@@ -2787,9 +2793,9 @@ async function executeOpenUserModalForEdit(userId, modalInstance) {
         }
     }
     
-    // Superadmin o'zini tahrirlayotgan bo'lsa, faqat login, to'liq ism, parol o'zgartirish imkoniyati
+    // Superadmin o'zini tahrirlayotgan bo'lsa, login, to'liq ism, parol, Telegram bog'lanish va qurulma soni o'zgartirish imkoniyati
     if (isSuperadminEditingSelf) {
-        console.log(`🔧 [USERS] Superadmin o'zini tahrirlayapti - login, to'liq ism, parol va qurulma soni o'zgartirish mumkin`);
+        console.log(`🔧 [USERS] Superadmin o'zini tahrirlayapti - login, to'liq ism, parol, Telegram bog'lanish va qurulma soni o'zgartirish mumkin`);
         
         // Rol select'ni yashirish
         if (DOM.userRoleSelect && DOM.userRoleSelect.parentElement) {
@@ -2817,6 +2823,86 @@ async function executeOpenUserModalForEdit(userId, modalInstance) {
         DOM.passwordGroup.style.display = 'block';
         DOM.passwordInput.required = false; // Parol ixtiyoriy (o'zgartirish uchun)
         DOM.passwordInput.placeholder = 'Yangi parol (ixtiyoriy)';
+        
+        // Telegram bog'lanish bo'limini ko'rsatish (superadmin uchun ixtiyoriy)
+        setTimeout(() => {
+            const telegramSection = document.getElementById('superadmin-telegram-section');
+            if (!telegramSection) {
+                // Telegram bog'lanish bo'limini yaratish
+                const passwordGroup = DOM.passwordGroup;
+                if (passwordGroup && passwordGroup.parentElement) {
+                    const telegramHtml = `
+                        <div id="superadmin-telegram-section" class="form-group" style="margin-top: 20px; padding: 20px; background: rgba(79, 172, 254, 0.1); border-radius: 8px; border: 1px solid rgba(79, 172, 254, 0.3);">
+                            <label style="display: block; margin-bottom: 15px; font-weight: 600; color: #4facfe;">
+                                <i data-feather="send"></i> Telegram Bog'lanish (Ixtiyoriy)
+                            </label>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                ${user.telegram_chat_id ? `
+                                    <div style="flex: 1; min-width: 200px;">
+                                        <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                                <i data-feather="check-circle" style="color: #10b981;"></i>
+                                                <span style="font-weight: 600; color: #10b981;">Ulangan</span>
+                                            </div>
+                                            <div style="font-size: 12px; color: rgba(255,255,255,0.7);">
+                                                Chat ID: ${user.telegram_chat_id}<br>
+                                                ${user.telegram_username ? `Username: @${user.telegram_username}` : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="button" id="superadmin-disconnect-telegram-btn" class="btn btn-danger" style="padding: 12px 20px;">
+                                        <i data-feather="unlink"></i> Obunani bekor qilish
+                                    </button>
+                                ` : `
+                                    <button type="button" id="superadmin-connect-telegram-btn" class="btn btn-primary" style="padding: 12px 20px;">
+                                        <i data-feather="link"></i> Telegram'ga ulanish
+                                    </button>
+                                `}
+                            </div>
+                            <div style="margin-top: 10px; font-size: 12px; color: rgba(255,255,255,0.6);">
+                                <i data-feather="info"></i> Telegram'ga ulanish ixtiyoriy. Agar ulanmasangiz ham tizimdan foydalana olasiz.
+                            </div>
+                        </div>
+                    `;
+                    passwordGroup.insertAdjacentHTML('afterend', telegramHtml);
+                    
+                    // Feather icons
+                    if (window.feather) {
+                        window.feather.replace();
+                    }
+                    
+                    // Event listener'lar
+                    const connectBtn = document.getElementById('superadmin-connect-telegram-btn');
+                    const disconnectBtn = document.getElementById('superadmin-disconnect-telegram-btn');
+                    
+                    if (connectBtn) {
+                        connectBtn.addEventListener('click', async () => {
+                            await handleGenerateTelegramLink(userId, user.username);
+                        });
+                    }
+                    
+                    if (disconnectBtn) {
+                        disconnectBtn.addEventListener('click', async () => {
+                            await handleClearTelegram(userId, user.username);
+                            // Modal'ni yangilash
+                            await executeOpenUserModalForEdit(userId, modalInstance);
+                        });
+                    }
+                }
+            } else {
+                // Agar allaqachon mavjud bo'lsa, yangilash
+                const connectBtn = document.getElementById('superadmin-connect-telegram-btn');
+                const disconnectBtn = document.getElementById('superadmin-disconnect-telegram-btn');
+                
+                if (user.telegram_chat_id) {
+                    if (connectBtn) connectBtn.style.display = 'none';
+                    if (disconnectBtn) disconnectBtn.style.display = 'block';
+                } else {
+                    if (connectBtn) connectBtn.style.display = 'block';
+                    if (disconnectBtn) disconnectBtn.style.display = 'none';
+                }
+            }
+        }, 100);
     } else {
         DOM.deviceLimitInput.value = user.device_limit;
         
@@ -2868,6 +2954,42 @@ async function executeOpenUserModalForEdit(userId, modalInstance) {
         toggleLocationVisibilityForUserForm();
         
         // Filial va brendlar toggleLocationVisibilityForUserForm orqali yuklanadi
+        
+        // User-specific sozlamalar dropdown'lariga change event listener qo'shish
+        // setTimeout ichida qo'shish - DOM elementlari to'liq yuklangandan keyin
+        setTimeout(() => {
+            // DOM elementlarini qayta yuklash (modal ochilgandan keyin)
+            DOM.userRequiresLocations = document.getElementById('user-requires-locations');
+            DOM.userRequiresBrands = document.getElementById('user-requires-brands');
+            
+            if (DOM.userRequiresLocations) {
+                // Eski event listener'larni olib tashlash (cloneNode orqali)
+                const oldLocationsSelect = DOM.userRequiresLocations;
+                const newLocationsSelect = oldLocationsSelect.cloneNode(true);
+                oldLocationsSelect.parentNode.replaceChild(newLocationsSelect, oldLocationsSelect);
+                DOM.userRequiresLocations = newLocationsSelect;
+                
+                // Yangi event listener qo'shish
+                DOM.userRequiresLocations.addEventListener('change', toggleLocationVisibilityForUserForm);
+                console.log('✅ [EDIT_MODAL] userRequiresLocations change event listener qo\'shildi');
+            } else {
+                console.warn('⚠️ [EDIT_MODAL] userRequiresLocations element topilmadi');
+            }
+            
+            if (DOM.userRequiresBrands) {
+                // Eski event listener'larni olib tashlash (cloneNode orqali)
+                const oldBrandsSelect = DOM.userRequiresBrands;
+                const newBrandsSelect = oldBrandsSelect.cloneNode(true);
+                oldBrandsSelect.parentNode.replaceChild(newBrandsSelect, oldBrandsSelect);
+                DOM.userRequiresBrands = newBrandsSelect;
+                
+                // Yangi event listener qo'shish
+                DOM.userRequiresBrands.addEventListener('change', toggleLocationVisibilityForUserForm);
+                console.log('✅ [EDIT_MODAL] userRequiresBrands change event listener qo\'shildi');
+            } else {
+                console.warn('⚠️ [EDIT_MODAL] userRequiresBrands element topilmadi');
+            }
+        }, 100);
     }
     
     // Event listener'larni qo'shish - modal ochilgandan keyin
@@ -6047,67 +6169,123 @@ let currentRequestsViewMode = localStorage.getItem('requestsViewMode') || 'grid'
 // Render request card (grid view)
 function renderRequestCard(request) {
     const initials = getInitials(request.full_name || request.fullname || request.username);
-    const statusBadge = getRequestStatusBadge(request);
-    const createdDate = request.created_at ? formatDateTime(request.created_at) : 'Noma\'lum';
+    const createdDate = request.created_at ? formatDate(request.created_at) : 'Noma\'lum';
     const fullName = request.full_name || request.fullname || 'Noma\'lum';
     const username = request.username || 'noname';
     const telegramId = request.telegram_id || request.telegram_chat_id;
     const telegramUsername = request.telegram_username;
+    const isPasswordChange = request.type === 'password_change';
+    const role = request.role || 'user';
+    const requestTypeText = isPasswordChange ? 'Parol tiklash' : 'Ro\'yxatdan o\'tish';
+    const requestTypeIcon = isPasswordChange ? 'key' : 'user-plus';
     
     return `
-        <div class="request-card" data-request-id="${request.id}">
-            <div class="request-card-header">
-                <div class="request-card-checkbox">
-                    <input type="checkbox" 
-                           class="request-checkbox" 
-                           data-request-id="${request.id}"
-                           ${selectedRequests.has(request.id) ? 'checked' : ''}>
+        <div class="user-card" data-request-id="${request.id}" data-request-type="${isPasswordChange ? 'password_change' : 'registration'}" style="position: relative;">
+            <div class="user-card-header" style="position: relative;">
+                <input type="checkbox" class="user-card-checkbox" 
+                       data-request-id="${request.id}"
+                       ${selectedRequests.has(request.id) ? 'checked' : ''}
+                       style="position: absolute; top: 0; left: 0; z-index: 10; width: 18px; height: 18px; cursor: pointer; margin: 0;">
+                
+                <div class="user-card-avatar" style="position: relative; width: 56px; height: 56px; min-width: 56px; flex-shrink: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; color: white; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3); margin-left: 24px;">
+                    ${initials}
+                    <div class="user-card-status-indicator ${request.status === 'pending' ? 'pending' : 'active'}" style="position: absolute; bottom: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--card-bg); background: ${request.status === 'pending' ? '#f59e0b' : '#10b981'}; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"></div>
                 </div>
-                <div class="request-avatar">${initials}</div>
-                <div class="request-card-info">
-                    <h3 class="request-card-name">${escapeHtml(fullName)}</h3>
-                    <p class="request-card-username">@${escapeHtml(username)}</p>
-                </div>
-                ${statusBadge}
-            </div>
-            
-            <div class="request-card-details">
-                ${telegramId ? `
-                    <div class="request-detail-item">
-                        <i data-feather="send"></i>
-                        <span>Telegram ID: <strong>${telegramId}</strong></span>
+
+                <div class="user-card-info" style="flex: 1; min-width: 0;">
+                    <div class="user-card-name">
+                        ${escapeHtml(fullName)}
                     </div>
-                ` : ''}
+                    <div class="user-card-username">@${escapeHtml(username)}</div>
+                    <div class="user-card-badges">
+                        <span class="user-badge user-badge-${role}" style="background: ${isPasswordChange ? 'rgba(6, 182, 212, 0.2)' : 'rgba(59, 130, 246, 0.2)'}; color: ${isPasswordChange ? '#06b6d4' : '#3b82f6'}; border: 1px solid ${isPasswordChange ? 'rgba(6, 182, 212, 0.3)' : 'rgba(59, 130, 246, 0.3)'};">
+                            <i data-feather="${requestTypeIcon}"></i>
+                            ${requestTypeText}
+                        </span>
+                        <span class="user-badge user-badge-pending">
+                            <i data-feather="clock"></i>
+                            Kutmoqda
+                        </span>
+                        ${role && role !== 'user' ? `
+                        <span class="user-badge user-badge-${role}">
+                            <i data-feather="${role === 'admin' ? 'shield' : 'user'}"></i>
+                            ${role}
+                        </span>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <div class="user-card-details">
                 ${telegramUsername ? `
-                    <div class="request-detail-item">
-                        <i data-feather="user"></i>
-                        <span>Telegram: <strong>@${escapeHtml(telegramUsername)}</strong></span>
-                    </div>
+                <div class="user-card-detail-item">
+                    <i data-feather="send"></i>
+                    <span>@${escapeHtml(telegramUsername)}</span>
+                </div>
                 ` : ''}
-                ${request.status ? `
-                    <div class="request-detail-item">
-                        <i data-feather="info"></i>
-                        <span>Holat: <strong>${getStatusText(request.status)}</strong></span>
-                    </div>
+                ${telegramId ? `
+                <div class="user-card-detail-item">
+                    <i data-feather="hash"></i>
+                    <span>Telegram ID: ${telegramId}</span>
+                </div>
+                ` : ''}
+                ${request.email ? `
+                <div class="user-card-detail-item">
+                    <i data-feather="mail"></i>
+                    <span>${escapeHtml(request.email)}</span>
+                </div>
+                ` : ''}
+                ${request.phone ? `
+                <div class="user-card-detail-item">
+                    <i data-feather="phone"></i>
+                    <span>${escapeHtml(request.phone)}</span>
+                </div>
                 ` : ''}
             </div>
-            
-            <div class="request-timeline">
-                <i data-feather="clock"></i>
-                <span class="request-timeline-text">
-                    So'rov yuborilgan: <span class="request-timeline-date">${createdDate}</span>
-                </span>
+
+            <div class="user-card-meta">
+                <div class="user-card-meta-item">
+                    <i data-feather="calendar"></i>
+                    <span>${createdDate}</span>
+                </div>
+                <div class="user-card-meta-item">
+                    <i data-feather="clock"></i>
+                    <span>So'rov yuborilgan</span>
+                </div>
             </div>
-            
-            <div class="request-card-actions">
-                <button class="btn btn-success" onclick="window.approveRequest(${request.id})">
-                    <i data-feather="check"></i>
-                    <span>Tasdiqlash</span>
-                </button>
-                <button class="btn btn-danger" onclick="window.rejectRequest(${request.id})">
-                    <i data-feather="x"></i>
-                    <span>Rad etish</span>
-                </button>
+
+            <div class="user-card-actions">
+                ${isPasswordChange ? `
+                    <button class="user-card-action-btn" 
+                            style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none;"
+                            onclick="window.approvePasswordChangeRequest(${request.password_change_request_id})"
+                            title="Tasdiqlash">
+                        <i data-feather="check"></i>
+                        Tasdiqlash
+                    </button>
+                    <button class="user-card-action-btn" 
+                            style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; border: none; margin-left: 8px;"
+                            onclick="window.rejectPasswordChangeRequest(${request.password_change_request_id})"
+                            title="Rad etish">
+                        <i data-feather="x"></i>
+                        Rad etish
+                    </button>
+                ` : `
+                    <button class="user-card-action-btn" 
+                            style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none;"
+                            onclick="window.approveRequest(${request.user_id || request.id})"
+                            title="Tasdiqlash">
+                        <i data-feather="check"></i>
+                        Tasdiqlash
+                    </button>
+                    <button class="user-card-action-btn" 
+                            style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; border: none; margin-left: 8px;"
+                            onclick="window.rejectRequest(${request.user_id || request.id})"
+                            title="Rad etish">
+                        <i data-feather="x"></i>
+                        Rad etish
+                    </button>
+                `}
             </div>
         </div>
     `;
@@ -6116,15 +6294,15 @@ function renderRequestCard(request) {
 // Render request list item (list view)
 function renderRequestListItem(request) {
     const initials = getInitials(request.full_name || request.fullname || request.username);
-    const statusBadge = getRequestStatusBadge(request);
     const createdDate = request.created_at ? formatDateTime(request.created_at) : 'Noma\'lum';
     const fullName = request.full_name || request.fullname || 'Noma\'lum';
     const username = request.username || 'noname';
     const telegramId = request.telegram_id || request.telegram_chat_id;
     const telegramUsername = request.telegram_username;
+    const isPasswordChange = request.type === 'password_change';
     
     return `
-        <div class="request-list-item" data-request-id="${request.id}">
+        <div class="request-list-item" data-request-id="${request.id}" data-request-type="${isPasswordChange ? 'password_change' : 'registration'}">
             <div class="request-list-checkbox">
                 <input type="checkbox" 
                        class="request-checkbox" 
@@ -6134,8 +6312,8 @@ function renderRequestListItem(request) {
             <div class="request-list-avatar">${initials}</div>
             <div class="request-list-info">
                 <div class="request-list-name-row">
-                    <h3 class="request-list-name">${escapeHtml(fullName)}</h3>
-                    ${statusBadge}
+                    <h3 class="request-list-name">${escapeHtml(fullName)}${isPasswordChange ? ' <span style="color: #06b6d4; font-size: 0.85em;">(Parol tiklash)</span>' : ''}</h3>
+                    ${getRequestStatusBadge(request)}
                 </div>
                 <div class="request-list-meta">
                     <span class="request-list-username">@${escapeHtml(username)}</span>
@@ -6148,14 +6326,25 @@ function renderRequestListItem(request) {
                 </div>
             </div>
             <div class="request-list-actions">
-                <button class="btn btn-success btn-sm" onclick="window.approveRequest(${request.id})">
-                    <i data-feather="check"></i>
-                    <span>Tasdiqlash</span>
-                </button>
-                <button class="btn btn-danger btn-sm" onclick="window.rejectRequest(${request.id})">
-                    <i data-feather="x"></i>
-                    <span>Rad etish</span>
-                </button>
+                ${isPasswordChange ? `
+                    <button class="btn btn-success btn-sm" onclick="window.approvePasswordChangeRequest(${request.password_change_request_id})">
+                        <i data-feather="check"></i>
+                        <span>Tasdiqlash</span>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="window.rejectPasswordChangeRequest(${request.password_change_request_id})">
+                        <i data-feather="x"></i>
+                        <span>Rad etish</span>
+                    </button>
+                ` : `
+                    <button class="btn btn-success btn-sm" onclick="window.approveRequest(${request.user_id || request.id})">
+                        <i data-feather="check"></i>
+                        <span>Tasdiqlash</span>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="window.rejectRequest(${request.user_id || request.id})">
+                        <i data-feather="x"></i>
+                        <span>Rad etish</span>
+                    </button>
+                `}
             </div>
         </div>
     `;
@@ -6235,18 +6424,65 @@ function renderModernRequests() {
         // Fallback: filter from all users
         requests = state.users.filter(u => u.status === 'pending' || u.status === 'pending_approval' || u.status === 'pending_telegram_subscription' || u.status === 'status_in_process');
     }
+    
+    // Add password change requests
+    if (state.passwordChangeRequests && state.passwordChangeRequests.length > 0) {
+        // Convert password change requests to request format
+        const passwordRequests = state.passwordChangeRequests.map(pcr => ({
+            id: `pcr_${pcr.id}`, // Prefix to avoid conflicts
+            type: 'password_change',
+            user_id: pcr.user_id,
+            username: pcr.username,
+            fullname: pcr.fullname || pcr.full_name,
+            full_name: pcr.fullname || pcr.full_name,
+            role: pcr.role,
+            created_at: pcr.requested_at,
+            status: 'pending',
+            password_change_request_id: pcr.id
+        }));
+        
+        // Remove duplicates: if a user has both registration and password change request, keep only password change
+        const passwordUserIds = new Set(passwordRequests.map(pr => pr.user_id));
+        requests = requests.filter(r => !passwordUserIds.has(r.user_id));
+        
+        // Group by user_id and keep only the latest (most recent) request per user
+        const passwordRequestsByUser = {};
+        passwordRequests.forEach(pr => {
+            const userId = pr.user_id;
+            if (!passwordRequestsByUser[userId]) {
+                passwordRequestsByUser[userId] = pr;
+            } else {
+                // Compare dates - keep the one with the latest created_at
+                const existingDate = new Date(passwordRequestsByUser[userId].created_at);
+                const currentDate = new Date(pr.created_at);
+                if (currentDate > existingDate) {
+                    passwordRequestsByUser[userId] = pr;
+                }
+            }
+        });
+        
+        // Convert back to array (only latest request per user)
+        const uniquePasswordRequests = Object.values(passwordRequestsByUser);
+        requests = [...requests, ...uniquePasswordRequests];
+    }
 
     // Apply status filter
     if (currentRequestsFilter.status) {
-        if (currentRequestsFilter.status === 'pending_telegram_subscription') {
-            // Telegram kutmoqda - null, undefined yoki pending_subscription
-            requests = requests.filter(r => !r.telegram_connection_status || r.telegram_connection_status === 'pending_subscription' || r.telegram_connection_status === 'not_connected');
+        if (currentRequestsFilter.status === 'password_change') {
+            // Parol tiklash so'rovlari
+            requests = requests.filter(r => r.type === 'password_change');
+        } else if (currentRequestsFilter.status === 'registration') {
+            // Ro'yxatdan o'tish so'rovlari
+            requests = requests.filter(r => r.type !== 'password_change');
+        } else if (currentRequestsFilter.status === 'pending_telegram_subscription') {
+            // Telegram kutmoqda - null, undefined yoki pending_subscription (faqat ro'yxatdan o'tish so'rovlari)
+            requests = requests.filter(r => r.type !== 'password_change' && (!r.telegram_connection_status || r.telegram_connection_status === 'pending_subscription' || r.telegram_connection_status === 'not_connected'));
         } else if (currentRequestsFilter.status === 'pending_admin_approval') {
-            // Admin tasdiq - telegram ulanish tugallangan, lekin admin tasdiqlashi kerak
-            requests = requests.filter(r => r.telegram_connection_status === 'subscribed' || r.telegram_connection_status === 'connected' || r.telegram_connection_status === 'pending_admin_approval');
+            // Admin tasdiq - telegram ulanish tugallangan, lekin admin tasdiqlashi kerak (faqat ro'yxatdan o'tish so'rovlari)
+            requests = requests.filter(r => r.type !== 'password_change' && (r.telegram_connection_status === 'subscribed' || r.telegram_connection_status === 'connected' || r.telegram_connection_status === 'pending_admin_approval'));
         } else if (currentRequestsFilter.status === 'status_in_process') {
-            // Jarayonda
-            requests = requests.filter(r => r.telegram_connection_status === 'in_process');
+            // Jarayonda (faqat ro'yxatdan o'tish so'rovlari)
+            requests = requests.filter(r => r.type !== 'password_change' && r.telegram_connection_status === 'in_process');
         }
     }
 
@@ -6300,6 +6536,16 @@ function renderModernRequests() {
 
 // Get request status badge HTML
 function getRequestStatusBadge(request) {
+    // Parol tiklash so'rovlari uchun alohida badge
+    if (request.type === 'password_change') {
+        return `
+            <div class="request-status-badge" style="background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); color: white; padding: 6px 12px; border-radius: 20px; font-size: 0.75em; font-weight: 600;">
+                <i data-feather="key"></i>
+                <span>Parol</span>
+            </div>
+        `;
+    }
+    
     // console.log('📋 Request badge for:', request.username, 'telegram_connection_status:', request.telegram_connection_status);
     
     // If telegram_id exists but telegram_connection_status is null/undefined, user needs admin approval
@@ -6348,6 +6594,9 @@ async function updateRequestsStatistics() {
         pendingUsers = state.users.filter(u => u.status === 'pending');
     }
     
+    // Get password change requests
+    const passwordChangeRequests = state.passwordChangeRequests || [];
+    
     // Count by status
     // Telegram kutmoqda - null, undefined yoki pending_subscription
     const telegramPending = pendingUsers.filter(u => !u.telegram_connection_status || u.telegram_connection_status === 'pending_subscription' || u.telegram_connection_status === 'not_connected').length;
@@ -6369,6 +6618,16 @@ async function updateRequestsStatistics() {
         return created >= today;
     }).length;
     
+    // Count password change requests
+    const passwordChangeCount = passwordChangeRequests.length;
+    const todayPasswordRequests = passwordChangeRequests.filter(pcr => {
+        const requested = new Date(pcr.requested_at);
+        return requested >= today;
+    }).length;
+    
+    // Total requests (registration + password change)
+    const totalRequests = pendingUsers.length + passwordChangeCount;
+    
         // Real data from API - bugungi tasdiqlangan va rad etilgan foydalanuvchilar
         let approvedToday = 0;
         let rejectedToday = 0;
@@ -6385,32 +6644,34 @@ async function updateRequestsStatistics() {
             // Xatolik bo'lsa ham, 0 qiymatlar bilan davom etadi
         }
         
-    const totalToday = todayRequests + approvedToday + rejectedToday;
+    const totalToday = todayRequests + todayPasswordRequests + approvedToday + rejectedToday;
     const approvalRate = totalToday > 0 ? Math.round((approvedToday / totalToday) * 100) : 0;
     const rejectionRate = totalToday > 0 ? Math.round((rejectedToday / totalToday) * 100) : 0;
     
     // Update DOM
-    updateElement('pending-requests-count', pendingUsers.length);
-    updateElement('today-requests-count', todayRequests);
+    updateElement('pending-requests-count', totalRequests);
+    updateElement('today-requests-count', todayRequests + todayPasswordRequests);
     updateElement('approved-today-count', approvedToday);
     updateElement('rejected-today-count', rejectedToday);
     updateElement('approval-rate', `${approvalRate}%`);
     updateElement('rejection-rate', `${rejectionRate}%`);
     
     // Update filter badges
-    updateElement('request-status-count-all', pendingUsers.length);
+    updateElement('request-status-count-all', totalRequests);
+    updateElement('request-status-count-password', passwordChangeCount);
+    updateElement('request-status-count-registration', pendingUsers.length);
     updateElement('request-status-count-telegram', telegramPending);
     // Admin tasdiq va Jarayonda sanogichlari olib tashlandi
     
     // Update pending text
-    const pendingText = pendingUsers.length === 0 ? 'Hammasi tasdiqlangan' : 
-                       pendingUsers.length === 1 ? '1 ta so\'rov' : 
-                       `${pendingUsers.length} ta so'rov`;
+    const pendingText = totalRequests === 0 ? 'Hammasi tasdiqlangan' : 
+                       totalRequests === 1 ? '1 ta so\'rov' : 
+                       `${totalRequests} ta so'rov`;
     updateElement('pending-requests-text', pendingText);
     
     // Update sidebar badge count
     if (DOM.requestsCountBadge) {
-        const count = pendingUsers.length;
+        const count = totalRequests;
         DOM.requestsCountBadge.textContent = count;
         DOM.requestsCountBadge.classList.toggle('hidden', count === 0);
     }
@@ -6418,7 +6679,7 @@ async function updateRequestsStatistics() {
     // Show/hide bulk approve button
     const bulkApproveBtn = document.getElementById('bulk-approve-all-btn');
     if (bulkApproveBtn) {
-        bulkApproveBtn.style.display = pendingUsers.length > 0 ? 'flex' : 'none';
+        bulkApproveBtn.style.display = totalRequests > 0 ? 'flex' : 'none';
         }
     } catch (error) {
         errorLog('Statistikani yangilashda xatolik:', error);
@@ -6493,19 +6754,41 @@ function setupRequestsFilters() {
     // Refresh button
     const refreshBtn = document.getElementById('refresh-requests-btn');
     if (refreshBtn) {
-        refreshBtn.addEventListener('click', async () => {
-            refreshBtn.disabled = true;
-            refreshBtn.innerHTML = '<i data-feather="loader"></i><span>Yuklanmoqda...</span>';
+        // Remove existing listeners by cloning
+        const newRefreshBtn = refreshBtn.cloneNode(true);
+        refreshBtn.parentNode.replaceChild(newRefreshBtn, refreshBtn);
+        
+        newRefreshBtn.addEventListener('click', async () => {
+            newRefreshBtn.disabled = true;
+            newRefreshBtn.innerHTML = '<i data-feather="loader"></i><span>Yuklanmoqda...</span>';
             feather.replace();
             
-            await fetchUsers();
-            renderModernRequests();
-            updateRequestsStatistics();
-            
-            refreshBtn.disabled = false;
-            refreshBtn.innerHTML = '<i data-feather="refresh-cw"></i><span>Yangilash</span>';
-            feather.replace();
-            showToast('So\'rovlar yangilandi', 'success');
+            try {
+                const [pendingRes, passwordRes] = await Promise.all([
+                    fetchPendingUsers(),
+                    fetchPasswordChangeRequests()
+                ]);
+                
+                if (pendingRes) {
+                    state.pendingUsers = pendingRes;
+                }
+                if (passwordRes) {
+                    state.passwordChangeRequests = passwordRes;
+                }
+                
+                await fetchUsers();
+                renderModernRequests();
+                updateRequestsStatistics();
+                
+                showToast('So\'rovlar yangilandi', 'success');
+            } catch (error) {
+                console.error('Yangilashda xatolik:', error);
+                showToast('Yangilashda xatolik', 'error');
+            } finally {
+                newRefreshBtn.disabled = false;
+                newRefreshBtn.innerHTML = '<i data-feather="refresh-cw"></i><span>Yangilash</span>';
+                feather.replace();
+            }
         });
     }
     
@@ -6812,9 +7095,10 @@ window.rejectRequest = async function(userId) {
         showToast(result.message || 'So\'rov rad etildi', 'success');
         
         // Ma'lumotlarni yangilash
-        const [pendingRes, usersRes] = await Promise.all([
+        const [pendingRes, usersRes, passwordRes] = await Promise.all([
             fetchPendingUsers(),
-            fetchUsers()
+            fetchUsers(),
+            fetchPasswordChangeRequests()
         ]);
         
         if (pendingRes) {
@@ -6823,6 +7107,9 @@ window.rejectRequest = async function(userId) {
         if (usersRes) {
             state.users = usersRes;
         }
+        if (passwordRes) {
+            state.passwordChangeRequests = passwordRes;
+        }
         
         renderModernRequests();
         updateRequestsStatistics();
@@ -6830,6 +7117,113 @@ window.rejectRequest = async function(userId) {
         console.log('✅ [REJECT] Barcha ma\'lumotlar yangilandi');
     } catch (error) {
         console.error('❌ [REJECT] Xatolik:', error);
+        showToast(`Xatolik: ${error.message}`, 'error');
+    }
+};
+
+// Parol tiklash so'rovini tasdiqlash
+window.approvePasswordChangeRequest = async function(requestId) {
+    console.log('✅ [APPROVE-PASSWORD] Parol tiklash so\'rovi tasdiqlanmoqda. Request ID:', requestId);
+    
+    const confirmed = await showConfirmDialog({
+        title: 'Parol tiklash so\'rovini tasdiqlash',
+        message: 'Ushbu parol tiklash so\'rovini tasdiqlashni xohlaysizmi?',
+        confirmText: 'Ha, tasdiqlash',
+        cancelText: 'Bekor qilish',
+        type: 'success',
+        icon: 'check-circle'
+    });
+    
+    if (!confirmed) {
+        console.log('🚫 [APPROVE-PASSWORD] Foydalanuvchi bekor qildi');
+        return;
+    }
+    
+    try {
+        const res = await safeFetch(`/api/users/password-change-requests/${requestId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!res || !res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData?.message || 'Tasdiqlashda xatolik');
+        }
+        
+        const result = await res.json();
+        showToast(result.message || 'Parol tiklash so\'rovi tasdiqlandi', 'success');
+        
+        // Ma'lumotlarni yangilash
+        const passwordRes = await fetchPasswordChangeRequests();
+        if (passwordRes) {
+            state.passwordChangeRequests = passwordRes;
+        }
+        
+        renderModernRequests();
+        updateRequestsStatistics();
+        
+        console.log('✅ [APPROVE-PASSWORD] Parol tiklash so\'rovi muvaffaqiyatli tasdiqlandi');
+    } catch (error) {
+        console.error('❌ [APPROVE-PASSWORD] Xatolik:', error);
+        showToast(`Xatolik: ${error.message}`, 'error');
+    }
+};
+
+// Parol tiklash so'rovini rad etish
+window.rejectPasswordChangeRequest = async function(requestId) {
+    console.log('❌ [REJECT-PASSWORD] Parol tiklash so\'rovi rad etilmoqda. Request ID:', requestId);
+    
+    const confirmed = await showConfirmDialog({
+        title: 'Parol tiklash so\'rovini rad etish',
+        message: 'Ushbu parol tiklash so\'rovini rad etishni xohlaysizmi?',
+        confirmText: 'Ha, rad etish',
+        cancelText: 'Bekor qilish',
+        type: 'danger',
+        icon: 'x-circle'
+    });
+    
+    if (!confirmed) {
+        console.log('🚫 [REJECT-PASSWORD] Foydalanuvchi bekor qildi');
+        return;
+    }
+    
+    // Sabab kiritish uchun prompt
+    const reason = prompt('Sababni kiriting (ixtiyoriy):') || 'Sabab ko\'rsatilmagan';
+    
+    try {
+        const res = await safeFetch(`/api/users/password-change-requests/${requestId}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment: reason })
+        });
+        
+        if (!res || !res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData?.message || 'Rad etishda xatolik');
+        }
+        
+        const result = await res.json();
+        showToast(result.message || 'Parol tiklash so\'rovi rad etildi', 'success');
+        
+        // Ma'lumotlarni yangilash
+        const [pendingRes, passwordRes] = await Promise.all([
+            fetchPendingUsers(),
+            fetchPasswordChangeRequests()
+        ]);
+        
+        if (pendingRes) {
+            state.pendingUsers = pendingRes;
+        }
+        if (passwordRes) {
+            state.passwordChangeRequests = passwordRes;
+        }
+        
+        renderModernRequests();
+        updateRequestsStatistics();
+        
+        console.log('✅ [REJECT-PASSWORD] Parol tiklash so\'rovi muvaffaqiyatli rad etildi');
+    } catch (error) {
+        console.error('❌ [REJECT-PASSWORD] Xatolik:', error);
         showToast(`Xatolik: ${error.message}`, 'error');
     }
 };
@@ -7137,8 +7531,19 @@ function getStatusText(status) {
 }
 
 // Initialize requests section
-export function initModernRequestsPage() {
+export async function initModernRequestsPage() {
     setupRequestsFilters();
+    
+    // Parol tiklash so'rovlarini yuklash
+    try {
+        const passwordRes = await fetchPasswordChangeRequests();
+        if (passwordRes) {
+            state.passwordChangeRequests = passwordRes;
+        }
+    } catch (error) {
+        console.error('Parol tiklash so\'rovlarini yuklashda xatolik:', error);
+    }
+    
     renderModernRequests();
     updateRequestsStatistics();
 }

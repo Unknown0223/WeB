@@ -147,6 +147,172 @@ router.get('/me/sessions', isAuthenticated, async (req, res) => {
     }
 });
 
+// Parol o'zgartirish so'rovlarini olish (Admin uchun) - :id route'laridan oldin bo'lishi kerak
+router.get('/password-change-requests', isAuthenticated, hasPermission('users:change_password'), async (req, res) => {
+    try {
+        log.info(`[GET-PASSWORD-REQUESTS] So'rov keldi. User ID: ${req.session.user?.id}`);
+        const allRequests = await db('password_change_requests')
+            .join('users', 'password_change_requests.user_id', 'users.id')
+            .where('password_change_requests.status', 'pending')
+            .select(
+                'password_change_requests.*',
+                'users.username',
+                'users.fullname',
+                'users.role'
+            )
+            .orderBy('password_change_requests.requested_at', 'desc');
+        
+        // Bir foydalanuvchidan faqat eng yangi so'rovni qoldirish
+        const uniqueRequests = [];
+        const userRequestMap = new Map();
+        
+        for (const request of allRequests) {
+            const userId = request.user_id;
+            if (!userRequestMap.has(userId)) {
+                userRequestMap.set(userId, request);
+                uniqueRequests.push(request);
+            } else {
+                const existingRequest = userRequestMap.get(userId);
+                const existingDate = new Date(existingRequest.requested_at);
+                const currentDate = new Date(request.requested_at);
+                if (currentDate > existingDate) {
+                    // Yangi so'rov eski so'rovdan keyinroq - eski so'rovni almashtirish
+                    const index = uniqueRequests.findIndex(r => r.user_id === userId);
+                    if (index !== -1) {
+                        uniqueRequests[index] = request;
+                        userRequestMap.set(userId, request);
+                    }
+                }
+            }
+        }
+        
+        log.info(`[GET-PASSWORD-REQUESTS] Jami so'rovlar: ${allRequests.length}, Unique so'rovlar: ${uniqueRequests.length}`);
+        res.json(uniqueRequests);
+    } catch (error) {
+        log.error("Parol so'rovlarini olish xatoligi:", error.message);
+        log.error("Stack trace:", error.stack);
+        res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
+    }
+});
+
+// Parol o'zgartirish so'rovini tasdiqlash (Admin uchun) - :id route'laridan oldin bo'lishi kerak
+router.post('/password-change-requests/:id/approve', isAuthenticated, hasPermission('users:change_password'), async (req, res) => {
+    const requestId = req.params.id;
+    const adminId = req.session.user.id;
+    const ipAddress = req.session.ip_address;
+    const userAgent = req.session.user_agent;
+    
+    try {
+        log.info(`[APPROVE-PASSWORD] So'rov tasdiqlanmoqda. Request ID: ${requestId}, Admin ID: ${adminId}`);
+        const request = await db('password_change_requests').where({ id: requestId, status: 'pending' }).first();
+        
+        if (!request) {
+            log.warn(`[APPROVE-PASSWORD] So'rov topilmadi yoki allaqachon ko'rib chiqilgan. Request ID: ${requestId}`);
+            return res.status(404).json({ message: "So'rov topilmadi yoki allaqachon ko'rib chiqilgan." });
+        }
+        
+        log.info(`[APPROVE-PASSWORD] So'rov topildi. User ID: ${request.user_id}`);
+        
+        // Parolni yangilash
+        const updateResult = await db('users')
+            .where({ id: request.user_id })
+            .update({ 
+                password: request.new_password_hash,
+                updated_at: db.fn.now()
+            });
+        log.info(`[APPROVE-PASSWORD] Parol yangilandi. Update result: ${updateResult} ta qator yangilandi`);
+        
+        // So'rov statusini yangilash
+        await db('password_change_requests')
+            .where({ id: requestId })
+            .update({
+                status: 'approved',
+                approved_by: adminId,
+                processed_at: db.fn.now()
+            });
+        log.info(`[APPROVE-PASSWORD] So'rov statusi 'approved' ga o'zgartirildi`);
+        
+        // Audit log
+        await db('audit_logs').insert({
+            user_id: adminId,
+            action: 'approve_password_change',
+            target_type: 'user',
+            target_id: request.user_id,
+            details: JSON.stringify({ request_id: requestId }),
+            ip_address: ipAddress,
+            user_agent: userAgent
+        });
+        log.info(`[APPROVE-PASSWORD] Audit log saqlandi`);
+        
+        // Foydalanuvchiga Telegram orqali xabar yuborish
+        const user = await db('users').where({ id: request.user_id }).first();
+        log.info(`[APPROVE-PASSWORD] Foydalanuvchi topildi: ${user?.username}, Telegram Chat ID: ${user?.telegram_chat_id || 'YO\'Q'}`);
+        if (user.telegram_chat_id) {
+            try {
+                log.info(`[APPROVE-PASSWORD] Foydalanuvchi ${user.username} ga Telegram xabari yuborilmoqda...`);
+                await sendToTelegram({
+                    type: 'password_changed',
+                    chat_id: user.telegram_chat_id,
+                    user_id: user.id,
+                    username: user.username
+                });
+                log.info(`[APPROVE-PASSWORD] ✅ Telegram xabari foydalanuvchiga yuborildi`);
+            } catch (error) {
+                log.error(`[APPROVE-PASSWORD] ❌ Telegram xabar yuborishda xatolik:`, error.message);
+            }
+        } else {
+            log.warn(`[APPROVE-PASSWORD] ⚠️ Foydalanuvchining Telegram chat ID si yo'q, xabar yuborilmadi`);
+        }
+        
+        log.info(`[APPROVE-PASSWORD] ✅ Parol o'zgartirish so'rovi muvaffaqiyatli tasdiqlandi`);
+        res.json({ message: "Parol o'zgartirish so'rovi tasdiqlandi." });
+    } catch (error) {
+        log.error("So'rovni tasdiqlash xatoligi:", error.message);
+        res.status(500).json({ message: "So'rovni tasdiqlashda xatolik." });
+    }
+});
+
+// Parol o'zgartirish so'rovini rad etish (Admin uchun) - :id route'laridan oldin bo'lishi kerak
+router.post('/password-change-requests/:id/reject', isAuthenticated, hasPermission('users:change_password'), async (req, res) => {
+    const requestId = req.params.id;
+    const adminId = req.session.user.id;
+    const { comment } = req.body;
+    
+    try {
+        const request = await db('password_change_requests').where({ id: requestId, status: 'pending' }).first();
+        
+        if (!request) {
+            return res.status(404).json({ message: "So'rov topilmadi yoki allaqachon ko'rib chiqilgan." });
+        }
+        
+        // So'rov statusini yangilash
+        await db('password_change_requests')
+            .where({ id: requestId })
+            .update({
+                status: 'rejected',
+                approved_by: adminId,
+                processed_at: db.fn.now(),
+                admin_comment: comment || null
+            });
+        
+        // Foydalanuvchiga Telegram orqali xabar yuborish
+        const user = await db('users').where({ id: request.user_id }).first();
+        if (user.telegram_chat_id) {
+            await sendToTelegram({
+                type: 'password_change_rejected',
+                chat_id: user.telegram_chat_id,
+                username: user.username,
+                reason: comment || 'Sabab ko\'rsatilmagan'
+            });
+        }
+        
+        res.json({ message: "So'rov rad etildi." });
+    } catch (error) {
+        log.error("So'rovni rad etish xatoligi:", error.message);
+        res.status(500).json({ message: "So'rovni rad etishda xatolik." });
+    }
+});
+
 // Bitta foydalanuvchi ma'lumotlarini olish
 router.get('/:id', isAuthenticated, hasPermission('users:view'), async (req, res) => {
     const userId = parseInt(req.params.id);
@@ -1296,127 +1462,6 @@ router.delete('/me/avatar', isAuthenticated, async (req, res) => {
     }
 });
 
-// Parol o'zgartirish so'rovlarini olish (Admin uchun)
-router.get('/password-change-requests', isAuthenticated, hasPermission('users:change_password'), async (req, res) => {
-    try {
-        const requests = await db('password_change_requests')
-            .join('users', 'password_change_requests.user_id', 'users.id')
-            .where('password_change_requests.status', 'pending')
-            .select(
-                'password_change_requests.*',
-                'users.username',
-                'users.fullname',
-                'users.role'
-            )
-            .orderBy('password_change_requests.requested_at', 'desc');
-        
-        res.json(requests);
-    } catch (error) {
-        log.error("Parol so'rovlarini olish xatoligi:", error.message);
-        res.status(500).json({ message: "So'rovlarni yuklashda xatolik." });
-    }
-});
-
-// Parol o'zgartirish so'rovini tasdiqlash (Admin uchun)
-router.post('/password-change-requests/:id/approve', isAuthenticated, hasPermission('users:change_password'), async (req, res) => {
-    const requestId = req.params.id;
-    const adminId = req.session.user.id;
-    const ipAddress = req.session.ip_address;
-    const userAgent = req.session.user_agent;
-    
-    try {
-        const request = await db('password_change_requests').where({ id: requestId, status: 'pending' }).first();
-        
-        if (!request) {
-            return res.status(404).json({ message: "So'rov topilmadi yoki allaqachon ko'rib chiqilgan." });
-        }
-        
-        // Parolni yangilash
-        await db('users')
-            .where({ id: request.user_id })
-            .update({ 
-                password: request.new_password_hash,
-                updated_at: db.fn.now()
-            });
-        
-        // So'rov statusini yangilash
-        await db('password_change_requests')
-            .where({ id: requestId })
-            .update({
-                status: 'approved',
-                approved_by: adminId,
-                processed_at: db.fn.now()
-            });
-        
-        // Audit log
-        await db('audit_logs').insert({
-            user_id: adminId,
-            action: 'approve_password_change',
-            target_type: 'user',
-            target_id: request.user_id,
-            details: JSON.stringify({ request_id: requestId }),
-            ip_address: ipAddress,
-            user_agent: userAgent
-        });
-        
-        // Foydalanuvchiga Telegram orqali xabar yuborish
-        const user = await db('users').where({ id: request.user_id }).first();
-        if (user.telegram_chat_id) {
-            await sendToTelegram({
-                type: 'password_changed',
-                chat_id: user.telegram_chat_id,
-                username: user.username
-            });
-        }
-        
-        res.json({ message: "Parol o'zgartirish so'rovi tasdiqlandi." });
-    } catch (error) {
-        log.error("So'rovni tasdiqlash xatoligi:", error.message);
-        res.status(500).json({ message: "So'rovni tasdiqlashda xatolik." });
-    }
-});
-
-// Parol o'zgartirish so'rovini rad etish (Admin uchun)
-router.post('/password-change-requests/:id/reject', isAuthenticated, hasPermission('users:change_password'), async (req, res) => {
-    const requestId = req.params.id;
-    const adminId = req.session.user.id;
-    const { comment } = req.body;
-    
-    try {
-        const request = await db('password_change_requests').where({ id: requestId, status: 'pending' }).first();
-        
-        if (!request) {
-            return res.status(404).json({ message: "So'rov topilmadi yoki allaqachon ko'rib chiqilgan." });
-        }
-        
-        // So'rov statusini yangilash
-        await db('password_change_requests')
-            .where({ id: requestId })
-            .update({
-                status: 'rejected',
-                approved_by: adminId,
-                processed_at: db.fn.now(),
-                admin_comment: comment || null
-            });
-        
-        // Foydalanuvchiga Telegram orqali xabar yuborish
-        const user = await db('users').where({ id: request.user_id }).first();
-        if (user.telegram_chat_id) {
-            await sendToTelegram({
-                type: 'password_change_rejected',
-                chat_id: user.telegram_chat_id,
-                username: user.username,
-                reason: comment || 'Sabab ko\'rsatilmagan'
-            });
-        }
-        
-        res.json({ message: "So'rov rad etildi." });
-    } catch (error) {
-        log.error("So'rovni rad etish xatoligi:", error.message);
-        res.status(500).json({ message: "So'rovni rad etishda xatolik." });
-    }
-});
-
 // Foydalanuvchi o'chirishdan oldin ma'lumotlarni tekshirish
 router.get('/:id/check-data', isAuthenticated, hasPermission('users:edit'), async (req, res) => {
     try {
@@ -1621,12 +1666,9 @@ router.post('/:id/generate-telegram-link', isAuthenticated, hasPermission('users
             return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
         }
 
-        // Superadmin uchun bot obunasi majburiy emas
+        // Superadmin uchun bot obunasi ixtiyoriy (endi ruxsat beriladi)
         const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
-        if (isSuperAdmin) {
-            log.error(`[GENERATE_LINK] Superadmin uchun link yaratishga urinish: ${userId}`);
-            return res.status(400).json({ message: "Superadmin uchun bot obunasi majburiy emas." });
-        }
+        // Superadmin uchun ham link yaratish mumkin (ixtiyoriy)
 
         // Agar allaqachon ulangan bo'lsa
         if (user.telegram_chat_id && user.is_telegram_connected) {
@@ -1732,10 +1774,13 @@ router.post('/:id/clear-telegram', isAuthenticated, hasPermission('users:edit'),
 
         // Superadmin uchun Telegram bog'lanishni tozalashga ruxsat bermaymiz
         const isTargetSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
-        if (isTargetSuperAdmin) {
-            log.error(`[CLEAR] Superadmin uchun Telegram bog'lanishni tozalashga urinish: ${userId}`);
-            return res.status(400).json({ message: "Superadmin uchun Telegram bog'lanishini tozalashga ruxsat berilmaydi." });
+        // Superadmin o'zini tahrirlayotgan bo'lsa, obunani bekor qilishga ruxsat berish
+        const isEditingSelf = parseInt(userId) === parseInt(adminId);
+        if (isTargetSuperAdmin && !isEditingSelf) {
+            log.error(`[CLEAR] Superadmin uchun Telegram bog'lanishni tozalashga urinish (o'zi emas): ${userId}`);
+            return res.status(400).json({ message: "Superadmin uchun Telegram bog'lanishini faqat o'zi bekor qilishi mumkin." });
         }
+        // Superadmin o'zini tahrirlayotgan bo'lsa, obunani bekor qilishga ruxsat berish
 
         // Agar foydalanuvchi allaqachon botga ulanmagan bo'lsa
         if (!user.telegram_chat_id && !user.is_telegram_connected) {

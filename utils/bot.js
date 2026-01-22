@@ -586,7 +586,7 @@ async function formatAndSendReport(payload) {
 
 
 async function handleSecurityRequest(payload) {
-    const { type, chat_id, admin_chat_id, user_id, username, fullname, token, password, secret_word } = payload;
+    const { type, chat_id, admin_chat_id, user_id, username, fullname, token, password, secret_word, requester, requester_fullname, request_id, reason } = payload;
     let text, keyboard;
 
     function escapeMarkdownV2(text) {
@@ -603,17 +603,47 @@ async function handleSecurityRequest(payload) {
         }
         
         try {
-
-            const result = await bot.sendMessage(chatId, text, { parse_mode: 'MarkdownV2', ...options });
-
+            // Log options va reply_markup ni tekshirish
+            if (options.reply_markup) {
+                botLog.info(`[BOT] [SEND-MARKDOWN-V2] reply_markup mavjud:`, JSON.stringify(options.reply_markup, null, 2));
+            } else {
+                botLog.info(`[BOT] [SEND-MARKDOWN-V2] reply_markup yo'q`);
+            }
+            
+            const messageOptions = { parse_mode: 'MarkdownV2', ...options };
+            botLog.info(`[BOT] [SEND-MARKDOWN-V2] Yuboriladigan options:`, JSON.stringify(messageOptions, null, 2));
+            
+            // Telegram API'ga to'g'ridan-to'g'ri yuborish va javobni log qilish
+            const result = await bot.sendMessage(chatId, text, messageOptions);
+            
+            botLog.info(`[BOT] [SEND-MARKDOWN-V2] ✅ Xabar muvaffaqiyatli yuborildi. Message ID: ${result.message_id}`);
+            
+            // Agar reply_markup yuborilgan bo'lsa, javobni tekshirish
+            if (options.reply_markup && result) {
+                botLog.info(`[BOT] [SEND-MARKDOWN-V2] Reply markup yuborilgan. Result:`, JSON.stringify(result, null, 2));
+                // Telegram API javobida reply_markup borligini tekshirish
+                if (result.reply_markup) {
+                    botLog.info(`[BOT] [SEND-MARKDOWN-V2] ✅ Reply markup Telegram API javobida mavjud`);
+                } else {
+                    botLog.warn(`[BOT] [SEND-MARKDOWN-V2] ⚠️ Reply markup Telegram API javobida yo'q!`);
+                }
+            }
+            
             return result;
         } catch (error) {
             const body = error.response?.body;
-            botLog.error(`MarkdownV2 xabar yuborishda xatolik (chat_id: ${chatId}):`, {
+            botLog.error(`[BOT] [SEND-MARKDOWN-V2] ❌ MarkdownV2 xabar yuborishda xatolik (chat_id: ${chatId}):`, {
                 error_code: body?.error_code,
                 description: body?.description,
-                message: error.message
+                message: error.message,
+                options: JSON.stringify(options, null, 2),
+                stack: error.stack
             });
+            
+            // Agar reply_markup bilan muammo bo'lsa, uni log qilish
+            if (options.reply_markup) {
+                botLog.error(`[BOT] [SEND-MARKDOWN-V2] ⚠️ Reply markup bilan xatolik yuz berdi. Reply markup:`, JSON.stringify(options.reply_markup, null, 2));
+            }
             
             return null;
         }
@@ -695,7 +725,7 @@ async function handleSecurityRequest(payload) {
             break;
         
         case 'delete_credentials':
-            const user = await db('users').where({ id: user_id }).select('creds_message_id').first();
+            const user = await db('users').where({ id: user_id }).select('creds_message_id', 'password_change_message_id').first();
             if (user && user.creds_message_id) {
                 try {
                     await bot.deleteMessage(chat_id, user.creds_message_id);
@@ -704,14 +734,280 @@ async function handleSecurityRequest(payload) {
                     // Silent fail - old message deletion is optional
                 }
             }
+            // Parol o'zgartirish xabarini ham o'chirish
+            if (user && user.password_change_message_id) {
+                try {
+                    await bot.deleteMessage(chat_id, user.password_change_message_id);
+                    await db('users').where({ id: user_id }).update({ 
+                        password_change_message_id: null,
+                        must_delete_password_change_message: false
+                    });
+                } catch (error) {
+                    // Silent fail - old message deletion is optional
+                }
+            }
+            break;
+            
+        case 'password_change_request':
+            botLog.info(`[BOT] password_change_request qayta ishlanmoqda. Chat ID: ${chat_id}, User ID: ${user_id}, Requester: ${requester || username}, Request ID: ${request_id}`);
+            botLog.info(`[BOT] Request ID type: ${typeof request_id}, value: ${request_id}, is null: ${request_id === null}, is undefined: ${request_id === undefined}`);
+            text = `🔑 *${escapeMarkdownV2("Parol O'zgartirish So'rovi")}*\\!\n\n${escapeMarkdownV2("Foydalanuvchi parolni o'zgartirish so'rovi yubordi.")}\n\n👤 *${escapeMarkdownV2("Foydalanuvchi:")}* ${escapeMarkdownV2(requester || username)}\n${requester_fullname ? `📝 *${escapeMarkdownV2("To'liq ism:")}* ${escapeMarkdownV2(requester_fullname)}\n` : ''}🆔 *${escapeMarkdownV2("ID:")}* ${user_id}\n\n${escapeMarkdownV2("Quyidagi tugmalar orqali tasdiqlash yoki rad etish mumkin.")}`;
+            
+            // Inline keyboard qo'shish - knopkalar yonma-yon bo'lishi kerak
+            keyboard = null;
+            if (request_id) {
+                keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: "✅ Tasdiq", callback_data: `password_approve_${request_id}` },
+                            { text: "❌ Rad et", callback_data: `password_reject_${request_id}` }
+                        ]
+                    ]
+                };
+                botLog.info(`[BOT] ✅ Inline keyboard yaratildi. Request ID: ${request_id}, Callback data: password_approve_${request_id}, password_reject_${request_id}`);
+            } else {
+                botLog.warn(`[BOT] ⚠️ Request ID yo'q, inline keyboard yaratilmaydi. Request ID: ${request_id}`);
+            }
+            
+            botLog.info(`[BOT] Xabar matni tayyorlandi, yuborilmoqda... Keyboard: ${keyboard ? 'mavjud' : 'yo\'q'}`);
+            if (keyboard) {
+                botLog.info(`[BOT] Keyboard structure:`, JSON.stringify(keyboard, null, 2));
+            }
+            const passwordChangeResult = await sendMarkdownV2Message(chat_id, text, keyboard ? { reply_markup: keyboard } : {});
+            if (!passwordChangeResult) {
+                botLog.error(`[BOT] ❌ Parol o'zgartirish so'rovi yuborilmadi. Chat ID: ${chat_id}`);
+            } else {
+                botLog.info(`[BOT] ✅ Parol o'zgartirish so'rovi muvaffaqiyatli yuborildi. Chat ID: ${chat_id}, Message ID: ${passwordChangeResult.message_id}, Keyboard: ${keyboard ? 'yuborildi' : 'yuborilmadi'}`);
+            }
+            break;
+            
+        case 'password_changed':
+            botLog.info(`[BOT] password_changed qayta ishlanmoqda. Chat ID: ${chat_id}, Username: ${username}`);
+            
+            // Agar foydalanuvchi yangi parolni o'zi kiritgan bo'lsa (request yuborilganda), 
+            // uni xabarda ko'rsatish kerak emas, chunki u allaqachon biladi.
+            // Faqat parol o'zgartirildi haqida xabar yuboriladi.
+            text = `✅ *${escapeMarkdownV2("Parol O'zgartirildi")}*\\!\n\n${escapeMarkdownV2("Sizning parolingiz muvaffaqiyatli o'zgartirildi.")}\n\n👤 *${escapeMarkdownV2("Foydalanuvchi:")}* ${escapeMarkdownV2(username)}\n\n${escapeMarkdownV2("Endi yangi parol bilan tizimga kirishingiz mumkin.")}\n\n${escapeMarkdownV2("⚠️ Diqqat:")} ${escapeMarkdownV2("Ushbu xabar tizimga birinchi marta kirganingizdan so'ng avtomatik o'chib ketadi.")}`;
+            botLog.info(`[BOT] Xabar matni tayyorlandi, yuborilmoqda...`);
+            const passwordChangedResult = await sendMarkdownV2Message(chat_id, text, {
+                disable_web_page_preview: true,
+                protect_content: true
+            });
+            if (!passwordChangedResult) {
+                botLog.error(`[BOT] ❌ Parol o'zgartirildi xabari yuborilmadi. Chat ID: ${chat_id}`);
+            } else {
+                // Xabar ID'sini saqlash (keyinchalik o'chirish uchun)
+                await db('users').where({ id: user_id }).update({ 
+                    password_change_message_id: passwordChangedResult.message_id,
+                    must_delete_password_change_message: true
+                });
+                botLog.info(`[BOT] ✅ Parol o'zgartirildi xabari muvaffaqiyatli yuborildi. Chat ID: ${chat_id}, Message ID: ${passwordChangedResult.message_id}`);
+            }
+            break;
+            
+        case 'password_change_rejected':
+            botLog.info(`[BOT] password_change_rejected qayta ishlanmoqda. Chat ID: ${chat_id}, Username: ${username}`);
+            const reason = payload.reason || 'Sabab ko\'rsatilmagan';
+            text = `❌ *${escapeMarkdownV2("Parol O'zgartirish So'rovi Rad Etildi")}*\\!\n\n${escapeMarkdownV2("Sizning parol o'zgartirish so'rovingiz rad etildi.")}\n\n👤 *${escapeMarkdownV2("Foydalanuvchi:")}* ${escapeMarkdownV2(username)}\n📝 *${escapeMarkdownV2("Sabab:")}* ${escapeMarkdownV2(reason)}\n\n${escapeMarkdownV2("Iltimos, admin bilan bog'laning yoki qayta urinib ko'ring.")}`;
+            botLog.info(`[BOT] Xabar matni tayyorlandi, yuborilmoqda...`);
+            const passwordRejectedResult = await sendMarkdownV2Message(chat_id, text);
+            if (!passwordRejectedResult) {
+                botLog.error(`[BOT] ❌ Parol o'zgartirish rad etildi xabari yuborilmadi. Chat ID: ${chat_id}`);
+            } else {
+                botLog.info(`[BOT] ✅ Parol o'zgartirish rad etildi xabari muvaffaqiyatli yuborildi. Chat ID: ${chat_id}, Message ID: ${passwordRejectedResult.message_id}`);
+            }
             break;
     }
 }
 
 
+// Parol tiklash so'rovini tasdiqlash/rad etish handler
+async function handlePasswordChangeRequestCallback(query, bot) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const data = query.data;
+    
+    try {
+        // Callback_data format: password_approve_${requestId} yoki password_reject_${requestId}
+        const parts = data.split('_');
+        const action = parts[1]; // 'approve' yoki 'reject'
+        const requestId = parseInt(parts[2]);
+        
+        botLog.info(`[PASSWORD-CALLBACK] ${action} chaqirildi. Request ID: ${requestId}, User ID: ${userId}, Chat ID: ${chatId}`);
+        
+        // Superadmin chat ID ni settings'dan olish
+        const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
+        const adminChatIdFromSettings = adminChatIdSetting ? adminChatIdSetting.value : null;
+        
+        botLog.info(`[PASSWORD-CALLBACK] Settings'dan admin chat ID: ${adminChatIdFromSettings || 'YO\'Q'}, Callback chat ID: ${chatId}`);
+        
+        // Foydalanuvchini tekshirish
+        const user = await db('users').where({ telegram_chat_id: chatId }).first();
+        
+        // Bot orqali ruxsat: agar chat ID settings'dagi admin chat ID ga mos kelsa, superadmin ruxsati beriladi
+        const isSuperAdminChatId = adminChatIdFromSettings && String(chatId) === String(adminChatIdFromSettings);
+        
+        if (!user && !isSuperAdminChatId) {
+            botLog.error(`[PASSWORD-CALLBACK] ❌ Foydalanuvchi topilmadi va superadmin chat ID ham mos kelmaydi. Chat ID: ${chatId}`);
+            await bot.answerCallbackQuery(query.id, { text: '❌ Foydalanuvchi topilmadi', show_alert: true });
+            return;
+        }
+        
+        // Bot orqali superadmin ruxsati tekshiruvi
+        if (isSuperAdminChatId) {
+            botLog.info(`[PASSWORD-CALLBACK] ✅ Superadmin chat ID mos keldi. Bot orqali ruxsat berildi. Chat ID: ${chatId}`);
+            // Superadmin ruxsati mavjud, davom etamiz
+        } else if (user) {
+            // Foydalanuvchi topildi, permission tekshirish
+            botLog.info(`[PASSWORD-CALLBACK] Foydalanuvchi topildi: ${user.username} (ID: ${user.id}), Role: ${user.role}`);
+            
+            // Permission tekshirish - superadmin uchun alohida tekshirish
+            const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+            let hasPermission = false;
+            
+            if (isSuperAdmin) {
+                // Superadmin uchun permission mavjud
+                hasPermission = true;
+                botLog.info(`[PASSWORD-CALLBACK] ✅ Superadmin permission mavjud`);
+            } else {
+                // Boshqa foydalanuvchilar uchun permission tekshirish
+                const rolePermission = await db('users')
+                    .join('role_permissions', 'users.role', 'role_permissions.role_name')
+                    .where('users.id', user.id)
+                    .where('role_permissions.permission_key', 'users:change_password')
+                    .first();
+                
+                const userPermission = await db('users')
+                    .join('user_permissions', 'users.id', 'user_permissions.user_id')
+                    .where('users.id', user.id)
+                    .where('user_permissions.permission_key', 'users:change_password')
+                    .where('user_permissions.type', 'additional')
+                    .first();
+                
+                hasPermission = !!(rolePermission || userPermission);
+                botLog.info(`[PASSWORD-CALLBACK] Permission tekshiruvi: Role permission: ${!!rolePermission}, User permission: ${!!userPermission}, Has permission: ${hasPermission}`);
+            }
+            
+            if (!hasPermission) {
+                botLog.error(`[PASSWORD-CALLBACK] ❌ Permission yo'q. User: ${user.username} (ID: ${user.id}), Role: ${user.role}`);
+                await bot.answerCallbackQuery(query.id, { text: '❌ Sizda bu amalni bajarish huquqi yo\'q', show_alert: true });
+                return;
+            }
+        } else {
+            botLog.error(`[PASSWORD-CALLBACK] ❌ Foydalanuvchi topilmadi va superadmin chat ID ham mos kelmaydi. Chat ID: ${chatId}`);
+            await bot.answerCallbackQuery(query.id, { text: '❌ Foydalanuvchi topilmadi', show_alert: true });
+            return;
+        }
+        
+        // user_id ni aniqlash - agar superadmin chat ID bo'lsa, superadmin'ni topish
+        let userIdForApi = user ? user.id : null;
+        if (!userIdForApi && isSuperAdminChatId) {
+            const superAdminUser = await db('users').whereIn('role', ['superadmin', 'super_admin']).first();
+            if (superAdminUser) {
+                userIdForApi = superAdminUser.id;
+                botLog.info(`[PASSWORD-CALLBACK] Superadmin user topildi: ${superAdminUser.username} (ID: ${superAdminUser.id})`);
+            }
+        }
+        
+        if (!userIdForApi) {
+            botLog.error(`[PASSWORD-CALLBACK] ❌ User ID aniqlanmadi. Chat ID: ${chatId}`);
+            await bot.answerCallbackQuery(query.id, { text: '❌ Foydalanuvchi topilmadi', show_alert: true });
+            return;
+        }
+        
+        // So'rovni olish
+        const request = await db('password_change_requests')
+            .where({ id: requestId, status: 'pending' })
+            .first();
+        
+        if (!request) {
+            await bot.answerCallbackQuery(query.id, { text: '❌ So\'rov topilmadi yoki allaqachon ko\'rib chiqilgan', show_alert: true });
+            // Xabarni yangilash
+            try {
+                await bot.editMessageText(
+                    query.message.text + '\n\n⚠️ <b>So\'rov topilmadi yoki allaqachon ko\'rib chiqilgan.</b>',
+                    {
+                        chat_id: chatId,
+                        message_id: query.message.message_id,
+                        parse_mode: 'HTML',
+                        reply_markup: {}
+                    }
+                );
+            } catch (e) {
+                // Xatolikni e'tiborsiz qoldirish
+            }
+            return;
+        }
+        
+        // API endpoint'ga so'rov yuborish
+        const endpoint = action === 'approve' 
+            ? `/api/telegram/password-change-requests/${requestId}/approve`
+            : `/api/telegram/password-change-requests/${requestId}/reject`;
+        
+        const method = 'POST';
+        const body = JSON.stringify({
+            telegram_chat_id: chatId,
+            user_id: userIdForApi,
+            comment: action === 'reject' ? 'Telegram bot orqali rad etildi' : undefined
+        });
+        
+        botLog.info(`[PASSWORD-CALLBACK] API so'rovi yuborilmoqda: ${endpoint}, User ID: ${userIdForApi}`);
+        
+        const response = await fetch(new URL(endpoint, NODE_SERVER_URL).href, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.message || 'API xatolik');
+        }
+        
+        // Xabarni yangilash
+        const statusText = action === 'approve' 
+            ? '✅ <b>Tasdiqlandi</b>'
+            : '❌ <b>Rad etildi</b>';
+        
+        const userName = user ? (user.fullname || user.username) : 'Superadmin';
+        const newText = query.message.text + `\n\n${statusText}\n👤 <b>Tasdiqlovchi:</b> ${escapeHtml(userName)}`;
+        
+        try {
+            await bot.editMessageText(newText, {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+                parse_mode: 'HTML',
+                reply_markup: {}
+            });
+        } catch (editError) {
+            botLog.warn(`[PASSWORD-CALLBACK] Xabarni yangilashda xatolik: ${editError.message}`);
+        }
+        
+        await bot.answerCallbackQuery(query.id, { 
+            text: action === 'approve' ? '✅ So\'rov tasdiqlandi' : '❌ So\'rov rad etildi',
+            show_alert: false 
+        });
+        
+        botLog.info(`[PASSWORD-CALLBACK] ✅ ${action} muvaffaqiyatli yakunlandi. Request ID: ${requestId}`);
+        
+    } catch (error) {
+        botLog.error(`[PASSWORD-CALLBACK] ❌ Xatolik:`, error);
+        try {
+            await bot.answerCallbackQuery(query.id, { 
+                text: `❌ Xatolik: ${error.message}`, 
+                show_alert: true 
+            });
+        } catch (e) {
+            // E'tiborsiz qoldirish
+        }
+    }
+}
+
 async function sendToTelegram(payload) {
     try {
         const { type } = payload;
+        botLog.info(`[SEND-TO-TELEGRAM] Xabar yuborilmoqda. Type: ${type}, Payload keys: ${Object.keys(payload).join(', ')}`);
 
         if (type === 'new' || type === 'edit') {
             const groupIdSetting = await db('settings').where({ key: 'telegram_group_id' }).first();
@@ -797,8 +1093,12 @@ async function sendToTelegram(payload) {
             'new_user_request',
             'new_user_approval',
             'user_approved_credentials',
-            'delete_credentials'
+            'delete_credentials',
+            'password_change_request',
+            'password_changed',
+            'password_change_rejected'
         ].includes(type)) {
+            botLog.info(`[SEND-TO-TELEGRAM] Type ${type} ro'yxatda topildi, handleSecurityRequest chaqirilmoqda`);
             
             if (['new_user_request', 'new_user_approval', 'account_lock_alert', 'security_alert'].includes(type)) {
                 const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
@@ -815,13 +1115,15 @@ async function sendToTelegram(payload) {
                 payload.admin_chat_id = adminChatId;
             }
             
-
+            botLog.info(`[SEND-TO-TELEGRAM] handleSecurityRequest chaqirilmoqda. Type: ${type}, Chat ID: ${payload.chat_id || payload.admin_chat_id || 'N/A'}`);
             await handleSecurityRequest(payload);
+            botLog.info(`[SEND-TO-TELEGRAM] handleSecurityRequest yakunlandi. Type: ${type}`);
 
         }
 
     } catch (error) {
-        botLog.error(`Telegramga yuborish funksiyasida kutilmagan xatolik:`, error.message);
+        botLog.error(`[SEND-TO-TELEGRAM] ❌ Telegramga yuborish funksiyasida kutilmagan xatolik:`, error.message);
+        botLog.error(`[SEND-TO-TELEGRAM] Stack trace:`, error.stack);
     }
 }
 
@@ -885,63 +1187,16 @@ const initializeBot = async (botToken, options = { polling: true }) => {
             return;
         }
         
-        // ETIMEDOUT yoki boshqa tarmoq xatoliklari
+        // ETIMEDOUT yoki boshqa tarmoq xatoliklari - debug level'da log qilamiz
         if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.message?.includes('timeout')) {
-            reconnectAttempts++;
-            
-            if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
-                botLog.warn(`Polling xatolik (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}): ${error.code} - ${error.message}`);
-                botLog.info(`${RECONNECT_DELAY / 1000} soniyadan keyin qayta uriniladi...`);
-                
-                // Polling'ni to'xtatish
-                try {
-                    if (bot && bot.isPolling && bot.isPolling()) {
-                        await bot.stopPolling();
-                    }
-                } catch (stopError) {
-                    botLog.error('Polling to\'xtatishda xatolik:', stopError.message);
-                }
-                
-                // Qayta urinish
-                setTimeout(async () => {
-                    try {
-                        botLog.info('Bot qayta ishga tushirilmoqda...');
-                        await bot.startPolling({
-                            restart: true,
-                            polling: {
-                                interval: 1000,
-                                autoStart: true,
-                                params: {
-                                    timeout: 10
-                                }
-                            }
-                        });
-                        reconnectAttempts = 0; // Muvaffaqiyatli bo'lsa, counter'ni tozalash
-                        botLog.info('✅ Bot qayta ishga tushirildi');
-                    } catch (reconnectError) {
-                        botLog.error('Qayta ishga tushirishda xatolik:', reconnectError.message);
-                    }
-                }, RECONNECT_DELAY);
-                
-                return; // Xatolikni qayta ko'rsatmaslik
-            } else {
-                botLog.error(`Polling xatolik: ${MAX_RECONNECT_ATTEMPTS} marta urinishdan keyin to'xtatildi`);
-                botLog.error('Internet aloqasini yoki firewall sozlamalarini tekshiring');
-                // Polling'ni to'xtatish
-                try {
-                    if (bot && bot.isPolling && bot.isPolling()) {
-                        await bot.stopPolling();
-                        botIsInitialized = false;
-                    }
-                } catch (stopError) {
-                    botLog.error('Polling to\'xtatishda xatolik:', stopError.message);
-                }
-                return;
-            }
+            // Bu xatoliklar odatda tarmoq muammosi yoki vaqtinchalik bog'lanish muammosi
+            // Bot avtomatik qayta urinib ko'radi, shuning uchun faqat debug level'da log qilamiz
+            botLog.debug(`[BOT] Polling tarmoq xatoligi (avtomatik qayta uriniladi): ${error.code} - ${error.message}`);
+            return; // Xatolikni qayta ko'rsatmaslik, bot avtomatik qayta urinib ko'radi
         }
         
         // Boshqa xatoliklarni ko'rsatish
-        botLog.error('Polling xatoligi:', error.code, '-', error.message);
+        botLog.error(`[BOT] Polling xatoligi: ${error.code} - ${error.message}`);
         
         if (error.response && error.response.statusCode === 401) {
             botLog.error("Noto'g'ri bot tokeni. Bot to'xtatildi.");
@@ -2366,6 +2621,10 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         }
                     }
                     return;
+        } else if (data.startsWith('password_approve_') || data.startsWith('password_reject_')) {
+            // Parol tiklash so'rovlarini tasdiqlash/rad etish
+            await handlePasswordChangeRequestCallback(query, bot);
+            return;
         } else {
             // Boshqa callback'lar (retry, block, unblock...)
             let endpoint = '';

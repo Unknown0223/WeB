@@ -16,9 +16,30 @@ async function refreshUserSessions(userId = null) {
         for (const session of sessions) {
             let sessionData;
             try {
+                // Session ma'lumotini parse qilish
+                if (!session.sess || session.sess.trim() === '') {
+                    log.warn(`Sessiya (sid: ${session.sid}) bo'sh. O'chirilmoqda...`);
+                    await db('sessions').where({ sid: session.sid }).del();
+                    continue;
+                }
+                
                 sessionData = JSON.parse(session.sess);
+                
+                // Parse qilingan ma'lumot to'g'ri formatda ekanligini tekshirish
+                if (!sessionData || typeof sessionData !== 'object') {
+                    log.warn(`Sessiya (sid: ${session.sid}) noto'g'ri formatda. O'chirilmoqda...`);
+                    await db('sessions').where({ sid: session.sid }).del();
+                    continue;
+                }
             } catch (e) {
-                log.error(`Sessiya (sid: ${session.sid}) ma'lumotini parse qilib bo'lmadi.`);
+                // Buzilgan session'larni o'chirish
+                log.warn(`Sessiya (sid: ${session.sid}) ma'lumotini parse qilib bo'lmadi. O'chirilmoqda...`, e.message);
+                try {
+                    await db('sessions').where({ sid: session.sid }).del();
+                    log.info(`✅ Buzilgan sessiya (sid: ${session.sid}) muvaffaqiyatli o'chirildi.`);
+                } catch (deleteError) {
+                    log.error(`❌ Buzilgan sessiyani (sid: ${session.sid}) o'chirishda xatolik:`, deleteError.message);
+                }
                 continue;
             }
 

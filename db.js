@@ -46,21 +46,39 @@ function getDbConfig() {
     if (isRailway && databaseUrl) {
         // Reference bo'lsa ham, Railway runtime'da resolve qilinadi
         // Knex.js reference'ni connection string sifatida qabul qiladi va Railway runtime'da resolve qiladi
+        
+        // Railway.com'da SSL kerak bo'lishi mumkin
+        // Connection string'ga SSL parametrlarini qo'shish
+        let connectionConfig = databaseUrl;
+        
+        // Agar connection string bo'lsa va SSL parametrlari yo'q bo'lsa, qo'shish
+        if (typeof databaseUrl === 'string' && databaseUrl.startsWith('postgresql://')) {
+            // Connection string'ga SSL parametrlarini qo'shish (agar yo'q bo'lsa)
+            if (!databaseUrl.includes('?ssl=') && !databaseUrl.includes('?sslmode=')) {
+                // Railway.com'da SSL kerak
+                connectionConfig = databaseUrl + (databaseUrl.includes('?') ? '&' : '?') + 'sslmode=require';
+                log.debug(`[DB] Added SSL parameter to connection string for Railway.com`);
+            }
+        }
+        
         return {
             client: 'pg',
-            connection: databaseUrl, // Reference yoki oddiy connection string bo'lishi mumkin
+            connection: connectionConfig,
             migrations: {
                 directory: path.resolve(__dirname, 'migrations')
             },
             pool: {
                 min: 2,
-                max: 10,
-                acquireTimeoutMillis: 30000,
+                max: 15,
+                acquireTimeoutMillis: 60000,
                 idleTimeoutMillis: 30000,
-                createTimeoutMillis: 10000,
-                destroyTimeoutMillis: 5000
+                createTimeoutMillis: 30000,
+                destroyTimeoutMillis: 5000,
+                reapIntervalMillis: 1000,
+                createRetryIntervalMillis: 200,
+                propagateCreateError: false
             },
-            acquireConnectionTimeout: 10000,
+            acquireConnectionTimeout: 30000,
             asyncStackTraces: false,
             debug: false
         };
@@ -76,26 +94,38 @@ function getDbConfig() {
         const pgPassword = process.env.PGPASSWORD;
         
         if (pgHost && pgDatabase && pgUser && pgPassword) {
-            // Railway.com'ning avtomatik yaratilgan PostgreSQL variable'laridan connection string yaratish
-            databaseUrl = `postgresql://${pgUser}:${pgPassword}@${pgHost}:${pgPort}/${pgDatabase}`;
+            // Railway.com'ning avtomatik yaratilgan PostgreSQL variable'laridan connection object yaratish
+            // Railway.com'da SSL kerak bo'lishi mumkin
             log.debug(`[DB] Using Railway.com's auto-generated PostgreSQL variables (PGHOST, PGDATABASE, etc.)`);
-            log.debug(`[DB] Connection string created from PGHOST=${pgHost}, PGDATABASE=${pgDatabase}, PGUSER=${pgUser}`);
+            log.debug(`[DB] Connection created from PGHOST=${pgHost}, PGDATABASE=${pgDatabase}, PGUSER=${pgUser}`);
             
             return {
                 client: 'pg',
-                connection: databaseUrl,
+                connection: {
+                    host: pgHost,
+                    port: parseInt(pgPort) || 5432,
+                    database: pgDatabase,
+                    user: pgUser,
+                    password: pgPassword,
+                    ssl: {
+                        rejectUnauthorized: false // Railway.com'da self-signed certificate bo'lishi mumkin
+                    }
+                },
                 migrations: {
                     directory: path.resolve(__dirname, 'migrations')
                 },
                 pool: {
                     min: 2,
-                    max: 10,
-                    acquireTimeoutMillis: 30000,
+                    max: 15,
+                    acquireTimeoutMillis: 60000,
                     idleTimeoutMillis: 30000,
-                    createTimeoutMillis: 10000,
-                    destroyTimeoutMillis: 5000
+                    createTimeoutMillis: 30000,
+                    destroyTimeoutMillis: 5000,
+                    reapIntervalMillis: 1000,
+                    createRetryIntervalMillis: 200,
+                    propagateCreateError: false
                 },
-                acquireConnectionTimeout: 10000,
+                acquireConnectionTimeout: 30000,
                 asyncStackTraces: false,
                 debug: false
             };

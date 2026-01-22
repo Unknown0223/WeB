@@ -475,6 +475,16 @@ router.post('/login', async (req, res) => {
             }).catch(() => {});
             db('users').where({ id: user.id }).update({ must_delete_creds: false }).catch(() => {});
         }
+        
+        // Parol o'zgartirish xabarini o'chirish (agar kerak bo'lsa) - background'da
+        if (user.must_delete_password_change_message && user.telegram_chat_id) {
+            sendToTelegram({
+                type: 'delete_credentials',
+                chat_id: user.telegram_chat_id,
+                user_id: user.id
+            }).catch(() => {});
+            db('users').where({ id: user.id }).update({ must_delete_password_change_message: false }).catch(() => {});
+        }
 
         // === BOT OBUNASI TEKSHIRUVI ===
         // Bot obunasi tekshiruvi faqat quyidagi holatda ishlaydi:
@@ -836,6 +846,21 @@ router.post('/request-password-change', isAuthenticated, async (req, res) => {
         // Yangi parolni hash qilish
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         
+        // Eski pending so'rovlarni rejected qilish (bir foydalanuvchidan faqat eng yangi so'rov pending bo'lishi kerak)
+        const oldPendingRequests = await db('password_change_requests')
+            .where({ user_id: userId, status: 'pending' })
+            .select('id');
+        
+        if (oldPendingRequests.length > 0) {
+            await db('password_change_requests')
+                .whereIn('id', oldPendingRequests.map(r => r.id))
+                .update({
+                    status: 'rejected',
+                    admin_comment: 'Yangi so\'rov yuborilgani uchun avtomatik rad etildi',
+                    processed_at: db.fn.now()
+                });
+        }
+        
         // So'rovni saqlash
         await db('password_change_requests').insert({
             user_id: userId,
@@ -847,11 +872,37 @@ router.post('/request-password-change', isAuthenticated, async (req, res) => {
         });
         
         // Adminlarni xabardor qilish
-        const admins = await db('users')
+        // Superadmin'larni qo'shish
+        const superAdmins = await db('users')
+            .whereIn('role', ['superadmin', 'super_admin'])
+            .select('telegram_chat_id', 'username');
+        
+        // Role-based permission'ga ega foydalanuvchilarni qo'shish
+        const roleBasedAdmins = await db('users')
+            .join('role_permissions', 'users.role', 'role_permissions.role_name')
+            .where('role_permissions.permission_key', 'users:change_password')
+            .select('users.telegram_chat_id', 'users.username')
+            .distinct();
+        
+        // Additional permission'ga ega foydalanuvchilarni qo'shish
+        const additionalAdmins = await db('users')
             .join('user_permissions', 'users.id', 'user_permissions.user_id')
             .where('user_permissions.permission_key', 'users:change_password')
             .where('user_permissions.type', 'additional')
-            .select('users.telegram_chat_id', 'users.username');
+            .select('users.telegram_chat_id', 'users.username')
+            .distinct();
+        
+        // Barcha adminlarni birlashtirish (duplikatlarni olib tashlash)
+        const adminMap = new Map();
+        
+        [...superAdmins, ...roleBasedAdmins, ...additionalAdmins].forEach(admin => {
+            const key = admin.username;
+            if (!adminMap.has(key)) {
+                adminMap.set(key, admin);
+            }
+        });
+        
+        const admins = Array.from(adminMap.values());
         
         // Telegram orqali xabar yuborish
         for (const admin of admins) {
@@ -946,35 +997,176 @@ router.post('/reset-password-request', async (req, res) => {
         // Yangi parolni hash qilish
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         
+        // Eski pending so'rovlarni rejected qilish (bir foydalanuvchidan faqat eng yangi so'rov pending bo'lishi kerak)
+        log.info(`[RESET-PASSWORD] Eski pending so'rovlar tekshirilmoqda. User ID: ${user.id}`);
+        const oldPendingRequests = await db('password_change_requests')
+            .where({ user_id: user.id, status: 'pending' })
+            .select('id');
+        
+        if (oldPendingRequests.length > 0) {
+            log.info(`[RESET-PASSWORD] ${oldPendingRequests.length} ta eski pending so'rov topildi, rejected qilinmoqda...`);
+            await db('password_change_requests')
+                .whereIn('id', oldPendingRequests.map(r => r.id))
+                .update({
+                    status: 'rejected',
+                    admin_comment: 'Yangi so\'rov yuborilgani uchun avtomatik rad etildi',
+                    processed_at: db.fn.now()
+                });
+            log.info(`[RESET-PASSWORD] ✅ ${oldPendingRequests.length} ta eski so'rov rejected qilindi`);
+        }
+        
         // So'rovni saqlash
-        await db('password_change_requests').insert({
-            user_id: user.id,
-            new_password_hash: hashedPassword,
-            status: 'pending',
-            requested_at: db.fn.now(),
-            ip_address: req.ip || req.connection.remoteAddress,
-            user_agent: req.get('user-agent') || 'Unknown'
-        });
+        log.info(`[RESET-PASSWORD] So'rov yuborilmoqda. Username: ${username}, User ID: ${user.id}`);
+        
+        const { isPostgres, isSqlite } = require('../db.js');
+        let requestId = null;
+        
+        log.info(`[RESET-PASSWORD] Database type: ${isPostgres ? 'PostgreSQL' : isSqlite ? 'SQLite' : 'Unknown'}`);
+        
+        if (isPostgres) {
+            // PostgreSQL uchun returning('id') ishlatish
+            const insertResult = await db('password_change_requests').insert({
+                user_id: user.id,
+                new_password_hash: hashedPassword,
+                status: 'pending',
+                requested_at: db.fn.now(),
+                ip_address: req.ip || req.connection.remoteAddress,
+                user_agent: req.get('user-agent') || 'Unknown'
+            }).returning('id');
+            
+            log.info(`[RESET-PASSWORD] PostgreSQL insert result:`, JSON.stringify(insertResult));
+            
+            if (Array.isArray(insertResult) && insertResult.length > 0) {
+                requestId = insertResult[0]?.id || insertResult[0];
+                log.info(`[RESET-PASSWORD] PostgreSQL requestId extracted: ${requestId}`);
+            } else if (insertResult && insertResult.id) {
+                requestId = insertResult.id;
+                log.info(`[RESET-PASSWORD] PostgreSQL requestId from object: ${requestId}`);
+            }
+        } else {
+            // SQLite uchun odatiy insert
+            const insertResult = await db('password_change_requests').insert({
+                user_id: user.id,
+                new_password_hash: hashedPassword,
+                status: 'pending',
+                requested_at: db.fn.now(),
+                ip_address: req.ip || req.connection.remoteAddress,
+                user_agent: req.get('user-agent') || 'Unknown'
+            });
+            
+            log.info(`[RESET-PASSWORD] SQLite insert result:`, JSON.stringify(insertResult));
+            
+            if (Array.isArray(insertResult) && insertResult.length > 0) {
+                requestId = insertResult[0];
+                log.info(`[RESET-PASSWORD] SQLite requestId extracted: ${requestId}`);
+            } else if (insertResult) {
+                requestId = insertResult;
+                log.info(`[RESET-PASSWORD] SQLite requestId from direct value: ${requestId}`);
+            }
+        }
+        
+        log.info(`[RESET-PASSWORD] So'rov bazaga saqlandi. Insert ID: ${requestId || 'N/A'}`);
+        
+        if (!requestId) {
+            log.error(`[RESET-PASSWORD] ⚠️ Request ID olinmadi! Insert result to'g'ri parse qilinmadi.`);
+        }
         
         // Adminlarni xabardor qilish
-        const admins = await db('users')
+        // Superadmin'larni qo'shish
+        const superAdmins = await db('users')
+            .whereIn('role', ['superadmin', 'super_admin'])
+            .select('telegram_chat_id', 'username', 'id');
+        
+        log.info(`[RESET-PASSWORD] Topilgan superadmin'lar soni: ${superAdmins.length}`);
+        superAdmins.forEach(admin => {
+            log.info(`[RESET-PASSWORD] Superadmin: ${admin.username} (ID: ${admin.id}), Telegram Chat ID: ${admin.telegram_chat_id || 'YO\'Q'}`);
+        });
+        
+        // Role-based permission'ga ega foydalanuvchilarni qo'shish
+        const roleBasedAdmins = await db('users')
+            .join('role_permissions', 'users.role', 'role_permissions.role_name')
+            .where('role_permissions.permission_key', 'users:change_password')
+            .select('users.telegram_chat_id', 'users.username', 'users.id', 'users.role')
+            .distinct();
+        
+        log.info(`[RESET-PASSWORD] Role-based permission'ga ega foydalanuvchilar soni: ${roleBasedAdmins.length}`);
+        roleBasedAdmins.forEach(admin => {
+            log.info(`[RESET-PASSWORD] Role-based admin: ${admin.username} (ID: ${admin.id}, Role: ${admin.role}), Telegram Chat ID: ${admin.telegram_chat_id || 'YO\'Q'}`);
+        });
+        
+        // Additional permission'ga ega foydalanuvchilarni qo'shish
+        const additionalAdmins = await db('users')
             .join('user_permissions', 'users.id', 'user_permissions.user_id')
             .where('user_permissions.permission_key', 'users:change_password')
             .where('user_permissions.type', 'additional')
-            .select('users.telegram_chat_id', 'users.username');
+            .select('users.telegram_chat_id', 'users.username', 'users.id')
+            .distinct();
         
-        // Telegram orqali xabar yuborish
-        for (const admin of admins) {
-            if (admin.telegram_chat_id) {
-                await sendToTelegram({
-                    type: 'password_change_request',
-                    chat_id: admin.telegram_chat_id,
-                    requester: user.username,
-                    requester_fullname: user.fullname,
-                    user_id: user.id
-                });
+        log.info(`[RESET-PASSWORD] Additional permission'ga ega foydalanuvchilar soni: ${additionalAdmins.length}`);
+        additionalAdmins.forEach(admin => {
+            log.info(`[RESET-PASSWORD] Additional admin: ${admin.username} (ID: ${admin.id}), Telegram Chat ID: ${admin.telegram_chat_id || 'YO\'Q'}`);
+        });
+        
+        // Barcha adminlarni birlashtirish (duplikatlarni olib tashlash)
+        const adminMap = new Map();
+        
+        [...superAdmins, ...roleBasedAdmins, ...additionalAdmins].forEach(admin => {
+            if (!adminMap.has(admin.id)) {
+                adminMap.set(admin.id, admin);
+            }
+        });
+        
+        const admins = Array.from(adminMap.values());
+        
+        log.info(`[RESET-PASSWORD] Jami topilgan adminlar soni: ${admins.length}`);
+        admins.forEach(admin => {
+            log.info(`[RESET-PASSWORD] Admin: ${admin.username} (ID: ${admin.id}), Telegram Chat ID: ${admin.telegram_chat_id || 'YO\'Q'}`);
+        });
+        
+        // Telegram orqali xabar yuborish - faqat superadmin'larga (foydalanuvchiga keyin yuboriladi tasdiqlanganda)
+        let sentCount = 0;
+        let failedCount = 0;
+        
+        // Settings'dan admin chat ID ni olish (agar superadmin'ning chat ID si yo'q bo'lsa)
+        const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
+        const adminChatIdFromSettings = adminChatIdSetting ? adminChatIdSetting.value : null;
+        
+        // Faqat superadmin'larga yuborish
+        for (const admin of superAdmins) {
+            log.info(`[RESET-PASSWORD] Superadmin tekshirilmoqda: ${admin.username}, Chat ID: ${admin.telegram_chat_id || 'YO\'Q'}`);
+            
+            // Agar superadmin'ning telegram_chat_id yo'q bo'lsa, settings'dan olish
+            let chatIdToUse = admin.telegram_chat_id;
+            if (!chatIdToUse && adminChatIdFromSettings) {
+                chatIdToUse = adminChatIdFromSettings;
+                log.info(`[RESET-PASSWORD] Superadmin ${admin.username} uchun settings'dan chat ID olingan: ${chatIdToUse}`);
+            }
+            
+            if (chatIdToUse) {
+                try {
+                    log.info(`[RESET-PASSWORD] Superadmin ${admin.username} (ID: ${admin.id}, Chat ID: ${chatIdToUse}) ga xabar yuborilmoqda...`);
+                    log.info(`[RESET-PASSWORD] Request ID yuborilmoqda: ${requestId || 'NULL'}`);
+                    await sendToTelegram({
+                        type: 'password_change_request',
+                        chat_id: chatIdToUse,
+                        requester: user.username,
+                        requester_fullname: user.fullname,
+                        user_id: user.id,
+                        request_id: requestId
+                    });
+                    log.info(`[RESET-PASSWORD] ✅ Xabar yuborildi. Request ID: ${requestId || 'NULL'}`);
+                    sentCount++;
+                    log.info(`[RESET-PASSWORD] ✅ Xabar superadmin ${admin.username} ga yuborildi`);
+                } catch (error) {
+                    failedCount++;
+                    log.error(`[RESET-PASSWORD] ❌ Xabar superadmin ${admin.username} ga yuborishda xatolik:`, error.message);
+                }
+            } else {
+                log.warn(`[RESET-PASSWORD] ⚠️ Superadmin ${admin.username} ning Telegram chat ID si yo'q va settings'dan ham topilmadi`);
             }
         }
+        
+        log.info(`[RESET-PASSWORD] Xabar yuborish natijasi: ${sentCount} ta superadminga muvaffaqiyatli, ${failedCount} ta xatolik`);
         
         res.json({ 
             message: "So'rov muvaffaqiyatli yuborildi. Admin tasdiqini kuting.",

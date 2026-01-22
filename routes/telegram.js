@@ -13,6 +13,245 @@ const router = express.Router();
 // Barcha tasdiqlashlar web'dan (admin panel) amalga oshiriladi
 
 // ===================================================================
+// === PAROL TIKLASH SO'ROVLARINI TASDIQLASH/RAD ETISH (BOT UCHUN) ===
+// ===================================================================
+router.post('/password-change-requests/:id/approve', async (req, res) => {
+    const requestId = req.params.id;
+    const { telegram_chat_id, user_id } = req.body;
+    
+    if (!telegram_chat_id || !user_id) {
+        return res.status(400).json({ message: "telegram_chat_id va user_id talab qilinadi." });
+    }
+    
+    try {
+        // Foydalanuvchini tekshirish (bot orqali superadmin chat ID bo'lsa, user bo'lmasligi mumkin)
+        let user = await db('users')
+            .where({ id: user_id, telegram_chat_id: telegram_chat_id })
+            .first();
+        
+        // Bot orqali ruxsat: agar chat ID settings'dagi admin chat ID ga mos kelsa, superadmin ruxsati beriladi
+        const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
+        const adminChatIdFromSettings = adminChatIdSetting ? adminChatIdSetting.value : null;
+        const isSuperAdminChatId = adminChatIdFromSettings && String(telegram_chat_id) === String(adminChatIdFromSettings);
+        
+        log.info(`[TELEGRAM-APPROVE] Settings'dan admin chat ID: ${adminChatIdFromSettings || 'YO\'Q'}, Request chat ID: ${telegram_chat_id}, Mos keladi: ${isSuperAdminChatId}`);
+        
+        // Bot orqali superadmin chat ID bo'lsa, user topilmasligi mumkin, lekin ruxsat beriladi
+        if (!user && !isSuperAdminChatId) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi yoki Telegram chat ID mos kelmaydi." });
+        }
+        
+        // Permission tekshirish - superadmin chat ID yoki oddiy permission
+        let hasPermission = false;
+        
+        if (isSuperAdminChatId) {
+            // Bot orqali superadmin ruxsati (settings'dagi admin chat ID)
+            hasPermission = true;
+            log.info(`[TELEGRAM-APPROVE] ✅ Superadmin chat ID mos keldi. Bot orqali ruxsat berildi. Chat ID: ${telegram_chat_id}`);
+            
+            // Agar user topilmasa, superadmin'ni topish
+            if (!user) {
+                user = await db('users').whereIn('role', ['superadmin', 'super_admin']).first();
+                if (user) {
+                    log.info(`[TELEGRAM-APPROVE] Superadmin user topildi: ${user.username} (ID: ${user.id})`);
+                }
+            }
+        } else if (user) {
+            // Web orqali ruxsat - oddiy permission tekshiruvi
+            const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+            
+            if (isSuperAdmin) {
+                // Superadmin uchun permission mavjud
+                hasPermission = true;
+                log.info(`[TELEGRAM-APPROVE] ✅ Superadmin permission mavjud. User: ${user.username} (ID: ${user.id})`);
+            } else {
+                // Boshqa foydalanuvchilar uchun permission tekshirish
+                const rolePermission = await db('users')
+                    .join('role_permissions', 'users.role', 'role_permissions.role_name')
+                    .where('users.id', user.id)
+                    .where('role_permissions.permission_key', 'users:change_password')
+                    .first();
+                
+                const userPermission = await db('users')
+                    .join('user_permissions', 'users.id', 'user_permissions.user_id')
+                    .where('users.id', user.id)
+                    .where('user_permissions.permission_key', 'users:change_password')
+                    .where('user_permissions.type', 'additional')
+                    .first();
+                
+                hasPermission = !!(rolePermission || userPermission);
+                log.info(`[TELEGRAM-APPROVE] Permission tekshiruvi: Role permission: ${!!rolePermission}, User permission: ${!!userPermission}, Has permission: ${hasPermission}`);
+            }
+        }
+        
+        if (!hasPermission) {
+            log.error(`[TELEGRAM-APPROVE] ❌ Permission yo'q. User: ${user ? user.username : 'N/A'} (ID: ${user_id}), Chat ID: ${telegram_chat_id}`);
+            return res.status(403).json({ message: "Sizda bu amalni bajarish huquqi yo'q." });
+        }
+        
+        if (!user) {
+            log.error(`[TELEGRAM-APPROVE] ❌ User topilmadi. User ID: ${user_id}, Chat ID: ${telegram_chat_id}`);
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+        
+        // So'rovni olish
+        const request = await db('password_change_requests')
+            .where({ id: requestId, status: 'pending' })
+            .first();
+        
+        if (!request) {
+            return res.status(404).json({ message: "So'rov topilmadi yoki allaqachon ko'rib chiqilgan." });
+        }
+        
+        // Parolni yangilash
+        await db('users')
+            .where({ id: request.user_id })
+            .update({ 
+                password: request.new_password_hash,
+                updated_at: db.fn.now()
+            });
+        
+        // So'rov statusini yangilash
+        await db('password_change_requests')
+            .where({ id: requestId })
+            .update({
+                status: 'approved',
+                approved_by: user.id,
+                processed_at: db.fn.now()
+            });
+        
+        // Audit log
+        await db('audit_logs').insert({
+            user_id: user.id,
+            action: 'approve_password_change',
+            target_type: 'user',
+            target_id: request.user_id,
+            details: JSON.stringify({ request_id: requestId, source: 'telegram_bot' }),
+            ip_address: req.ip || req.connection.remoteAddress,
+            user_agent: req.get('user-agent') || 'Telegram Bot'
+        });
+        
+        // Foydalanuvchiga Telegram orqali xabar yuborish
+        const targetUser = await db('users').where({ id: request.user_id }).first();
+        if (targetUser && targetUser.telegram_chat_id) {
+            await sendToTelegram({
+                type: 'password_changed',
+                chat_id: targetUser.telegram_chat_id,
+                user_id: targetUser.id,
+                username: targetUser.username
+            });
+        }
+        
+        res.json({ message: "Parol o'zgartirish so'rovi tasdiqlandi." });
+    } catch (error) {
+        log.error("Parol tiklash so'rovini tasdiqlash xatoligi:", error.message);
+        res.status(500).json({ message: "So'rovni tasdiqlashda xatolik." });
+    }
+});
+
+router.post('/password-change-requests/:id/reject', async (req, res) => {
+    const requestId = req.params.id;
+    const { telegram_chat_id, user_id, comment } = req.body;
+    
+    if (!telegram_chat_id || !user_id) {
+        return res.status(400).json({ message: "telegram_chat_id va user_id talab qilinadi." });
+    }
+    
+    try {
+        // Foydalanuvchini tekshirish
+        const user = await db('users')
+            .where({ id: user_id, telegram_chat_id: telegram_chat_id })
+            .first();
+        
+        if (!user) {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi yoki Telegram chat ID mos kelmaydi." });
+        }
+        
+        // Bot orqali ruxsat: agar chat ID settings'dagi admin chat ID ga mos kelsa, superadmin ruxsati beriladi
+        const adminChatIdSetting = await db('settings').where({ key: 'telegram_admin_chat_id' }).first();
+        const adminChatIdFromSettings = adminChatIdSetting ? adminChatIdSetting.value : null;
+        const isSuperAdminChatId = adminChatIdFromSettings && String(telegram_chat_id) === String(adminChatIdFromSettings);
+        
+        log.info(`[TELEGRAM-REJECT] Settings'dan admin chat ID: ${adminChatIdFromSettings || 'YO\'Q'}, Request chat ID: ${telegram_chat_id}, Mos keladi: ${isSuperAdminChatId}`);
+        
+        // Permission tekshirish - superadmin chat ID yoki oddiy permission
+        let hasPermission = false;
+        
+        if (isSuperAdminChatId) {
+            // Bot orqali superadmin ruxsati (settings'dagi admin chat ID)
+            hasPermission = true;
+            log.info(`[TELEGRAM-REJECT] ✅ Superadmin chat ID mos keldi. Bot orqali ruxsat berildi. Chat ID: ${telegram_chat_id}`);
+        } else {
+            // Web orqali ruxsat - oddiy permission tekshiruvi
+            const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+            
+            if (isSuperAdmin) {
+                // Superadmin uchun permission mavjud
+                hasPermission = true;
+                log.info(`[TELEGRAM-REJECT] ✅ Superadmin permission mavjud. User: ${user.username} (ID: ${user.id})`);
+            } else {
+                // Boshqa foydalanuvchilar uchun permission tekshirish
+                const rolePermission = await db('users')
+                    .join('role_permissions', 'users.role', 'role_permissions.role_name')
+                    .where('users.id', user.id)
+                    .where('role_permissions.permission_key', 'users:change_password')
+                    .first();
+                
+                const userPermission = await db('users')
+                    .join('user_permissions', 'users.id', 'user_permissions.user_id')
+                    .where('users.id', user.id)
+                    .where('user_permissions.permission_key', 'users:change_password')
+                    .where('user_permissions.type', 'additional')
+                    .first();
+                
+                hasPermission = !!(rolePermission || userPermission);
+                log.info(`[TELEGRAM-REJECT] Permission tekshiruvi: Role permission: ${!!rolePermission}, User permission: ${!!userPermission}, Has permission: ${hasPermission}`);
+            }
+        }
+        
+        if (!hasPermission) {
+            log.error(`[TELEGRAM-REJECT] ❌ Permission yo'q. User: ${user.username} (ID: ${user.id}), Role: ${user.role}, Chat ID: ${telegram_chat_id}`);
+            return res.status(403).json({ message: "Sizda bu amalni bajarish huquqi yo'q." });
+        }
+        
+        // So'rovni olish
+        const request = await db('password_change_requests')
+            .where({ id: requestId, status: 'pending' })
+            .first();
+        
+        if (!request) {
+            return res.status(404).json({ message: "So'rov topilmadi yoki allaqachon ko'rib chiqilgan." });
+        }
+        
+        // So'rov statusini yangilash
+        await db('password_change_requests')
+            .where({ id: requestId })
+            .update({
+                status: 'rejected',
+                approved_by: user.id,
+                processed_at: db.fn.now(),
+                admin_comment: comment || 'Telegram bot orqali rad etildi'
+            });
+        
+        // Foydalanuvchiga Telegram orqali xabar yuborish
+        const targetUser = await db('users').where({ id: request.user_id }).first();
+        if (targetUser && targetUser.telegram_chat_id) {
+            await sendToTelegram({
+                type: 'password_change_rejected',
+                chat_id: targetUser.telegram_chat_id,
+                username: targetUser.username,
+                reason: comment || 'Sabab ko\'rsatilmagan'
+            });
+        }
+        
+        res.json({ message: "So'rov rad etildi." });
+    } catch (error) {
+        log.error("Parol tiklash so'rovini rad etish xatoligi:", error.message);
+        res.status(500).json({ message: "So'rovni rad etishda xatolik." });
+    }
+});
+
+// ===================================================================
 // === FOYDALANUVCHINI TASDIQLASHNI YAKUNLASH (YANGILANGAN MANTIQ) ===
 // ===================================================================
 // Bu endpoint endi faqat web'dan chaqiriladi
