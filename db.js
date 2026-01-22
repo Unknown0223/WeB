@@ -41,12 +41,14 @@ function getDbConfig() {
         log.debug(`[DB] POSTGRES_DB exists: ${!!process.env.POSTGRES_DB}`);
     }
     
-    // Railway.com'da va DATABASE_URL mavjud bo'lsa (reference bo'lmagan connection string), to'g'ridan-to'g'ri PostgreSQL config qaytarish
-    if (isRailway && databaseUrl && !isReference) {
-        // Faqat reference bo'lmagan connection string bo'lsa
+    // Railway.com'da va DATABASE_URL mavjud bo'lsa (reference yoki oddiy connection string), PostgreSQL config qaytarish
+    // Railway runtime'da reference'lar avtomatik resolve qilinadi
+    if (isRailway && databaseUrl) {
+        // Reference bo'lsa ham, Railway runtime'da resolve qilinadi
+        // Knex.js reference'ni connection string sifatida qabul qiladi va Railway runtime'da resolve qiladi
         return {
             client: 'pg',
-            connection: databaseUrl,
+            connection: databaseUrl, // Reference yoki oddiy connection string bo'lishi mumkin
             migrations: {
                 directory: path.resolve(__dirname, 'migrations')
             },
@@ -64,8 +66,42 @@ function getDbConfig() {
         };
     }
     
-    // Railway.com'da lekin DATABASE_URL bo'lmasa yoki faqat reference bo'lsa, xatolik chiqarish
+    // Railway.com'da lekin DATABASE_URL bo'lmasa, Railway.com'ning avtomatik yaratilgan PostgreSQL variable'larini tekshirish
     if (isRailway && !databaseUrl && !hasPostgresConfig) {
+        // Railway.com'da Postgres service bilan bog'langan bo'lsa, Railway avtomatik PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD yaratadi
+        const pgHost = process.env.PGHOST;
+        const pgPort = process.env.PGPORT || '5432';
+        const pgDatabase = process.env.PGDATABASE;
+        const pgUser = process.env.PGUSER;
+        const pgPassword = process.env.PGPASSWORD;
+        
+        if (pgHost && pgDatabase && pgUser && pgPassword) {
+            // Railway.com'ning avtomatik yaratilgan PostgreSQL variable'laridan connection string yaratish
+            databaseUrl = `postgresql://${pgUser}:${pgPassword}@${pgHost}:${pgPort}/${pgDatabase}`;
+            log.debug(`[DB] Using Railway.com's auto-generated PostgreSQL variables (PGHOST, PGDATABASE, etc.)`);
+            log.debug(`[DB] Connection string created from PGHOST=${pgHost}, PGDATABASE=${pgDatabase}, PGUSER=${pgUser}`);
+            
+            return {
+                client: 'pg',
+                connection: databaseUrl,
+                migrations: {
+                    directory: path.resolve(__dirname, 'migrations')
+                },
+                pool: {
+                    min: 2,
+                    max: 10,
+                    acquireTimeoutMillis: 30000,
+                    idleTimeoutMillis: 30000,
+                    createTimeoutMillis: 10000,
+                    destroyTimeoutMillis: 5000
+                },
+                acquireConnectionTimeout: 10000,
+                asyncStackTraces: false,
+                debug: false
+            };
+        }
+        
+        // Agar hech qanday PostgreSQL config topilmasa, xatolik chiqarish
         log.error('❌ [DB] ❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
         log.error('❌ [DB] ❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
         log.error('❌ [DB] ❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
@@ -74,6 +110,10 @@ function getDbConfig() {
         log.error(`[DB] Debug: RAILWAY_SERVICE_NAME=${process.env.RAILWAY_SERVICE_NAME || 'NOT SET'}`);
         log.error(`[DB] Debug: DATABASE_URL=${process.env.DATABASE_URL || 'NOT SET'}`);
         log.error(`[DB] Debug: DATABASE_PUBLIC_URL=${process.env.DATABASE_PUBLIC_URL || 'NOT SET'}`);
+        log.error(`[DB] Debug: PGHOST=${pgHost || 'NOT SET'}`);
+        log.error(`[DB] Debug: PGDATABASE=${pgDatabase || 'NOT SET'}`);
+        log.error(`[DB] Debug: PGUSER=${pgUser || 'NOT SET'}`);
+        log.error(`[DB] Debug: PGPASSWORD=${pgPassword ? 'SET (hidden)' : 'NOT SET'}`);
         throw new Error(
             'Railway.com\'da DATABASE_URL sozlanmagan!\n' +
             'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
