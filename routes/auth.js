@@ -12,9 +12,13 @@ const log = createLogger('AUTH');
 
 // Login sahifasi uchun brending sozlamalarini olish (loader sozlamalari bilan)
 router.get('/public/settings/branding', async (req, res) => {
-    try {
-        const { getSettings } = require('../utils/settingsCache.js');
-        const allSettings = await getSettings();
+    let retries = 3;
+    let lastError = null;
+    
+    while (retries > 0) {
+        try {
+            const { getSettings } = require('../utils/settingsCache.js');
+            const allSettings = await getSettings();
         
         let settings = allSettings.branding_settings || { 
                 logo: {
@@ -102,9 +106,34 @@ router.get('/public/settings/branding', async (req, res) => {
         }
         
         res.json(settings);
-    } catch (error) {
-        log.error("Public branding settings xatoligi:", error.message);
-        res.status(500).json({ 
+        return; // Muvaffaqiyatli bo'lsa, return qilish
+        } catch (error) {
+            lastError = error;
+            retries--;
+            
+            const isRetryableError = 
+                error.message?.includes('Timeout acquiring a connection') ||
+                error.message?.includes('pool is probably full') ||
+                error.message?.includes('ECONNREFUSED') ||
+                error.code === 'ECONNREFUSED';
+            
+            if (isRetryableError && retries > 0) {
+                const delay = Math.min(500 * (4 - retries), 2000); // 500ms, 1000ms, 1500ms
+                log.warn(`[AUTH] Public branding settings retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // Boshqa xatolik yoki retry'lar tugagan
+                break;
+            }
+        }
+    }
+    
+    // Xatolik bo'lsa, default qiymatlarni qaytarish
+    if (lastError) {
+        log.error("Public branding settings xatoligi:", lastError.message);
+    }
+    
+    res.status(lastError ? 500 : 200).json({ 
             logo: {
                 text: 'MANUS', 
                 color: '#4CAF50', 
@@ -269,9 +298,29 @@ router.post('/login', async (req, res) => {
         return res.status(400).json({ message: "Login va parol kiritilishi shart." });
     }
 
-    try {
-        const user = await userRepository.findByUsername(trimmedUsername);
+    // Retry mexanizmi bilan user'ni topish
+    let user = null;
+    let userRetries = 3;
+    while (userRetries > 0 && !user) {
+        try {
+            user = await userRepository.findByUsername(trimmedUsername);
+            break;
+        } catch (error) {
+            userRetries--;
+            const isRetryableError = 
+                error.message?.includes('Timeout acquiring a connection') ||
+                error.message?.includes('pool is probably full');
+        
+            if (isRetryableError && userRetries > 0) {
+                const delay = Math.min(500 * (4 - userRetries), 2000); // 500ms, 1000ms, 1500ms
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                throw error;
+            }
+        }
+    }
 
+    try {
         if (!user) {
             // Background'da log yozish
             logAction(null, 'login_fail', 'user', null, { username: trimmedUsername, reason: 'User not found', ip: ipAddress, userAgent }).catch(() => {});
@@ -334,27 +383,48 @@ router.post('/login', async (req, res) => {
         }
 
         // Barcha kerakli ma'lumotlarni parallel olish (optimizatsiya)
-        // Session limit tekshiruvi uchun faqat user'ning sessiyalarini olish (optimizatsiya)
-        const [
-            locations,
-            rolePermissions,
-            additionalPerms,
-            restrictedPerms,
-            existingSessions
-        ] = await Promise.all([
-            userRepository.getLocationsByUserId(user.id),
-            userRepository.getPermissionsByRole(user.role),
-            db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
-            db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key'),
-            // Sessiya limit tekshiruvi uchun faqat user'ning sessiyalarini olish (optimizatsiya)
-            // PostgreSQL'da LIKE query, SQLite'da ham ishlaydi
-            user.role !== 'super_admin' && user.role !== 'superadmin'
-                ? db('sessions')
-                    .select('sid', 'sess')
-                    .whereRaw(`sess LIKE ?`, [`%"id":${user.id}%`])
-                    .limit(100) // Limit qo'shish - juda ko'p sessiya bo'lmasligi uchun
-                : Promise.resolve([])
-        ]);
+        // Retry mexanizmi bilan - connection pool timeout uchun
+        let locations, rolePermissions, additionalPerms, restrictedPerms, existingSessions;
+        let dataRetries = 3;
+        
+        while (dataRetries > 0) {
+            try {
+                [
+                    locations,
+                    rolePermissions,
+                    additionalPerms,
+                    restrictedPerms,
+                    existingSessions
+                ] = await Promise.all([
+                    userRepository.getLocationsByUserId(user.id),
+                    userRepository.getPermissionsByRole(user.role),
+                    db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
+                    db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key'),
+                    // Sessiya limit tekshiruvi uchun faqat user'ning sessiyalarini olish (optimizatsiya)
+                    // PostgreSQL'da LIKE query, SQLite'da ham ishlaydi
+                    user.role !== 'super_admin' && user.role !== 'superadmin'
+                        ? db('sessions')
+                            .select('sid', 'sess')
+                            .whereRaw(`sess LIKE ?`, [`%"id":${user.id}%`])
+                            .limit(100) // Limit qo'shish - juda ko'p sessiya bo'lmasligi uchun
+                        : Promise.resolve([])
+                ]);
+                break; // Muvaffaqiyatli bo'lsa, loop'ni to'xtatish
+            } catch (error) {
+                dataRetries--;
+                const isRetryableError = 
+                    error.message?.includes('Timeout acquiring a connection') ||
+                    error.message?.includes('pool is probably full');
+            
+                if (isRetryableError && dataRetries > 0) {
+                    const delay = Math.min(500 * (4 - dataRetries), 2000); // 500ms, 1000ms, 1500ms
+                    log.warn(`[AUTH] Login data fetch retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${dataRetries} qoldi)`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    throw error;
+                }
+            }
+        }
 
         // SESSIYA LIMIT TEKSHIRUVI
         // Qoida: "Qurilma + Brauzer" kombinatsiyasi asosida
@@ -506,8 +576,9 @@ router.post('/login', async (req, res) => {
         const isActiveUser = user.status === 'active';
 
         // Telegram aktiv holatini tekshirish
-        const telegramEnabledSetting = await db('settings').where({ key: 'telegram_enabled' }).first();
-        const telegramEnabled = telegramEnabledSetting && (telegramEnabledSetting.value === 'true' || telegramEnabledSetting.value === true);
+        const { getSetting } = require('../utils/settingsCache.js');
+        const telegramEnabled = await getSetting('telegram_enabled', 'false');
+        const telegramEnabledBool = telegramEnabled === 'true' || telegramEnabled === true;
 
         // Bot obunasi tekshiruvi faqat telegram aktiv bo'lsa va active foydalanuvchilar uchun
         // Agar foydalanuvchi active bo'lsa va bot obunasi yo'q bo'lsa, bu shuni anglatadiki:
@@ -1341,13 +1412,14 @@ router.get('/bot-connect/status', async (req, res) => {
         const hasTelegramChatId = !!user.telegram_chat_id;
 
         // Telegram aktiv holatini tekshirish
-        const telegramEnabledSetting = await db('settings').where({ key: 'telegram_enabled' }).first();
-        const telegramEnabled = telegramEnabledSetting && (telegramEnabledSetting.value === 'true' || telegramEnabledSetting.value === true);
+        const { getSetting } = require('../utils/settingsCache.js');
+        const telegramEnabled = await getSetting('telegram_enabled', 'false');
+        const telegramEnabledBool = telegramEnabled === 'true' || telegramEnabled === true;
 
         res.json({
             isSuperAdmin: isSuperAdmin,
             isTelegramConnected: isTelegramConnected && hasTelegramChatId,
-            requiresBotConnection: telegramEnabled && !isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId),
+            requiresBotConnection: telegramEnabledBool && !isSuperAdmin && (!isTelegramConnected || !hasTelegramChatId),
             username: user.username // Sessiyadagi username'ni qaytarish
         });
 

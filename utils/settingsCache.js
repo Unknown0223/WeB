@@ -13,8 +13,53 @@ async function getSettings() {
         return cached;
     }
 
-    // Bazadan o'qish
-    const rows = await db('settings').select('key', 'value');
+    // Bazadan o'qish - retry mexanizmi bilan
+    let rows = null;
+    let retries = 3;
+    let lastError = null;
+    
+    while (retries > 0) {
+        try {
+            // Connection test before attempting query
+            try {
+                await db.raw('SELECT 1');
+            } catch (testError) {
+                if (retries > 1) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    retries--;
+                    continue;
+                }
+            }
+            
+            rows = await db('settings').select('key', 'value');
+            break; // Muvaffaqiyatli bo'lsa, loop'ni to'xtatish
+        } catch (error) {
+            lastError = error;
+            retries--;
+            
+            const isRetryableError = 
+                error.message?.includes('Timeout acquiring a connection') ||
+                error.message?.includes('pool is probably full') ||
+                error.message?.includes('ECONNREFUSED') ||
+                error.code === 'ECONNREFUSED';
+            
+            if (isRetryableError && retries > 0) {
+                const delay = Math.min(500 * (4 - retries), 2000); // 500ms, 1000ms, 1500ms
+                log.warn(`[SETTINGS_CACHE] Retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // Boshqa xatolik yoki retry'lar tugagan
+                log.error('[SETTINGS_CACHE] Settings yuklashda xatolik:', error.message);
+                // Default qiymatlarni qaytarish
+                rows = [];
+                break;
+            }
+        }
+    }
+    
+    if (!rows) {
+        rows = [];
+    }
     const settings = {};
     
     rows.forEach(row => {
