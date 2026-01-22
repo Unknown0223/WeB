@@ -572,21 +572,21 @@ global.broadcastWebSocket = (type, payload) => {
                             // Avval eski webhookni o'chirish (agar mavjud bo'lsa)
                             try {
                                 await axios.post(`${telegramApiUrl}`, { url: '' });
-                                log.info('[INIT] [BOT] Eski webhook o'chirildi');
+                                log.info("[INIT] [BOT] Eski webhook o'chirildi");
                             } catch (deleteError) {
                                 // Xatolik bo'lsa ham davom etamiz
-                                log.debug('[INIT] [BOT] Eski webhook o'chirishda xatolik (e\'tiborsiz qoldirildi)');
+                                log.debug("[INIT] [BOT] Eski webhook o'chirishda xatolik (e'tiborsiz qoldirildi)");
                             }
                             
                             // Yangi webhookni o'rnatish
-                            log.info('[INIT] [BOT] Yangi webhook o\'rnatilmoqda...');
+                            log.info("[INIT] [BOT] Yangi webhook o'rnatilmoqda...");
                             const response = await axios.post(telegramApiUrl, { 
                                 url: webhookUrl,
                                 allowed_updates: ['message', 'callback_query', 'my_chat_member']
                             });
                             
                             if (response.data.ok) {
-                                log.info('[INIT] [BOT] ✅ Webhook muvaffaqiyatli o\'rnatildi');
+                                log.info("[INIT] [BOT] ✅ Webhook muvaffaqiyatli o'rnatildi");
                                 // Webhook rejimida botni ishga tushirish
                                 await initializeBot(botToken, { polling: false });
                                 const botInitDuration = Date.now() - botInitStartTime;
