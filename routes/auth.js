@@ -19,8 +19,8 @@ router.get('/public/settings/branding', async (req, res) => {
         try {
             const { getSettings } = require('../utils/settingsCache.js');
             const allSettings = await getSettings();
-        
-        let settings = allSettings.branding_settings || { 
+            
+            let settings = allSettings.branding_settings || { 
                 logo: {
                     text: 'MANUS', 
                     color: '#4CAF50', 
@@ -35,78 +35,78 @@ router.get('/public/settings/branding', async (req, res) => {
                     blurBackground: true
                 }
             };
-        
-        // MUAMMO: Bazada ikkala format ham mavjud bo'lishi mumkin
-        // Yechim: Avval logo strukturasini tekshirish, agar mavjud bo'lsa uni ishlatish
-        // Faqat logo strukturasida ma'lumotlar bo'lmasa, keyin eski formatni qo'llash
-        
-        if (settings.logo && (settings.logo.text || settings.logo.color)) {
-            // Yangi format mavjud - logo strukturasini ishlatish
             
-            // Logo strukturasini to'ldirish
-            if (!settings.logo.size) {
-                settings.logo.size = 32;
-            }
-            if (!settings.logo.text) {
-                settings.logo.text = 'MANUS';
-            }
-            if (!settings.logo.color) {
-                settings.logo.color = '#4CAF50';
-            }
-            if (!settings.logo.animation) {
-                settings.logo.animation = 'anim-glow-pulse';
-            }
-            if (!settings.logo.border) {
-                settings.logo.border = 'border-none';
-            }
+            // MUAMMO: Bazada ikkala format ham mavjud bo'lishi mumkin
+            // Yechim: Avval logo strukturasini tekshirish, agar mavjud bo'lsa uni ishlatish
+            // Faqat logo strukturasida ma'lumotlar bo'lmasa, keyin eski formatni qo'llash
             
-            // Eski format maydonlarini olib tashlash (tozalash)
-            delete settings.text;
-            delete settings.color;
-            delete settings.animation;
-            delete settings.border;
-            
-        } else if (settings.text || settings.color) {
-            // Faqat eski format mavjud - yangi formatga o'tkazish
-            settings = {
-                logo: {
-                    text: settings.text || 'MANUS',
-                    color: settings.color || '#4CAF50',
-                    animation: settings.animation || 'anim-glow-pulse',
-                    border: settings.border || 'border-none',
-                    size: settings.size || 32
-                },
-                loader: settings.loader || {
-                    type: 'spinner',
-                    text: 'Yuklanmoqda...',
-                    showProgress: false,
-                    blurBackground: true
+            if (settings.logo && (settings.logo.text || settings.logo.color)) {
+                // Yangi format mavjud - logo strukturasini ishlatish
+                
+                // Logo strukturasini to'ldirish
+                if (!settings.logo.size) {
+                    settings.logo.size = 32;
                 }
-            };
-        } else {
-            // Hech qanday format mavjud emas - default qo'llash
-            if (!settings.logo) {
-                settings.logo = {};
+                if (!settings.logo.text) {
+                    settings.logo.text = 'MANUS';
+                }
+                if (!settings.logo.color) {
+                    settings.logo.color = '#4CAF50';
+                }
+                if (!settings.logo.animation) {
+                    settings.logo.animation = 'anim-glow-pulse';
+                }
+                if (!settings.logo.border) {
+                    settings.logo.border = 'border-none';
+                }
+                
+                // Eski format maydonlarini olib tashlash (tozalash)
+                delete settings.text;
+                delete settings.color;
+                delete settings.animation;
+                delete settings.border;
+                
+            } else if (settings.text || settings.color) {
+                // Faqat eski format mavjud - yangi formatga o'tkazish
+                settings = {
+                    logo: {
+                        text: settings.text || 'MANUS',
+                        color: settings.color || '#4CAF50',
+                        animation: settings.animation || 'anim-glow-pulse',
+                        border: settings.border || 'border-none',
+                        size: settings.size || 32
+                    },
+                    loader: settings.loader || {
+                        type: 'spinner',
+                        text: 'Yuklanmoqda...',
+                        showProgress: false,
+                        blurBackground: true
+                    }
+                };
+            } else {
+                // Hech qanday format mavjud emas - default qo'llash
+                if (!settings.logo) {
+                    settings.logo = {};
+                }
+                if (!settings.logo.size) {
+                    settings.logo.size = 32;
+                }
+                if (!settings.logo.text) {
+                    settings.logo.text = 'MANUS';
+                }
+                if (!settings.logo.color) {
+                    settings.logo.color = '#4CAF50';
+                }
+                if (!settings.logo.animation) {
+                    settings.logo.animation = 'anim-glow-pulse';
+                }
+                if (!settings.logo.border) {
+                    settings.logo.border = 'border-none';
+                }
             }
-            if (!settings.logo.size) {
-                settings.logo.size = 32;
-            }
-            if (!settings.logo.text) {
-                settings.logo.text = 'MANUS';
-            }
-            if (!settings.logo.color) {
-                settings.logo.color = '#4CAF50';
-            }
-            if (!settings.logo.animation) {
-                settings.logo.animation = 'anim-glow-pulse';
-            }
-            if (!settings.logo.border) {
-                settings.logo.border = 'border-none';
-            }
-        }
-        
-        res.json(settings);
-        return; // Muvaffaqiyatli bo'lsa, return qilish
+            
+            res.json(settings);
+            return; // Muvaffaqiyatli bo'lsa, return qilish
         } catch (error) {
             lastError = error;
             retries--;
@@ -134,21 +134,20 @@ router.get('/public/settings/branding', async (req, res) => {
     }
     
     res.status(lastError ? 500 : 200).json({ 
-            logo: {
-                text: 'MANUS', 
-                color: '#4CAF50', 
-                animation: 'anim-glow-pulse', 
-                border: 'border-none',
-                size: 32
-            },
-            loader: {
-                type: 'spinner',
-                text: 'Yuklanmoqda...',
-                showProgress: false,
-                blurBackground: true
-            }
-        });
-    }
+        logo: {
+            text: 'MANUS', 
+            color: '#4CAF50', 
+            animation: 'anim-glow-pulse', 
+            border: 'border-none',
+            size: 32
+        },
+        loader: {
+            type: 'spinner',
+            text: 'Yuklanmoqda...',
+            showProgress: false,
+            blurBackground: true
+        }
+    });
 });
 
 // Foydalanuvchi registratsiyasi (YANGILANGAN)
