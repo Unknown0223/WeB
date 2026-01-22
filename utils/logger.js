@@ -18,14 +18,24 @@ const LOG_LEVELS = {
     silent: 4
 };
 
-// Default: har doim 'error' - faqat xatoliklar loglanadi
+// Default: Production'da 'warn', Development'da 'info'
 const getLogLevel = () => {
     const envLevel = process.env.LOG_LEVEL?.toLowerCase();
     if (envLevel && LOG_LEVELS[envLevel] !== undefined) {
         return envLevel;
     }
-    // Development'da ham default 'error' (faqat xatoliklar)
-    return 'error'; // Har doim faqat error loglar
+    
+    // NODE_ENV ga qarab avtomatik log level
+    const isProduction = process.env.NODE_ENV === 'production' || 
+                        process.env.RAILWAY_ENVIRONMENT === 'production' ||
+                        process.env.RENDER === 'true' ||
+                        process.env.HEROKU_APP_NAME;
+    
+    if (isProduction) {
+        return 'warn'; // Production'da faqat warn va error
+    }
+    
+    return 'info'; // Development'da info, warn, error
 };
 
 const currentLevel = () => LOG_LEVELS[getLogLevel()];

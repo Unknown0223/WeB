@@ -16,7 +16,7 @@ module.exports = {
     env_production: {
       NODE_ENV: 'production',
       PORT: 3000,
-      LOG_LEVEL: 'error'
+      LOG_LEVEL: 'warn' // Production'da faqat warn va error loglar
     },
     // Log sozlamalari
     error_file: './logs/pm2-error.log',
