@@ -285,7 +285,10 @@ router.post('/login', async (req, res) => {
     const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const userAgent = req.headers['user-agent'];
 
+    log.info(`[LOGIN] Login so'rovi boshlandi. Username: ${username}, IP: ${ipAddress}`);
+
     if (!username || !password) {
+        log.warn(`[LOGIN] Username yoki parol kiritilmagan`);
         return res.status(400).json({ message: "Login va parol kiritilishi shart." });
     }
 
@@ -294,15 +297,20 @@ router.post('/login', async (req, res) => {
     const trimmedPassword = password.trim();
 
     if (!trimmedUsername || !trimmedPassword) {
+        log.warn(`[LOGIN] Trim qilgandan keyin username yoki parol bo'sh`);
         return res.status(400).json({ message: "Login va parol kiritilishi shart." });
     }
+
+    log.info(`[LOGIN] User'ni topish boshlandi. Username: ${trimmedUsername}`);
 
     // Retry mexanizmi bilan user'ni topish
     let user = null;
     let userRetries = 3;
     while (userRetries > 0 && !user) {
         try {
+            log.debug(`[LOGIN] User'ni topishga urinilmoqda... (${userRetries} qoldi)`);
             user = await userRepository.findByUsername(trimmedUsername);
+            log.info(`[LOGIN] User topildi. User ID: ${user?.id}, Status: ${user?.status}, Role: ${user?.role}`);
             break;
         } catch (error) {
             userRetries--;
@@ -312,8 +320,10 @@ router.post('/login', async (req, res) => {
         
             if (isRetryableError && userRetries > 0) {
                 const delay = Math.min(500 * (4 - userRetries), 2000); // 500ms, 1000ms, 1500ms
+                log.warn(`[LOGIN] User'ni topishda retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${userRetries} qoldi)`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
+                log.error(`[LOGIN] User'ni topishda xatolik:`, error.message);
                 throw error;
             }
         }
@@ -321,10 +331,13 @@ router.post('/login', async (req, res) => {
 
     try {
         if (!user) {
+            log.warn(`[LOGIN] User topilmadi. Username: ${trimmedUsername}`);
             // Background'da log yozish
             logAction(null, 'login_fail', 'user', null, { username: trimmedUsername, reason: 'User not found', ip: ipAddress, userAgent }).catch(() => {});
             return res.status(401).json({ message: "Login yoki parol noto'g'ri." });
         }
+
+        log.info(`[LOGIN] User status tekshiruvi. Status: ${user.status}`);
 
         if (user.status !== 'active') {
             let reason = "Bu foydalanuvchi faol emas. Iltimos, administratorga murojaat qiling.";
@@ -335,14 +348,18 @@ router.post('/login', async (req, res) => {
             } else if (user.status === 'archived') {
                 reason = "Bu akkaunt arxivlangan. Qayta tiklash uchun administrator bilan bog'laning.";
             }
+            log.warn(`[LOGIN] User faol emas. Status: ${user.status}, Reason: ${reason}`);
             // Background'da log yozish
             logAction(user.id, 'login_fail', 'user', user.id, { username, reason: `Account status: ${user.status}`, ip: ipAddress, userAgent }).catch(() => {});
             return res.status(403).json({ message: reason });
         }
 
+        log.info(`[LOGIN] Parol tekshiruvi boshlandi`);
+
         const match = await bcrypt.compare(trimmedPassword, user.password);
 
         if (!match) {
+            log.warn(`[LOGIN] Parol noto'g'ri. User ID: ${user.id}`);
             const newAttempts = (user.login_attempts || 0) + 1;
             
             if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
@@ -381,6 +398,8 @@ router.post('/login', async (req, res) => {
             await db('users').where({ id: user.id }).update({ must_delete_creds: false });
         }
 
+        log.info(`[LOGIN] Parol to'g'ri. Data fetch boshlandi`);
+
         // Barcha kerakli ma'lumotlarni parallel olish (optimizatsiya)
         // Retry mexanizmi bilan - connection pool timeout uchun
         let locations, rolePermissions, additionalPerms, restrictedPerms, existingSessions;
@@ -388,6 +407,7 @@ router.post('/login', async (req, res) => {
         
         while (dataRetries > 0) {
             try {
+                log.debug(`[LOGIN] Data fetch urinilmoqda... (${dataRetries} qoldi)`);
                 [
                     locations,
                     rolePermissions,
@@ -408,6 +428,7 @@ router.post('/login', async (req, res) => {
                             .limit(100) // Limit qo'shish - juda ko'p sessiya bo'lmasligi uchun
                         : Promise.resolve([])
                 ]);
+                log.info(`[LOGIN] Data fetch muvaffaqiyatli. Locations: ${locations?.length || 0}, Permissions: ${rolePermissions?.length || 0}, Sessions: ${existingSessions?.length || 0}`);
                 break; // Muvaffaqiyatli bo'lsa, loop'ni to'xtatish
             } catch (error) {
                 dataRetries--;
@@ -417,13 +438,17 @@ router.post('/login', async (req, res) => {
             
                 if (isRetryableError && dataRetries > 0) {
                     const delay = Math.min(500 * (4 - dataRetries), 2000); // 500ms, 1000ms, 1500ms
-                    log.warn(`[AUTH] Login data fetch retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${dataRetries} qoldi)`);
+                    log.warn(`[LOGIN] Data fetch retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${dataRetries} qoldi)`);
+                    log.warn(`[LOGIN] Xatolik: ${error.message}`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 } else {
+                    log.error(`[LOGIN] Data fetch xatolik:`, error.message);
                     throw error;
                 }
             }
         }
+
+        log.info(`[LOGIN] Sessiya limit tekshiruvi boshlandi`);
 
         // SESSIYA LIMIT TEKSHIRUVI
         // Qoida: "Qurilma + Brauzer" kombinatsiyasi asosida
@@ -500,6 +525,8 @@ router.post('/login', async (req, res) => {
             }
         }
 
+        log.info(`[LOGIN] Permissions hisoblash boshlandi`);
+
         // Final permissions: rolePermissions + additional - restricted
         let finalPermissions = [...rolePermissions];
         
@@ -513,6 +540,8 @@ router.post('/login', async (req, res) => {
         // Cheklangan huquqlarni olib tashlash
         finalPermissions = finalPermissions.filter(perm => !restrictedPerms.includes(perm));
 
+        log.info(`[LOGIN] Sessiya yaratish boshlandi`);
+
         req.session.user = {
             id: user.id,
             username: user.username,
@@ -524,6 +553,8 @@ router.post('/login', async (req, res) => {
         req.session.ip_address = ipAddress;
         req.session.user_agent = userAgent;
         req.session.last_activity = Date.now();
+        
+        log.info(`[LOGIN] Sessiya yaratildi. Session ID: ${req.sessionID}`);
         
         // Online statusni real-time yangilash
         if (global.broadcastWebSocket) {
@@ -574,10 +605,14 @@ router.post('/login', async (req, res) => {
         const hasTelegramChatId = !!user.telegram_chat_id;
         const isActiveUser = user.status === 'active';
 
+        log.info(`[LOGIN] Bot obunasi tekshiruvi boshlandi`);
+
         // Telegram aktiv holatini tekshirish
         const { getSetting } = require('../utils/settingsCache.js');
         const telegramEnabled = await getSetting('telegram_enabled', 'false');
         const telegramEnabledBool = telegramEnabled === 'true' || telegramEnabled === true;
+
+        log.info(`[LOGIN] Telegram enabled: ${telegramEnabledBool}, IsSuperAdmin: ${isSuperAdmin}, IsTelegramConnected: ${isTelegramConnected}, HasTelegramChatId: ${hasTelegramChatId}`);
 
         // Bot obunasi tekshiruvi faqat telegram aktiv bo'lsa va active foydalanuvchilar uchun
         // Agar foydalanuvchi active bo'lsa va bot obunasi yo'q bo'lsa, bu shuni anglatadiki:
@@ -586,6 +621,7 @@ router.post('/login', async (req, res) => {
         // - Tizimdan chiqib ketgan
         // - Keyin qayta kirishga harakat qilgan
         if (telegramEnabledBool && !isSuperAdmin && isActiveUser && (!isTelegramConnected || !hasTelegramChatId)) {
+            log.info(`[LOGIN] Bot obunasi kerak. Redirect: /bot-connect`);
             // Bot obunasi yo'q - bot bog'lash sahifasiga redirect
             // Sessiya yaratiladi, lekin bot bog'languncha dashboard ochilmaydi
             req.session.user = {
@@ -617,6 +653,8 @@ router.post('/login', async (req, res) => {
         
         // =======================================================
 
+        log.info(`[LOGIN] Redirect URL aniqlash boshlandi`);
+
         // Barcha foydalanuvchilar uchun admin paneliga redirect
         // Menejer, kassir, operator, rahbar ham web interfeysdan foydalana oladi
         let redirectUrl = '/';
@@ -639,6 +677,9 @@ router.post('/login', async (req, res) => {
             redirectUrl = '/admin';
         }
         
+        const duration = Date.now() - startTime;
+        log.info(`[LOGIN] Login muvaffaqiyatli tugadi. Username: ${username}, Duration: ${duration}ms, Redirect: ${redirectUrl}`);
+        
         // Background'da log yozish (javobni kutmaslik)
         logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent }).catch(() => {});
         
@@ -654,7 +695,9 @@ router.post('/login', async (req, res) => {
         res.json({ message: "Tizimga muvaffaqiyatli kirildi.", user: req.session.user, redirectUrl });
 
     } catch (error) {
-        log.error(`Login xatoligi. Username: ${username}`, error.message);
+        const duration = Date.now() - startTime;
+        log.error(`[LOGIN] Login xatoligi. Username: ${username}, Duration: ${duration}ms`, error.message);
+        log.error(`[LOGIN] Error stack:`, error.stack);
         res.status(500).json({ message: "Serverda kutilmagan xatolik yuz berdi." });
     }
 });
