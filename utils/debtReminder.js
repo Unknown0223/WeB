@@ -20,53 +20,106 @@ const sendingSummary = new Set(); // "recipientType:recipientId" -> sending proc
 
 // Reminder sozlamalarini yuklash
 async function loadReminderSettings() {
-    try {
-        // Avval debt_settings jadvali mavjudligini tekshirish
-        const hasDebtSettingsTable = await db.schema.hasTable('debt_settings');
-        
-        let intervalLoaded = false;
-        let countLoaded = false;
-        
-        if (hasDebtSettingsTable) {
-            // Avval debt_settings jadvalidan qidirish
-            const intervalSetting = await db('debt_settings').where('key', 'debt_reminder_interval').first();
-            const countSetting = await db('debt_settings').where('key', 'debt_reminder_max_count').first();
+    let retries = 5;
+    let lastError = null;
+    
+    while (retries > 0) {
+        try {
+            // Connection pool'ni test qilish
+            try {
+                await db.raw('SELECT 1');
+            } catch (testError) {
+                if (retries > 1) {
+                    log.warn(`[DEBT_REMINDER] Connection test xatolik, ${1000}ms kutib qayta urinilmoqda...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    retries--;
+                    continue;
+                } else {
+                    throw testError;
+                }
+            }
             
-            if (intervalSetting) {
-                reminderInterval = parseInt(intervalSetting.value) || 30;
-                intervalLoaded = true;
-            }
-            if (countSetting) {
-                reminderMaxCount = parseInt(countSetting.value) || 3;
-                countLoaded = true;
-            }
-        }
-        
-        // Agar debt_settings jadvalidan topilmasa, eski settings jadvalidan qidirish (backward compatibility)
-        if (!intervalLoaded || !countLoaded) {
-            const hasSettingsTable = await db.schema.hasTable('settings');
-            if (hasSettingsTable) {
-                if (!intervalLoaded) {
-                    const intervalSetting = await db('settings').where('key', 'debt_reminder_interval_minutes').first();
-                    if (intervalSetting) {
-                        reminderInterval = parseInt(intervalSetting.value) || 30;
-                    }
+            // Avval debt_settings jadvali mavjudligini tekshirish
+            const hasDebtSettingsTable = await db.schema.hasTable('debt_settings');
+            
+            let intervalLoaded = false;
+            let countLoaded = false;
+            
+            if (hasDebtSettingsTable) {
+                // Avval debt_settings jadvalidan qidirish
+                const intervalSetting = await db('debt_settings').where('key', 'debt_reminder_interval').first();
+                const countSetting = await db('debt_settings').where('key', 'debt_reminder_max_count').first();
+                
+                if (intervalSetting) {
+                    reminderInterval = parseInt(intervalSetting.value) || 30;
+                    intervalLoaded = true;
                 }
-                if (!countLoaded) {
-                    const countSetting = await db('settings').where('key', 'debt_reminder_max_count').first();
-                    if (countSetting) {
-                        reminderMaxCount = parseInt(countSetting.value) || 3;
-                    }
+                if (countSetting) {
+                    reminderMaxCount = parseInt(countSetting.value) || 3;
+                    countLoaded = true;
                 }
             }
+            
+            // Agar debt_settings jadvalidan topilmasa, eski settings jadvalidan qidirish (backward compatibility)
+            if (!intervalLoaded || !countLoaded) {
+                const hasSettingsTable = await db.schema.hasTable('settings');
+                if (hasSettingsTable) {
+                    if (!intervalLoaded) {
+                        const intervalSetting = await db('settings').where('key', 'debt_reminder_interval_minutes').first();
+                        if (intervalSetting) {
+                            reminderInterval = parseInt(intervalSetting.value) || 30;
+                        }
+                    }
+                    if (!countLoaded) {
+                        const countSetting = await db('settings').where('key', 'debt_reminder_max_count').first();
+                        if (countSetting) {
+                            reminderMaxCount = parseInt(countSetting.value) || 3;
+                        }
+                    }
+                }
+            }
+            
+            // Muvaffaqiyatli bo'lsa, retry loop'ni to'xtatish
+            retries = 0;
+            break;
+        } catch (error) {
+            lastError = error;
+            retries--;
+            
+            // Connection pool timeout yoki lock xatoliklari uchun retry
+            const isRetryableError = 
+                error.message?.includes('Timeout acquiring a connection') ||
+                error.message?.includes('pool is probably full') ||
+                error.message?.includes('ECONNREFUSED') ||
+                error.code === 'ECONNREFUSED' ||
+                error.code === 'SQLITE_ERROR';
+            
+            // Faqat SQLITE_ERROR: no such table xatosini e'tiborsiz qoldiramiz
+            if (error.code === 'SQLITE_ERROR' && error.message?.includes('no such table')) {
+                // Migration hali ishlamagan bo'lishi mumkin, bu normal
+                log.debug('[DEBT_REMINDER] Jadval topilmadi (migration hali ishlamagan bo\'lishi mumkin)');
+                retries = 0;
+                break;
+            }
+            
+            if (isRetryableError && retries > 0) {
+                // Exponential backoff - har safar kutish vaqti oshadi
+                const delay = Math.min(2000 * (6 - retries), 10000); // 2s, 4s, 6s, 8s, 10s
+                log.warn(`[DEBT_REMINDER] Retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
+                log.warn(`[DEBT_REMINDER] Xatolik: ${error.message}`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // Boshqa xatolik yoki retry'lar tugagan
+                if (error.code !== 'SQLITE_ERROR' || !error.message?.includes('no such table')) {
+                    log.error('Reminder sozlamalarini yuklashda xatolik:', error);
+                }
+                break;
+            }
         }
-        
-    } catch (error) {
-        // Faqat SQLITE_ERROR: no such table xatosini e'tiborsiz qoldiramiz
-        // (migration hali ishlamagan bo'lishi mumkin)
-        if (error.code !== 'SQLITE_ERROR' || !error.message.includes('no such table')) {
-            log.error('Reminder sozlamalarini yuklashda xatolik:', error);
-        }
+    }
+    
+    if (lastError && retries === 0 && (lastError.code !== 'SQLITE_ERROR' || !lastError.message?.includes('no such table'))) {
+        log.error('[DEBT_REMINDER] Reminder sozlamalarini yuklashda barcha retry urinishlari tugadi');
     }
 }
 
@@ -688,13 +741,18 @@ function updateReminderSettings(interval, maxCount) {
     // log.info(`Reminder sozlamalari yangilandi: interval=${reminderInterval}min, maxCount=${reminderMaxCount}`);
 }
 
-// Initialization
-loadReminderSettings().then(() => {
-    // 5 daqiqadan keyin barcha pending requestlar uchun reminder boshlash
-    setTimeout(() => {
-        startRemindersForPendingRequests();
-    }, 5 * 60 * 1000);
-});
+// Initialization - server ishga tushganda delay bilan
+// Connection pool to'lib qolmasligi uchun delay qo'shish
+setTimeout(() => {
+    loadReminderSettings().then(() => {
+        // 5 daqiqadan keyin barcha pending requestlar uchun reminder boshlash
+        setTimeout(() => {
+            startRemindersForPendingRequests();
+        }, 5 * 60 * 1000);
+    }).catch((error) => {
+        log.warn('[DEBT_REMINDER] Initialization xatolik (ignored):', error.message);
+    });
+}, 2000); // 2 soniya delay - database initialization tugaguncha kutish
 
 /**
  * Reminder'ni database'ga saqlash
