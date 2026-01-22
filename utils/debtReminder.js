@@ -22,6 +22,9 @@ const sendingSummary = new Set(); // "recipientType:recipientId" -> sending proc
 async function loadReminderSettings() {
     let retries = 5;
     let lastError = null;
+    const initialDelay = 5000; // 5 seconds initial delay - database initialization tugaguncha kutish
+    
+    await new Promise(resolve => setTimeout(resolve, initialDelay));
     
     while (retries > 0) {
         try {
@@ -30,8 +33,9 @@ async function loadReminderSettings() {
                 await db.raw('SELECT 1');
             } catch (testError) {
                 if (retries > 1) {
-                    log.warn(`[DEBT_REMINDER] Connection test xatolik, ${1000}ms kutib qayta urinilmoqda...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    const delay = Math.min(2000 * (6 - retries), 10000); // Exponential backoff
+                    log.warn(`[DEBT_REMINDER] Connection test xatolik, ${delay}ms kutib qayta urinilmoqda...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
                     retries--;
                     continue;
                 } else {
@@ -699,26 +703,73 @@ async function sendSummaryReminder(recipient, requestId, reminderNumber) {
 
 // Barcha pending requestlar uchun reminder boshlash
 async function startRemindersForPendingRequests() {
-    try {
-        const pendingRequests = await db('debt_requests')
-            .whereIn('status', [
-                'PENDING_APPROVAL',
-                'SET_PENDING',
-                'APPROVED_BY_LEADER',
+    let retries = 5;
+    let lastError = null;
+    const initialDelay = 2000; // 2 seconds initial delay
+    
+    await new Promise(resolve => setTimeout(resolve, initialDelay));
+    
+    while (retries > 0) {
+        try {
+            // Connection pool'ni test qilish
+            try {
+                await db.raw('SELECT 1');
+            } catch (testError) {
+                if (retries > 1) {
+                    const delay = Math.min(2000 * (6 - retries), 10000); // Exponential backoff
+                    log.warn(`[DEBT_REMINDER] Connection test xatolik, ${delay}ms kutib qayta urinilmoqda...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    retries--;
+                    continue;
+                } else {
+                    throw testError;
+                }
+            }
+            
+            const pendingRequests = await db('debt_requests')
+                .whereIn('status', [
+                    'PENDING_APPROVAL',
+                    'SET_PENDING',
+                    'APPROVED_BY_LEADER',
                 'APPROVED_BY_CASHIER'
-            ])
-            .where('locked', false)
-            .select('id');
-        
-        for (const req of pendingRequests) {
-            if (!reminders.has(req.id)) {
-                startReminder(req.id);
+                ])
+                .where('locked', false)
+                .select('id')
+                .limit(100); // Limit qo'shish - juda ko'p request bo'lmasligi uchun
+            
+            for (const req of pendingRequests) {
+                if (!reminders.has(req.id)) {
+                    startReminder(req.id);
+                }
+            }
+            
+            // Muvaffaqiyatli bo'lsa, retry loop'ni to'xtatish
+            retries = 0;
+            break;
+        } catch (error) {
+            lastError = error;
+            retries--;
+            
+            const isRetryableError = 
+                error.message?.includes('Timeout acquiring a connection') ||
+                error.message?.includes('pool is probably full') ||
+                error.message?.includes('ECONNREFUSED') ||
+                error.code === 'ECONNREFUSED';
+            
+            if (isRetryableError && retries > 0) {
+                const delay = Math.min(2000 * (6 - retries), 10000); // Exponential backoff
+                log.warn(`[DEBT_REMINDER] Retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
+                log.warn(`[DEBT_REMINDER] Xatolik: ${error.message}`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                log.error('Pending requestlar uchun reminder boshlashda xatolik:', error);
+                break;
             }
         }
-        
-        // ${pendingRequests.length} ta request uchun reminder boshlandi (log olib tashlandi)
-    } catch (error) {
-        log.error('Pending requestlar uchun reminder boshlashda xatolik:', error);
+    }
+    
+    if (lastError && retries === 0) {
+        log.error('[DEBT_REMINDER] Pending requestlar uchun reminder boshlashda barcha retry urinishlari tugadi');
     }
 }
 
@@ -743,16 +794,24 @@ function updateReminderSettings(interval, maxCount) {
 
 // Initialization - server ishga tushganda delay bilan
 // Connection pool to'lib qolmasligi uchun delay qo'shish
+// Delay'ni oshirish - database initialization va migration'lar tugaguncha kutish
 setTimeout(() => {
     loadReminderSettings().then(() => {
         // 5 daqiqadan keyin barcha pending requestlar uchun reminder boshlash
+        // Delay'ni oshirish - connection pool to'lib qolmasligi uchun
         setTimeout(() => {
             startRemindersForPendingRequests();
         }, 5 * 60 * 1000);
     }).catch((error) => {
         log.warn('[DEBT_REMINDER] Initialization xatolik (ignored):', error.message);
+        // Xatolik bo'lsa ham, retry qilish uchun keyinroq urinib ko'rish
+        setTimeout(() => {
+            loadReminderSettings().catch(() => {
+                // Ikkinchi urinish ham muvaffaqiyatsiz bo'lsa, e'tiborsiz qoldirish
+            });
+        }, 30 * 1000); // 30 soniyadan keyin qayta urinish
     });
-}, 2000); // 2 soniya delay - database initialization tugaguncha kutish
+}, 10000); // 10 soniya delay - database initialization va migration'lar tugaguncha kutish
 
 /**
  * Reminder'ni database'ga saqlash
