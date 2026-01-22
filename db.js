@@ -114,17 +114,43 @@ function getDbConfig() {
         log.error(`[DB] Debug: PGDATABASE=${pgDatabase || 'NOT SET'}`);
         log.error(`[DB] Debug: PGUSER=${pgUser || 'NOT SET'}`);
         log.error(`[DB] Debug: PGPASSWORD=${pgPassword ? 'SET (hidden)' : 'NOT SET'}`);
+        
+        // Reference bo'lsa, aniqroq xabar
+        const rawDatabaseUrl = process.env.DATABASE_URL;
+        const isReferenceInEnv = rawDatabaseUrl && rawDatabaseUrl.includes('${{');
+        
+        if (isReferenceInEnv) {
+            throw new Error(
+                'Railway.com\'da DATABASE_URL reference resolve qilinmagan!\n' +
+                'Muammo: ${{Postgres.DATABASE_URL}} reference start vaqtida resolve qilinmayapti.\n\n' +
+                'YECHIM: Reference\'ni to\'g\'ridan-to\'g\'ri connection string bilan almashtirish kerak:\n\n' +
+                '1. Railway.com dashboard\'ga kiring\n' +
+                '2. Postgres service\'ning Variables bo\'limiga o\'ting\n' +
+                '3. DATABASE_PUBLIC_URL yoki DATABASE_URL ning to\'liq qiymatini ko\'ring\n' +
+                '   (masalan: postgresql://postgres:password@host:port/database)\n' +
+                '4. WeB service\'ning Variables bo\'limiga o\'ting\n' +
+                '5. DATABASE_URL ni o\'chiring (agar mavjud bo\'lsa)\n' +
+                '6. "+ New Variable" tugmasini bosing\n' +
+                '7. Key: DATABASE_URL\n' +
+                '8. Value: Postgres service\'dan ko\'chirilgan to\'liq connection string\n' +
+                '9. Saqlang va qayta deploy qiling\n\n' +
+                'Eslatma: Reference (${{...}}) ba\'zida ishlamaydi. To\'g\'ridan-to\'g\'ri connection string ishlatish tavsiya etiladi.'
+            );
+        }
+        
         throw new Error(
             'Railway.com\'da DATABASE_URL sozlanmagan!\n' +
             'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
             'PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.\n\n' +
             'Qo\'llanma:\n' +
             '1. Railway.com dashboard\'ga kiring\n' +
-            '2. WeB service\'ning Variables bo\'limiga o\'ting\n' +
-            '3. "+ New Variable" tugmasini bosing\n' +
-            '4. Key: DATABASE_URL\n' +
-            '5. Value: ${{Postgres.DATABASE_PUBLIC_URL}} yoki PostgreSQL service\'dan to\'g\'ridan-to\'g\'ri connection string\n' +
-            '6. Saqlang va qayta deploy qiling'
+            '2. Postgres service\'ning Variables bo\'limiga o\'ting\n' +
+            '3. DATABASE_PUBLIC_URL yoki DATABASE_URL ning to\'liq qiymatini ko\'ring\n' +
+            '4. WeB service\'ning Variables bo\'limiga o\'ting\n' +
+            '5. "+ New Variable" tugmasini bosing\n' +
+            '6. Key: DATABASE_URL\n' +
+            '7. Value: Postgres service\'dan ko\'chirilgan to\'liq connection string\n' +
+            '8. Saqlang va qayta deploy qiling'
         );
     }
     
