@@ -21,7 +21,7 @@ const client = new Client(config);
 async function createDatabase() {
   try {
     await client.connect();
-    console.log('✅ PostgreSQL server ga ulandi');
+    // Production'da log qilmaymiz (faqat error loglar)
 
     // Database mavjudligini tekshirish
     const checkResult = await client.query(
@@ -30,23 +30,23 @@ async function createDatabase() {
     );
 
     if (checkResult.rows.length > 0) {
-      console.log(`✅ Database "${dbName}" allaqachon mavjud`);
+      // Database allaqachon mavjud
     } else {
       // Database yaratish
       await client.query(`CREATE DATABASE ${dbName}`);
-      console.log(`✅ Database "${dbName}" yaratildi`);
     }
 
     await client.end();
     process.exit(0);
   } catch (error) {
+    // Faqat xatoliklarni log qilamiz
     console.error('❌ Xatolik:', error.message);
     if (error.code === 'ECONNREFUSED') {
       console.error('   PostgreSQL server ishlamayapti. Server ishga tushiring.');
     } else if (error.code === '28P01') {
       console.error('   Autentifikatsiya xatolik - username yoki parol noto\'g\'ri');
     } else if (error.code === '42P04') {
-      console.log(`✅ Database "${dbName}" allaqachon mavjud`);
+      // Database allaqachon mavjud - bu xatolik emas
       await client.end().catch(() => {});
       process.exit(0);
     }

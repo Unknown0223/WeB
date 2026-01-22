@@ -284,53 +284,23 @@ router.get('/available', isAuthenticated, hasPermission('debt:view_bindings'), a
                     : db('debt_svrs').select('id', 'name', 'brand_id', 'branch_id').orderBy('name')
         ]);
         
-        // Dublikat tekshiruvi va filtrlash - Brendlar (ID bo'yicha)
-        const originalBrandsCount = brandsRaw.length;
-        const uniqueBrandsMap = new Map();
-        brandsRaw.forEach(brand => {
-            if (!uniqueBrandsMap.has(brand.id)) {
-                uniqueBrandsMap.set(brand.id, brand);
-            } else {
-                log.warn(`⚠️ [bindings/available] Brend dublikat topildi: ID=${brand.id}, Name=${brand.name}`);
-            }
+        // Dublikat tekshiruvi va filtrlash - Utility funksiyalar ishlatiladi
+        const { removeDuplicatesById } = require('../../utils/arrayUtils.js');
+        
+        const uniqueBrands = removeDuplicatesById(brandsRaw, 'id', {
+            warnOnDuplicate: true,
+            context: 'bindings/available'
         });
-        const uniqueBrands = Array.from(uniqueBrandsMap.values());
         
-        if (originalBrandsCount !== uniqueBrands.length) {
-            log.warn(`⚠️ [bindings/available] Brendlar dublikatlari: Original=${originalBrandsCount}, Unique=${uniqueBrands.length}, Dublikatlar=${originalBrandsCount - uniqueBrands.length}`);
-        }
-        
-        // Dublikat tekshiruvi va filtrlash - Filiallar (ID bo'yicha)
-        const originalBranchesCount = branchesRaw.length;
-        const uniqueBranchesMap = new Map();
-        branchesRaw.forEach(branch => {
-            if (!uniqueBranchesMap.has(branch.id)) {
-                uniqueBranchesMap.set(branch.id, branch);
-            } else {
-                log.warn(`⚠️ [bindings/available] Filial dublikat topildi: ID=${branch.id}, Name=${branch.name}, BrandID=${branch.brand_id}`);
-            }
+        const uniqueBranches = removeDuplicatesById(branchesRaw, 'id', {
+            warnOnDuplicate: true,
+            context: 'bindings/available'
         });
-        const uniqueBranches = Array.from(uniqueBranchesMap.values());
         
-        if (originalBranchesCount !== uniqueBranches.length) {
-            log.warn(`⚠️ [bindings/available] Filiallar dublikatlari: Original=${originalBranchesCount}, Unique=${uniqueBranches.length}, Dublikatlar=${originalBranchesCount - uniqueBranches.length}`);
-        }
-        
-        // Dublikat tekshiruvi va filtrlash - SVR'lar (ID bo'yicha)
-        const originalSvrsCount = svrsRaw.length;
-        const uniqueSvrsMap = new Map();
-        svrsRaw.forEach(svr => {
-            if (!uniqueSvrsMap.has(svr.id)) {
-                uniqueSvrsMap.set(svr.id, svr);
-            } else {
-                log.warn(`⚠️ [bindings/available] SVR dublikat topildi: ID=${svr.id}, Name=${svr.name}, BrandID=${svr.brand_id}, BranchID=${svr.branch_id}`);
-            }
+        const uniqueSvrs = removeDuplicatesById(svrsRaw, 'id', {
+            warnOnDuplicate: true,
+            context: 'bindings/available'
         });
-        const uniqueSvrs = Array.from(uniqueSvrsMap.values());
-        
-        if (originalSvrsCount !== uniqueSvrs.length) {
-            log.warn(`⚠️ [bindings/available] SVR'lar dublikatlari: Original=${originalSvrsCount}, Unique=${uniqueSvrs.length}, Dublikatlar=${originalSvrsCount - uniqueSvrs.length}`);
-        }
         
         res.json({
             brands: uniqueBrands.map(b => ({ id: b.id, name: b.name })),

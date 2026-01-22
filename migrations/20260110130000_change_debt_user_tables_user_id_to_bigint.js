@@ -26,14 +26,14 @@ exports.up = async function(knex) {
             // Jadval mavjudligini tekshirish
             const hasTable = await knex.schema.hasTable(tableName);
             if (!hasTable) {
-                console.log(`Jadval ${tableName} topilmadi, o'tkazib yuborilmoqda...`);
+                // Production'da log qilmaymiz
                 continue;
             }
 
             // user_id ustuni mavjudligini tekshirish
             const hasUserIdColumn = await knex.schema.hasColumn(tableName, 'user_id');
             if (!hasUserIdColumn) {
-                console.log(`Jadval ${tableName} da user_id ustuni topilmadi, o'tkazib yuborilmoqda...`);
+                // Production'da log qilmaymiz
                 continue;
             }
 
@@ -43,9 +43,9 @@ exports.up = async function(knex) {
                 ALTER COLUMN user_id TYPE BIGINT USING user_id::BIGINT;
             `, [tableName]);
 
-            console.log(`✅ ${tableName}.user_id INTEGER dan BIGINT ga o'zgartirildi`);
+            // Production'da log qilmaymiz (migration'da ortiqcha loglar)
         } catch (error) {
-            console.warn(`❌ ${tableName}.user_id ni o'zgartirishda xatolik:`, error.message);
+            // Xatolikni e'tiborsiz qoldirish - migration'da ortiqcha loglar
             // Xatolikni e'tiborsiz qoldirish - constraint yoki boshqa muammo bo'lishi mumkin
         }
     }
@@ -88,9 +88,9 @@ exports.down = async function(knex) {
                 END;
             `, [tableName]);
 
-            console.log(`✅ ${tableName}.user_id BIGINT dan INTEGER ga qaytarildi`);
+            // Production'da log qilmaymiz (migration'da ortiqcha loglar)
         } catch (error) {
-            console.warn(`❌ ${tableName}.user_id ni qaytarishda xatolik:`, error.message);
+            // Xatolikni e'tiborsiz qoldirish - migration'da ortiqcha loglar
         }
     }
 };

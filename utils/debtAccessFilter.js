@@ -256,27 +256,13 @@ async function getAllowedDebtBranchesList(user, brandId = null) {
             branches = await query.select('id', 'name', 'brand_id').orderBy('name');
         }
         
-        // Dublikatlarni olib tashlash (ID bo'yicha)
-        const branchesMap = new Map();
-        const duplicateIds = [];
+        // Dublikatlarni olib tashlash (ID bo'yicha) - Utility funksiya ishlatiladi
+        const { removeDuplicatesById } = require('./arrayUtils.js');
         
-        branches.forEach(branch => {
-            if (!branchesMap.has(branch.id)) {
-                branchesMap.set(branch.id, branch);
-            } else {
-                duplicateIds.push(branch.id);
-                log.warn(`[DEBT_ACCESS_FILTER] ⚠️ Dublikat filial ID topildi: ID=${branch.id}, Name=${branch.name}, BrandID=${branch.brand_id}`);
-            }
+        const uniqueBranches = removeDuplicatesById(branches, 'id', {
+            warnOnDuplicate: true,
+            context: 'DEBT_ACCESS_FILTER'
         });
-        
-        const uniqueBranches = Array.from(branchesMap.values());
-        
-        if (duplicateIds.length > 0) {
-            log.warn(`[DEBT_ACCESS_FILTER] 🔴 Dublikat filiallar: Original=${branches.length}, Unique=${uniqueBranches.length}, Dublikatlar=${duplicateIds.length}`);
-            log.warn(`[DEBT_ACCESS_FILTER] 🔴 Dublikat ID'lar: ${[...new Set(duplicateIds)].join(', ')}`);
-        } else {
-            log.debug(`[DEBT_ACCESS_FILTER] ✅ Dublikatlar yo'q: ${uniqueBranches.length} ta filial`);
-        }
         
         return uniqueBranches;
     } catch (error) {

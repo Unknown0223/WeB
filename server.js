@@ -100,6 +100,9 @@ app.post('/telegram-webhook/:token', async (req, res) => {
 // Static files va session middleware (webhook'dan keyin)
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Production yoki development rejimini aniqlash (session store'dan oldin)
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production';
+
 // Sessiyani sozlash
 const session = require('express-session');
 const { isPostgres, isSqlite } = require('./db.js');
@@ -109,17 +112,24 @@ let sessionStore;
 if (isPostgres) {
     // PostgreSQL session store
     const PostgreSQLStore = require('connect-pg-simple')(session);
-    const config = require('./knexfile.js');
-    const env = process.env.NODE_ENV || 'development';
-    const dbConfig = config[env] || config.development;
     
-    // PostgreSQL connection string yoki object
+    // Railway.com'da DATABASE_URL mavjud bo'lsa, uni to'g'ridan-to'g'ri ishlatish
     let pgConnection;
-    if (typeof dbConfig.connection === 'string') {
-        pgConnection = dbConfig.connection;
+    if (process.env.DATABASE_URL) {
+        pgConnection = process.env.DATABASE_URL;
     } else {
-        const conn = dbConfig.connection;
-        pgConnection = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+        // Boshqa holatda knexfile.js dan config olish
+        const config = require('./knexfile.js');
+        const env = process.env.NODE_ENV || 'development';
+        const dbConfig = config[env] || config.development;
+        
+        // PostgreSQL connection string yoki object
+        if (typeof dbConfig.connection === 'string') {
+            pgConnection = dbConfig.connection;
+        } else {
+            const conn = dbConfig.connection;
+            pgConnection = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
+        }
     }
     
     sessionStore = new PostgreSQLStore({
@@ -128,7 +138,14 @@ if (isPostgres) {
         createTableIfMissing: true
     });
 } else {
-    // SQLite session store
+    // SQLite session store (faqat development uchun)
+    // Production'da (Railway, Render, Heroku) PostgreSQL ishlatiladi
+    if (isProduction) {
+        log.error('[SESSION] Production rejimida SQLite ishlatilmoqda! PostgreSQL sozlang.');
+        log.error('[SESSION] Railway.com uchun PostgreSQL service qo\'shing va DATABASE_URL ni sozlang.');
+        throw new Error('Production rejimida SQLite ishlatilmaydi. PostgreSQL sozlang.');
+    }
+    
     const SQLiteStore = require('connect-sqlite3')(session);
     sessionStore = new SQLiteStore({
         db: 'database.db',
@@ -136,9 +153,6 @@ if (isPostgres) {
         table: 'sessions'
     });
 }
-
-// Production yoki development rejimini aniqlash
-const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production';
 // Railway.com yoki boshqa cloud platformalar uchun HTTPS tekshiruvi
 const isSecure = isProduction || 
                  process.env.RAILWAY_PUBLIC_DOMAIN || 

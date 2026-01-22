@@ -6,6 +6,9 @@ const router = express.Router();
 const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
+const { createLogger } = require('../../utils/logger.js');
+
+const log = createLogger('EXCEL_TEMPLATE');
 
 /**
  * Excel shablon yuklab olish
@@ -45,11 +48,11 @@ router.get('/', async (req, res) => {
             }, 10000);
             
             if (err) {
-                console.error('Error sending file:', err);
+                log.error('Error sending file:', err);
             }
         });
     } catch (error) {
-        console.error('Error creating Excel template:', error);
+        log.error('Error creating Excel template:', error);
         res.status(500).json({ success: false, message: 'Xatolik yuz berdi' });
     }
 });

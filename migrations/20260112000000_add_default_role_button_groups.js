@@ -88,7 +88,7 @@ exports.up = async function(knex) {
         // Rol mavjudligini tekshirish
         const roleExists = await knex('roles').where('role_name', roleName).first();
         if (!roleExists) {
-            console.log(`⚠️  Rol "${roleName}" topilmadi, o'tkazib yuborilmoqda`);
+            // Production'da log qilmaymiz (faqat error loglar)
             continue;
         }
         
@@ -105,7 +105,7 @@ exports.up = async function(knex) {
             const buttonId = buttonKeyToId[buttonKey];
             
             if (!buttonId) {
-                console.log(`⚠️  Knopka "${buttonKey}" topilmadi, o'tkazib yuborilmoqda`);
+                // Production'da log qilmaymiz (faqat error loglar)
                 continue;
             }
             

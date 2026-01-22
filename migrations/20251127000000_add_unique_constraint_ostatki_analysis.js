@@ -41,7 +41,7 @@ exports.up = async function(knex) {
     }
     
     if (dupRows && dupRows.length > 0) {
-      console.log(`Topilgan duplicate guruhlar: ${dupRows.length} ta`);
+      // Production'da log qilmaymiz (faqat error loglar)
       
       for (const dup of dupRows) {
         const ids = (dup.ids || '').toString().split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id) && id > 0);
@@ -58,15 +58,14 @@ exports.up = async function(knex) {
               await knex('ostatki_analysis')
                 .whereIn('id', deleteIds)
                 .delete();
-              console.log(`  ✓ ${dup.smart_code || 'N/A'} - ${dup.filial || 'N/A'}: ${deleteIds.length} ta duplicate o'chirildi`);
+              // Production'da log qilmaymiz
             }
           }
         }
       }
     }
   } catch (err) {
-    console.warn('Duplicate tozalashda xatolik (ehtimol jadval bo\'sh):', err.message);
-    // Xatolik bo'lsa ham davom etish
+    // Xatolik bo'lsa ham davom etish (migration'da ortiqcha loglar)
   }
   
   // Endi unique constraint qo'shish

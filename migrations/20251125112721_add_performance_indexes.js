@@ -133,8 +133,7 @@ exports.down = async function(knex) {
         table.dropIndex('idx_sessions_expires');
       });
     } catch (err) {
-      // Index mavjud bo'lmasa, xato berilmasin
-      console.warn('Sessions indexes o\'chirishda xato:', err.message);
+      // Index mavjud bo'lmasa, xato berilmasin (log qilmaymiz)
     }
   }
 
