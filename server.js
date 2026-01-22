@@ -329,11 +329,16 @@ global.broadcastWebSocket = (type, payload) => {
 // Serverni ishga tushirish
 (async () => {
     try {
+        // Database initialization
         await initializeDB();
+        
+        // Startup operatsiyalarini ketma-ket qilish (connection pool to'lib qolmasligi uchun)
+        // Delay qo'shish connection'lar orasida
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // Buzilgan session'larni tozalash (server ishga tushganda)
         try {
-            const sessions = await db('sessions').select('sid', 'sess');
+            const sessions = await db('sessions').select('sid', 'sess').limit(1000); // Limit qo'shish
             let corruptedCount = 0;
             
             for (const session of sessions) {
@@ -363,51 +368,65 @@ global.broadcastWebSocket = (type, payload) => {
             log.warn('Buzilgan sessionlarni tozalashda xatolik:', cleanupError.message);
         }
         
+        // Delay qo'shish
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         // Vaqtinchalik fayllarni tozalash mexanizmini ishga tushirish
         // Har 1 soatda bir marta, 1 soatdan eski fayllarni o'chirish
         startCleanupInterval(1, 1);
         
-        // Orphaned yozuvlarni tozalash (server ishga tushganda)
-        try {
-            const existingUserIds = new Set();
-            const users = await db('users').select('id');
-            users.forEach(user => existingUserIds.add(user.id));
-            
-            const tablesToClean = [
-                { table: 'user_permissions', fkColumn: 'user_id' },
-                { table: 'user_locations', fkColumn: 'user_id' },
-                { table: 'user_brands', fkColumn: 'user_id' },
-                { table: 'reports', fkColumn: 'created_by' },
-                { table: 'report_history', fkColumn: 'changed_by' },
-                { table: 'audit_logs', fkColumn: 'user_id' },
-                { table: 'password_change_requests', fkColumn: 'user_id' },
-                { table: 'pivot_templates', fkColumn: 'created_by' },
-                { table: 'magic_links', fkColumn: 'user_id' },
-                { table: 'notifications', fkColumn: 'user_id' }
-            ];
-            
-            let totalDeleted = 0;
-            for (const { table, fkColumn } of tablesToClean) {
-                try {
-                    const hasTable = await db.schema.hasTable(table);
-                    if (hasTable) {
-                        const deleted = await db(table)
-                            .whereNotNull(fkColumn)
-                            .whereNotIn(fkColumn, Array.from(existingUserIds))
-                            .del();
-                        if (deleted > 0) {
-                            totalDeleted += deleted;
+        // Delay qo'shish
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Orphaned yozuvlarni tozalash (server ishga tushganda) - background'da
+        // Bu operatsiyani background'ga o'tkazish, server bloklamasligi uchun
+        setImmediate(async () => {
+            try {
+                const existingUserIds = new Set();
+                const users = await db('users').select('id');
+                users.forEach(user => existingUserIds.add(user.id));
+                
+                const tablesToClean = [
+                    { table: 'user_permissions', fkColumn: 'user_id' },
+                    { table: 'user_locations', fkColumn: 'user_id' },
+                    { table: 'user_brands', fkColumn: 'user_id' },
+                    { table: 'reports', fkColumn: 'created_by' },
+                    { table: 'report_history', fkColumn: 'changed_by' },
+                    { table: 'audit_logs', fkColumn: 'user_id' },
+                    { table: 'password_change_requests', fkColumn: 'user_id' },
+                    { table: 'pivot_templates', fkColumn: 'created_by' },
+                    { table: 'magic_links', fkColumn: 'user_id' },
+                    { table: 'notifications', fkColumn: 'user_id' }
+                ];
+                
+                let totalDeleted = 0;
+                for (const { table, fkColumn } of tablesToClean) {
+                    try {
+                        const hasTable = await db.schema.hasTable(table);
+                        if (hasTable) {
+                            const deleted = await db(table)
+                                .whereNotNull(fkColumn)
+                                .whereNotIn(fkColumn, Array.from(existingUserIds))
+                                .del();
+                            if (deleted > 0) {
+                                totalDeleted += deleted;
+                            }
                         }
+                        // Har bir jadvaldan keyin kichik delay
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    } catch (err) {
+                        // Jadval mavjud emas yoki xatolik - e'tiborsiz qoldirish
                     }
-                } catch (err) {
-                    // Jadval mavjud emas yoki xatolik - e'tiborsiz qoldirish
                 }
+                
+                // Cleanup to'liq bajarildi (log olib tashlandi)
+            } catch (cleanupError) {
+                log.error('[CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
             }
-            
-            // Cleanup to'liq bajarildi (log olib tashlandi)
-        } catch (cleanupError) {
-            log.error('[CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
-        }
+        });
+        
+        // Delay qo'shish
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         const { getSetting } = require('./utils/settingsCache.js');
         // Bot token: faqat telegram_bot_token ishlatiladi (bot bitta)

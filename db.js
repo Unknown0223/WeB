@@ -68,8 +68,8 @@ function getDbConfig() {
                 directory: path.resolve(__dirname, 'migrations')
             },
             pool: {
-                min: 2,
-                max: 15,
+                min: 1,
+                max: 10,
                 acquireTimeoutMillis: 60000,
                 idleTimeoutMillis: 30000,
                 createTimeoutMillis: 30000,
@@ -115,8 +115,8 @@ function getDbConfig() {
                     directory: path.resolve(__dirname, 'migrations')
                 },
                 pool: {
-                    min: 2,
-                    max: 15,
+                    min: 1,
+                    max: 10,
                     acquireTimeoutMillis: 60000,
                     idleTimeoutMillis: 30000,
                     createTimeoutMillis: 30000,
