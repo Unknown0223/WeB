@@ -281,15 +281,65 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
 };
 
 const initializeDB = async () => {
-    // Migration'larni bajarish - connection pool to'lib qolmasligi uchun timeout qo'shish
-    try {
-        log.info('[DB] Migrationlarni bajarish boshlandi...');
-        await db.migrate.latest();
-        log.info('[DB] Migrationlar muvaffaqiyatli bajarildi');
-    } catch (migrationError) {
-        log.error('[DB] Migration xatolik:', migrationError.message);
-        throw migrationError;
+    // Migration'larni bajarishdan oldin connection pool'ni tozalash
+    // Railway.com'da connection pool to'lib qolmasligi uchun
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Migration'larni bajarish - connection pool to'lib qolmasligi uchun retry mexanizmi bilan
+    let migrationRetries = 5;
+    let migrationLastError = null;
+    
+    while (migrationRetries > 0) {
+        try {
+            // Connection pool'ni test qilish
+            try {
+                await db.raw('SELECT 1');
+            } catch (testError) {
+                log.warn(`[DB] Connection test xatolik, ${1000}ms kutib qayta urinilmoqda...`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                migrationRetries--;
+                continue;
+            }
+            
+            log.info('[DB] Migrationlarni bajarish boshlandi...');
+            await db.migrate.latest();
+            log.info('[DB] Migrationlar muvaffaqiyatli bajarildi');
+            migrationRetries = 0;
+            break;
+        } catch (migrationError) {
+            migrationLastError = migrationError;
+            migrationRetries--;
+            
+            // Connection pool timeout yoki lock xatoliklari uchun retry
+            const isRetryableMigrationError = 
+                migrationError.message?.includes('Timeout acquiring a connection') ||
+                migrationError.message?.includes('pool is probably full') ||
+                migrationError.message?.includes('ECONNREFUSED') ||
+                migrationError.code === 'ECONNREFUSED';
+            
+            if (isRetryableMigrationError && migrationRetries > 0) {
+                // Exponential backoff - har safar kutish vaqti oshadi
+                const delay = Math.min(2000 * (6 - migrationRetries), 10000); // 2s, 4s, 6s, 8s, 10s
+                log.warn(`[DB] Migration retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${migrationRetries} qoldi)`);
+                log.warn(`[DB] Xatolik: ${migrationError.message}`);
+                
+                // Connection pool'ni tozalash uchun delay
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // Boshqa xatolik yoki retry'lar tugagan
+                log.error('[DB] Migration xatolik:', migrationError.message);
+                throw migrationError;
+            }
+        }
     }
+    
+    if (migrationLastError && migrationRetries === 0) {
+        log.error('[DB] Migration bajarishda barcha retry urinishlari tugadi');
+        throw migrationLastError;
+    }
+    
+    // Migration'lardan keyin connection pool'ni tozalash
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
     // YANGI LOGIKA: Faqat superadmin standart rol bo'ladi, boshqa rollar superadmin tomonidan yaratiladi
