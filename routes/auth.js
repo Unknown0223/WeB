@@ -400,6 +400,9 @@ router.post('/login', async (req, res) => {
 
         log.info(`[LOGIN] Parol to'g'ri. Data fetch boshlandi`);
 
+        // Superadmin uchun optimizatsiya - kamroq query
+        const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
+        
         // Barcha kerakli ma'lumotlarni parallel olish (optimizatsiya)
         // Retry mexanizmi bilan - connection pool timeout uchun
         let locations, rolePermissions, additionalPerms, restrictedPerms, existingSessions;
@@ -408,36 +411,47 @@ router.post('/login', async (req, res) => {
         while (dataRetries > 0) {
             try {
                 log.debug(`[LOGIN] Data fetch urinilmoqda... (${dataRetries} qoldi)`);
+                
+                // Superadmin uchun sessiya tekshiruvi o'tkazilmaydi
+                const queries = [
+                    userRepository.getLocationsByUserId(user.id),
+                    userRepository.getPermissionsByRole(user.role),
+                    db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
+                    db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key')
+                ];
+                
+                // Faqat superadmin bo'lmaganlar uchun sessiya query qo'shish
+                if (!isSuperAdmin) {
+                    queries.push(
+                        db('sessions')
+                            .select('sid', 'sess')
+                            .whereRaw(`sess LIKE ?`, [`%"id":${user.id}%`])
+                            .limit(100)
+                    );
+                } else {
+                    queries.push(Promise.resolve([]));
+                }
+                
                 [
                     locations,
                     rolePermissions,
                     additionalPerms,
                     restrictedPerms,
                     existingSessions
-                ] = await Promise.all([
-                    userRepository.getLocationsByUserId(user.id),
-                    userRepository.getPermissionsByRole(user.role),
-                    db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
-                    db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key'),
-                    // Sessiya limit tekshiruvi uchun faqat user'ning sessiyalarini olish (optimizatsiya)
-                    // PostgreSQL'da LIKE query, SQLite'da ham ishlaydi
-                    user.role !== 'super_admin' && user.role !== 'superadmin'
-                        ? db('sessions')
-                            .select('sid', 'sess')
-                            .whereRaw(`sess LIKE ?`, [`%"id":${user.id}%`])
-                            .limit(100) // Limit qo'shish - juda ko'p sessiya bo'lmasligi uchun
-                        : Promise.resolve([])
-                ]);
+                ] = await Promise.all(queries);
+                
                 log.info(`[LOGIN] Data fetch muvaffaqiyatli. Locations: ${locations?.length || 0}, Permissions: ${rolePermissions?.length || 0}, Sessions: ${existingSessions?.length || 0}`);
                 break; // Muvaffaqiyatli bo'lsa, loop'ni to'xtatish
             } catch (error) {
                 dataRetries--;
                 const isRetryableError = 
                     error.message?.includes('Timeout acquiring a connection') ||
-                    error.message?.includes('pool is probably full');
+                    error.message?.includes('pool is probably full') ||
+                    error.message?.includes('ECONNREFUSED') ||
+                    error.code === 'ECONNREFUSED';
             
                 if (isRetryableError && dataRetries > 0) {
-                    const delay = Math.min(500 * (4 - dataRetries), 2000); // 500ms, 1000ms, 1500ms
+                    const delay = Math.min(1000 * (4 - dataRetries), 3000); // 1s, 2s, 3s
                     log.warn(`[LOGIN] Data fetch retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${dataRetries} qoldi)`);
                     log.warn(`[LOGIN] Xatolik: ${error.message}`);
                     await new Promise(resolve => setTimeout(resolve, delay));
@@ -456,7 +470,7 @@ router.post('/login', async (req, res) => {
         // 2. Bir xil qurilma + turli brauzerlar = har bir brauzer uchun alohida sessiya (limit tekshiriladi)
         // 3. Turli qurilmalar = har bir qurilma uchun alohida sessiya (limit tekshiriladi)
         
-        if (user.role !== 'super_admin' && user.role !== 'superadmin') {
+        if (!isSuperAdmin) {
             // Foydalanuvchining barcha aktiv sessiyalarini olish
             const userSessions = existingSessions
                 .map(s => {
