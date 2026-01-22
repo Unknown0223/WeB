@@ -334,6 +334,7 @@ router.post('/login', async (req, res) => {
         }
 
         // Barcha kerakli ma'lumotlarni parallel olish (optimizatsiya)
+        // Session limit tekshiruvi uchun faqat user'ning sessiyalarini olish (optimizatsiya)
         const [
             locations,
             rolePermissions,
@@ -345,9 +346,13 @@ router.post('/login', async (req, res) => {
             userRepository.getPermissionsByRole(user.role),
             db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
             db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key'),
-            // Sessiya limit tekshiruvi uchun mavjud sessiyalarni olish (super admin uchun kerak emas)
-            user.role !== 'super_admin' 
-                ? db('sessions').select('sid', 'sess')
+            // Sessiya limit tekshiruvi uchun faqat user'ning sessiyalarini olish (optimizatsiya)
+            // PostgreSQL'da LIKE query, SQLite'da ham ishlaydi
+            user.role !== 'super_admin' && user.role !== 'superadmin'
+                ? db('sessions')
+                    .select('sid', 'sess')
+                    .whereRaw(`sess LIKE ?`, [`%"id":${user.id}%`])
+                    .limit(100) // Limit qo'shish - juda ko'p sessiya bo'lmasligi uchun
                 : Promise.resolve([])
         ]);
 
@@ -357,7 +362,7 @@ router.post('/login', async (req, res) => {
         // 2. Bir xil qurilma + turli brauzerlar = har bir brauzer uchun alohida sessiya (limit tekshiriladi)
         // 3. Turli qurilmalar = har bir qurilma uchun alohida sessiya (limit tekshiriladi)
         
-        if (user.role !== 'super_admin') {
+        if (user.role !== 'super_admin' && user.role !== 'superadmin') {
             // Foydalanuvchining barcha aktiv sessiyalarini olish
             const userSessions = existingSessions
                 .map(s => {
@@ -510,7 +515,7 @@ router.post('/login', async (req, res) => {
         // - Bot obunasini bekor qilgan
         // - Tizimdan chiqib ketgan
         // - Keyin qayta kirishga harakat qilgan
-        if (telegramEnabled && !isSuperAdmin && isActiveUser && (!isTelegramConnected || !hasTelegramChatId)) {
+        if (telegramEnabledBool && !isSuperAdmin && isActiveUser && (!isTelegramConnected || !hasTelegramChatId)) {
             // Bot obunasi yo'q - bot bog'lash sahifasiga redirect
             // Sessiya yaratiladi, lekin bot bog'languncha dashboard ochilmaydi
             req.session.user = {
