@@ -403,61 +403,76 @@ router.post('/login', async (req, res) => {
         // Superadmin uchun optimizatsiya - kamroq query
         const isSuperAdmin = user.role === 'superadmin' || user.role === 'super_admin';
         
-        // Barcha kerakli ma'lumotlarni parallel olish (optimizatsiya)
-        // Retry mexanizmi bilan - connection pool timeout uchun
+        // Superadmin uchun optimizatsiya - faqat kerakli ma'lumotlarni olish
         let locations, rolePermissions, additionalPerms, restrictedPerms, existingSessions;
-        let dataRetries = 3;
         
-        while (dataRetries > 0) {
+        if (isSuperAdmin) {
+            // Superadmin uchun minimal query - faqat permissions (cache'dan)
+            log.info(`[LOGIN] Superadmin uchun optimizatsiya - minimal query`);
+            const dataFetchStartTime = Date.now();
+            
             try {
-                log.debug(`[LOGIN] Data fetch urinilmoqda... (${dataRetries} qoldi)`);
+                // Superadmin uchun faqat permissions olish (cache'dan tez)
+                rolePermissions = await userRepository.getPermissionsByRole(user.role);
+                locations = []; // Superadmin uchun locations kerak emas
+                additionalPerms = [];
+                restrictedPerms = [];
+                existingSessions = []; // Superadmin uchun sessiya tekshiruvi o'tkazilmaydi
                 
-                // Superadmin uchun sessiya tekshiruvi o'tkazilmaydi
-                const queries = [
-                    userRepository.getLocationsByUserId(user.id),
-                    userRepository.getPermissionsByRole(user.role),
-                    db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
-                    db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key')
-                ];
-                
-                // Faqat superadmin bo'lmaganlar uchun sessiya query qo'shish
-                if (!isSuperAdmin) {
-                    queries.push(
+                const dataFetchDuration = Date.now() - dataFetchStartTime;
+                log.info(`[LOGIN] ✅ Superadmin data fetch muvaffaqiyatli (${dataFetchDuration}ms)`);
+            } catch (error) {
+                log.error(`[LOGIN] Superadmin data fetch xatolik:`, error.message);
+                throw error;
+            }
+        } else {
+            // Oddiy foydalanuvchilar uchun to'liq query
+            let dataRetries = 3;
+            
+            while (dataRetries > 0) {
+                try {
+                    log.debug(`[LOGIN] Data fetch urinilmoqda... (${dataRetries} qoldi)`);
+                    const dataFetchStartTime = Date.now();
+                    
+                    const queries = [
+                        userRepository.getLocationsByUserId(user.id),
+                        userRepository.getPermissionsByRole(user.role),
+                        db('user_permissions').where({ user_id: user.id, type: 'additional' }).pluck('permission_key'),
+                        db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key'),
                         db('sessions')
                             .select('sid', 'sess')
                             .whereRaw(`sess LIKE ?`, [`%"id":${user.id}%`])
                             .limit(100)
-                    );
-                } else {
-                    queries.push(Promise.resolve([]));
-                }
+                    ];
+                    
+                    [
+                        locations,
+                        rolePermissions,
+                        additionalPerms,
+                        restrictedPerms,
+                        existingSessions
+                    ] = await Promise.all(queries);
+                    
+                    const dataFetchDuration = Date.now() - dataFetchStartTime;
+                    log.info(`[LOGIN] Data fetch muvaffaqiyatli (${dataFetchDuration}ms). Locations: ${locations?.length || 0}, Permissions: ${rolePermissions?.length || 0}, Sessions: ${existingSessions?.length || 0}`);
+                    break; // Muvaffaqiyatli bo'lsa, loop'ni to'xtatish
+                } catch (error) {
+                    dataRetries--;
+                    const isRetryableError = 
+                        error.message?.includes('Timeout acquiring a connection') ||
+                        error.message?.includes('pool is probably full') ||
+                        error.message?.includes('ECONNREFUSED') ||
+                        error.code === 'ECONNREFUSED';
                 
-                [
-                    locations,
-                    rolePermissions,
-                    additionalPerms,
-                    restrictedPerms,
-                    existingSessions
-                ] = await Promise.all(queries);
-                
-                log.info(`[LOGIN] Data fetch muvaffaqiyatli. Locations: ${locations?.length || 0}, Permissions: ${rolePermissions?.length || 0}, Sessions: ${existingSessions?.length || 0}`);
-                break; // Muvaffaqiyatli bo'lsa, loop'ni to'xtatish
-            } catch (error) {
-                dataRetries--;
-                const isRetryableError = 
-                    error.message?.includes('Timeout acquiring a connection') ||
-                    error.message?.includes('pool is probably full') ||
-                    error.message?.includes('ECONNREFUSED') ||
-                    error.code === 'ECONNREFUSED';
-            
-                if (isRetryableError && dataRetries > 0) {
-                    const delay = Math.min(1000 * (4 - dataRetries), 3000); // 1s, 2s, 3s
-                    log.warn(`[LOGIN] Data fetch retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${dataRetries} qoldi)`);
-                    log.warn(`[LOGIN] Xatolik: ${error.message}`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                } else {
-                    log.error(`[LOGIN] Data fetch xatolik:`, error.message);
-                    throw error;
+                    if (isRetryableError && dataRetries > 0) {
+                        const delay = Math.min(1000 * (4 - dataRetries), 3000); // 1s, 2s, 3s
+                        log.warn(`[LOGIN] Data fetch retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${dataRetries} qoldi)`);
+                        log.warn(`[LOGIN] Xatolik: ${error.message}`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } else {
+                        log.error(`[LOGIN] Data fetch xatolik:`, error.message);
+                        throw error;
+                    }
                 }
             }
         }
@@ -555,6 +570,7 @@ router.post('/login', async (req, res) => {
         finalPermissions = finalPermissions.filter(perm => !restrictedPerms.includes(perm));
 
         log.info(`[LOGIN] Sessiya yaratish boshlandi`);
+        const sessionStartTime = Date.now();
 
         req.session.user = {
             id: user.id,
@@ -568,7 +584,20 @@ router.post('/login', async (req, res) => {
         req.session.user_agent = userAgent;
         req.session.last_activity = Date.now();
         
-        log.info(`[LOGIN] Sessiya yaratildi. Session ID: ${req.sessionID}`);
+        // Session save'ni kutish - muhim!
+        await new Promise((resolve, reject) => {
+            req.session.save((err) => {
+                if (err) {
+                    log.error(`[LOGIN] Session save xatolik:`, err.message);
+                    reject(err);
+                } else {
+                    const sessionDuration = Date.now() - sessionStartTime;
+                    log.info(`[LOGIN] ✅ Sessiya yaratildi va saqlandi (${sessionDuration}ms)`);
+                    log.info(`[LOGIN] Session ID: ${req.sessionID}`);
+                    resolve();
+                }
+            });
+        });
         
         // Online statusni real-time yangilash
         if (global.broadcastWebSocket) {
@@ -1126,101 +1155,105 @@ router.post('/reset-password-request', async (req, res) => {
     }
     
     try {
-        // Foydalanuvchini topish
-        const user = await db('users').where({ username }).first();
-        
-        if (!user) {
-            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
-        }
-        
-        // Maxfiy so'zni tekshirish
-        if (!user.secret_word) {
-            return res.status(400).json({ message: "Maxfiy so'z o'rnatilmagan." });
-        }
-        
-        const isSecretValid = await bcrypt.compare(secretWord, user.secret_word);
-        if (!isSecretValid) {
-            return res.status(401).json({ message: "Maxfiy so'z noto'g'ri." });
-        }
-        
-        // Yangi parolni hash qilish
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-        
-        // Eski pending so'rovlarni rejected qilish (bir foydalanuvchidan faqat eng yangi so'rov pending bo'lishi kerak)
-        log.info(`[RESET-PASSWORD] Eski pending so'rovlar tekshirilmoqda. User ID: ${user.id}`);
-        const oldPendingRequests = await db('password_change_requests')
-            .where({ user_id: user.id, status: 'pending' })
-            .select('id');
-        
-        if (oldPendingRequests.length > 0) {
-            log.info(`[RESET-PASSWORD] ${oldPendingRequests.length} ta eski pending so'rov topildi, rejected qilinmoqda...`);
-            await db('password_change_requests')
-                .whereIn('id', oldPendingRequests.map(r => r.id))
-                .update({
-                    status: 'rejected',
-                    admin_comment: 'Yangi so\'rov yuborilgani uchun avtomatik rad etildi',
-                    processed_at: db.fn.now()
-                });
-            log.info(`[RESET-PASSWORD] ✅ ${oldPendingRequests.length} ta eski so'rov rejected qilindi`);
-        }
-        
-        // So'rovni saqlash
-        log.info(`[RESET-PASSWORD] So'rov yuborilmoqda. Username: ${username}, User ID: ${user.id}`);
-        
+        // Transaction ichida barcha database operatsiyalarini bajarish
+        // Bu connection pool'ni to'ldirib qo'yishni oldini oladi
         const { isPostgres, isSqlite } = require('../db.js');
         let requestId = null;
+        let user = null;
         
-        log.info(`[RESET-PASSWORD] Database type: ${isPostgres ? 'PostgreSQL' : isSqlite ? 'SQLite' : 'Unknown'}`);
-        
-        if (isPostgres) {
-            // PostgreSQL uchun returning('id') ishlatish
-            const insertResult = await db('password_change_requests').insert({
-                user_id: user.id,
-                new_password_hash: hashedPassword,
-                status: 'pending',
-                requested_at: db.fn.now(),
-                ip_address: req.ip || req.connection.remoteAddress,
-                user_agent: req.get('user-agent') || 'Unknown'
-            }).returning('id');
+        await db.transaction(async (trx) => {
+            // Foydalanuvchini topish
+            user = await trx('users').where({ username }).first();
             
-            log.info(`[RESET-PASSWORD] PostgreSQL insert result:`, JSON.stringify(insertResult));
-            
-            if (Array.isArray(insertResult) && insertResult.length > 0) {
-                requestId = insertResult[0]?.id || insertResult[0];
-                log.info(`[RESET-PASSWORD] PostgreSQL requestId extracted: ${requestId}`);
-            } else if (insertResult && insertResult.id) {
-                requestId = insertResult.id;
-                log.info(`[RESET-PASSWORD] PostgreSQL requestId from object: ${requestId}`);
+            if (!user) {
+                throw new Error('USER_NOT_FOUND');
             }
-        } else {
-            // SQLite uchun odatiy insert
-            const insertResult = await db('password_change_requests').insert({
-                user_id: user.id,
-                new_password_hash: hashedPassword,
-                status: 'pending',
-                requested_at: db.fn.now(),
-                ip_address: req.ip || req.connection.remoteAddress,
-                user_agent: req.get('user-agent') || 'Unknown'
-            });
             
-            log.info(`[RESET-PASSWORD] SQLite insert result:`, JSON.stringify(insertResult));
-            
-            if (Array.isArray(insertResult) && insertResult.length > 0) {
-                requestId = insertResult[0];
-                log.info(`[RESET-PASSWORD] SQLite requestId extracted: ${requestId}`);
-            } else if (insertResult) {
-                requestId = insertResult;
-                log.info(`[RESET-PASSWORD] SQLite requestId from direct value: ${requestId}`);
+            // Maxfiy so'zni tekshirish
+            if (!user.secret_word) {
+                throw new Error('SECRET_WORD_NOT_SET');
             }
-        }
+            
+            const isSecretValid = await bcrypt.compare(secretWord, user.secret_word);
+            if (!isSecretValid) {
+                throw new Error('INVALID_SECRET_WORD');
+            }
+            
+            // Yangi parolni hash qilish
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            
+            // Eski pending so'rovlarni rejected qilish (bir foydalanuvchidan faqat eng yangi so'rov pending bo'lishi kerak)
+            log.info(`[RESET-PASSWORD] Eski pending so'rovlar tekshirilmoqda. User ID: ${user.id}`);
+            const oldPendingRequests = await trx('password_change_requests')
+                .where({ user_id: user.id, status: 'pending' })
+                .select('id');
+            
+            if (oldPendingRequests.length > 0) {
+                log.info(`[RESET-PASSWORD] ${oldPendingRequests.length} ta eski pending so'rov topildi, rejected qilinmoqda...`);
+                await trx('password_change_requests')
+                    .whereIn('id', oldPendingRequests.map(r => r.id))
+                    .update({
+                        status: 'rejected',
+                        admin_comment: 'Yangi so\'rov yuborilgani uchun avtomatik rad etildi',
+                        processed_at: trx.fn.now()
+                    });
+                log.info(`[RESET-PASSWORD] ✅ ${oldPendingRequests.length} ta eski so'rov rejected qilindi`);
+            }
+            
+            // So'rovni saqlash
+            log.info(`[RESET-PASSWORD] So'rov yuborilmoqda. Username: ${username}, User ID: ${user.id}`);
+            log.info(`[RESET-PASSWORD] Database type: ${isPostgres ? 'PostgreSQL' : isSqlite ? 'SQLite' : 'Unknown'}`);
+            
+            if (isPostgres) {
+                // PostgreSQL uchun returning('id') ishlatish
+                const insertResult = await trx('password_change_requests').insert({
+                    user_id: user.id,
+                    new_password_hash: hashedPassword,
+                    status: 'pending',
+                    requested_at: trx.fn.now(),
+                    ip_address: req.ip || req.connection.remoteAddress,
+                    user_agent: req.get('user-agent') || 'Unknown'
+                }).returning('id');
+                
+                log.info(`[RESET-PASSWORD] PostgreSQL insert result:`, JSON.stringify(insertResult));
+                
+                if (Array.isArray(insertResult) && insertResult.length > 0) {
+                    requestId = insertResult[0]?.id || insertResult[0];
+                    log.info(`[RESET-PASSWORD] PostgreSQL requestId extracted: ${requestId}`);
+                } else if (insertResult && insertResult.id) {
+                    requestId = insertResult.id;
+                    log.info(`[RESET-PASSWORD] PostgreSQL requestId from object: ${requestId}`);
+                }
+            } else {
+                // SQLite uchun odatiy insert
+                const insertResult = await trx('password_change_requests').insert({
+                    user_id: user.id,
+                    new_password_hash: hashedPassword,
+                    status: 'pending',
+                    requested_at: trx.fn.now(),
+                    ip_address: req.ip || req.connection.remoteAddress,
+                    user_agent: req.get('user-agent') || 'Unknown'
+                });
+                
+                log.info(`[RESET-PASSWORD] SQLite insert result:`, JSON.stringify(insertResult));
+                
+                if (Array.isArray(insertResult) && insertResult.length > 0) {
+                    requestId = insertResult[0];
+                    log.info(`[RESET-PASSWORD] SQLite requestId extracted: ${requestId}`);
+                } else if (insertResult) {
+                    requestId = insertResult;
+                    log.info(`[RESET-PASSWORD] SQLite requestId from direct value: ${requestId}`);
+                }
+            }
+            
+            log.info(`[RESET-PASSWORD] So'rov bazaga saqlandi. Insert ID: ${requestId || 'N/A'}`);
+            
+            if (!requestId) {
+                log.error(`[RESET-PASSWORD] ⚠️ Request ID olinmadi! Insert result to'g'ri parse qilinmadi.`);
+            }
+        });
         
-        log.info(`[RESET-PASSWORD] So'rov bazaga saqlandi. Insert ID: ${requestId || 'N/A'}`);
-        
-        if (!requestId) {
-            log.error(`[RESET-PASSWORD] ⚠️ Request ID olinmadi! Insert result to'g'ri parse qilinmadi.`);
-        }
-        
-        // Adminlarni xabardor qilish
+        // Transaction'dan keyin adminlarni topish (alohida query, lekin connection tezda release qilinadi)
         // Superadmin'larni qo'shish
         const superAdmins = await db('users')
             .whereIn('role', ['superadmin', 'super_admin'])
@@ -1322,6 +1355,17 @@ router.post('/reset-password-request', async (req, res) => {
             success: true 
         });
     } catch (error) {
+        // Transaction ichida xatolik bo'lsa, uni to'g'ri handle qilish
+        if (error.message === 'USER_NOT_FOUND') {
+            return res.status(404).json({ message: "Foydalanuvchi topilmadi." });
+        }
+        if (error.message === 'SECRET_WORD_NOT_SET') {
+            return res.status(400).json({ message: "Maxfiy so'z o'rnatilmagan." });
+        }
+        if (error.message === 'INVALID_SECRET_WORD') {
+            return res.status(401).json({ message: "Maxfiy so'z noto'g'ri." });
+        }
+        
         log.error("Parol tiklash so'rovi xatoligi:", error.message);
         res.status(500).json({ message: "So'rov yuborishda xatolik yuz berdi." });
     }
