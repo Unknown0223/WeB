@@ -310,7 +310,12 @@ router.post('/login', async (req, res) => {
         try {
             log.debug(`[LOGIN] User'ni topishga urinilmoqda... (${userRetries} qoldi)`);
             user = await userRepository.findByUsername(trimmedUsername);
-            log.info(`[LOGIN] User topildi. User ID: ${user?.id}, Status: ${user?.status}, Role: ${user?.role}`);
+            const userFindDuration = Date.now() - userFindStartTime;
+            if (user) {
+                log.info(`[LOGIN] ✅ User topildi (${userFindDuration}ms). User ID: ${user?.id}, Status: ${user?.status}, Role: ${user?.role}`);
+            } else {
+                log.warn(`[LOGIN] ⚠️ User topilmadi (${userFindDuration}ms)`);
+            }
             break;
         } catch (error) {
             userRetries--;
@@ -320,10 +325,12 @@ router.post('/login', async (req, res) => {
         
             if (isRetryableError && userRetries > 0) {
                 const delay = Math.min(500 * (4 - userRetries), 2000); // 500ms, 1000ms, 1500ms
-                log.warn(`[LOGIN] User'ni topishda retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${userRetries} qoldi)`);
+                log.warn(`[LOGIN] ⚠️ User'ni topishda retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${userRetries} qoldi)`);
+                log.warn(`[LOGIN] Xatolik: ${error.message}`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
-                log.error(`[LOGIN] User'ni topishda xatolik:`, error.message);
+                const userFindDuration = Date.now() - userFindStartTime;
+                log.error(`[LOGIN] ❌ User'ni topishda xatolik (${userFindDuration}ms):`, error.message);
                 throw error;
             }
         }

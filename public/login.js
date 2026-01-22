@@ -249,9 +249,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Abort controller for request cancellation
         const abortController = new AbortController();
         const timeoutAbort = setTimeout(() => {
-            logClient.warn('[SUBMIT] ⚠️ 30 soniya timeout - request abort qilindi');
+            logClient.warn('[SUBMIT] ⚠️ 60 soniya timeout - request abort qilindi');
             abortController.abort();
-        }, 30000); // 30 soniya timeout
+        }, 60000); // 60 soniya timeout (30 dan oshirildi)
 
         try {
             const startTime = Date.now();
