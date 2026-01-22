@@ -265,10 +265,27 @@ app.get('/health', (req, res) => {
 
 // --- Sahifalarni ko'rsatish (HTML Routing) ---
 app.get('/login', (req, res) => {
+    const loginPageStartTime = Date.now();
+    log.info('[ROUTE] ═══════════════════════════════════════════════════════════');
+    log.info('[ROUTE] 📄 LOGIN PAGE REQUEST');
+    log.info(`[ROUTE] 📅 Vaqt: ${new Date().toISOString()}`);
+    log.info(`[ROUTE] 🌐 IP: ${req.headers['x-forwarded-for'] || req.socket.remoteAddress}`);
+    log.info(`[ROUTE] 👤 User Agent: ${req.headers['user-agent']}`);
+    log.info(`[ROUTE] 🔐 Session mavjud: ${!!req.session.user}`);
+    
     if (req.session.user) {
+        log.info(`[ROUTE] ✅ User allaqachon login qilgan, redirect: /`);
+        log.info(`[ROUTE] 👤 User ID: ${req.session.user.id}, Username: ${req.session.user.username}`);
         res.redirect('/');
     } else {
+        log.info('[ROUTE] Login sahifasi yuborilmoqda...');
+        const sendStartTime = Date.now();
         res.sendFile(path.join(__dirname, 'public', 'login.html'));
+        const sendDuration = Date.now() - sendStartTime;
+        const totalDuration = Date.now() - loginPageStartTime;
+        log.info(`[ROUTE] ✅ Login sahifasi yuborildi (${sendDuration}ms)`);
+        log.info(`[ROUTE] ⏱️  Jami vaqt: ${totalDuration}ms`);
+        log.info('[ROUTE] ═══════════════════════════════════════════════════════════');
     }
 });
 

@@ -692,6 +692,7 @@ router.post('/login', async (req, res) => {
         
         const duration = Date.now() - startTime;
         log.info(`[LOGIN] Login muvaffaqiyatli tugadi. Username: ${username}, Duration: ${duration}ms, Redirect: ${redirectUrl}`);
+        log.info(`[LOGIN] Response yuborilmoqda...`);
         
         // Background'da log yozish (javobni kutmaslik)
         logAction(user.id, 'login_success', 'user', user.id, { ip: ipAddress, userAgent }).catch(() => {});
@@ -705,13 +706,30 @@ router.post('/login', async (req, res) => {
             });
         }
         
+        const responseStartTime = Date.now();
         res.json({ message: "Tizimga muvaffaqiyatli kirildi.", user: req.session.user, redirectUrl });
+        const responseDuration = Date.now() - responseStartTime;
+        log.info(`[LOGIN] ✅ Response yuborildi (${responseDuration}ms)`);
+        log.info('═══════════════════════════════════════════════════════════');
+        log.info(`✅ LOGIN ENDPOINT MUVAFFAQIYATLI TUGADI`);
+        log.info(`⏱️  Jami vaqt: ${duration}ms`);
+        log.info('═══════════════════════════════════════════════════════════');
 
     } catch (error) {
         const duration = Date.now() - startTime;
-        log.error(`[LOGIN] Login xatoligi. Username: ${username}, Duration: ${duration}ms`, error.message);
-        log.error(`[LOGIN] Error stack:`, error.stack);
+        log.error('═══════════════════════════════════════════════════════════');
+        log.error('❌ LOGIN ENDPOINT XATOLIK');
+        log.error(`⏱️  Vaqt: ${duration}ms`);
+        log.error(`👤 Username: ${username}`);
+        log.error(`📝 Xatolik turi: ${error.name || 'Unknown'}`);
+        log.error(`📝 Xatolik xabari: ${error.message || 'No message'}`);
+        log.error(`📚 Stack trace:`, error.stack);
+        log.error('═══════════════════════════════════════════════════════════');
+        
+        const responseStartTime = Date.now();
         res.status(500).json({ message: "Serverda kutilmagan xatolik yuz berdi." });
+        const responseDuration = Date.now() - responseStartTime;
+        log.error(`[LOGIN] ❌ Error response yuborildi (${responseDuration}ms)`);
     }
 });
 
