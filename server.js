@@ -399,11 +399,22 @@ global.broadcastWebSocket = (type, payload) => {
 
 // Serverni ishga tushirish
 (async () => {
+    const serverStartTime = Date.now();
+    log.info('═══════════════════════════════════════════════════════════');
+    log.info('🚀 SERVER INITIALIZATION BOSHLANDI');
+    log.info(`📅 Vaqt: ${new Date().toISOString()}`);
+    log.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    log.info(`🔧 Railway Environment: ${process.env.RAILWAY_ENVIRONMENT || 'NO'}`);
+    log.info(`🔌 Port: ${PORT}`);
+    log.info(`🌐 APP_BASE_URL: ${process.env.APP_BASE_URL || 'NOT SET'}`);
+    log.info('═══════════════════════════════════════════════════════════');
+    
     try {
         // Server'ni darhol listen qilish (healthcheck uchun)
         // Initialization background'da davom etadi
         server.listen(PORT, '0.0.0.0', () => {
-            log.info(`✅ Server ${PORT} portida ishga tushdi`);
+            const listenDuration = Date.now() - serverStartTime;
+            log.info(`✅ Server ${PORT} portida ishga tushdi (${listenDuration}ms)`);
             log.info(`🌐 Healthcheck: http://0.0.0.0:${PORT}/health`);
             
             // PM2 uchun ready signal
@@ -413,14 +424,21 @@ global.broadcastWebSocket = (type, payload) => {
         });
         
         // Database initialization (background'da)
+        log.info('[INIT] Database initialization boshlandi...');
+        const dbInitStartTime = Date.now();
         try {
             await initializeDB();
+            const dbInitDuration = Date.now() - dbInitStartTime;
+            log.info(`[INIT] ✅ Database initialization muvaffaqiyatli tugadi (${dbInitDuration}ms)`);
             
             // Startup operatsiyalarini ketma-ket qilish (connection pool to'lib qolmasligi uchun)
             // Delay qo'shish connection'lar orasida
+            log.info('[INIT] Startup operatsiyalari boshlandi...');
             await new Promise(resolve => setTimeout(resolve, 500));
         
             // Buzilgan session'larni tozalash (server ishga tushganda)
+            log.info('[INIT] Buzilgan session'larni tozalash boshlandi...');
+            const sessionCleanupStartTime = Date.now();
             try {
                 const sessions = await db('sessions').select('sid', 'sess').limit(1000); // Limit qo'shish
                 let corruptedCount = 0;
@@ -445,30 +463,38 @@ global.broadcastWebSocket = (type, payload) => {
                     }
                 }
                 
+                const sessionCleanupDuration = Date.now() - sessionCleanupStartTime;
                 if (corruptedCount > 0) {
-                    log.info(`✅ ${corruptedCount} ta buzilgan sessiya tozalandi.`);
+                    log.info(`[INIT] ✅ ${corruptedCount} ta buzilgan sessiya tozalandi (${sessionCleanupDuration}ms)`);
+                } else {
+                    log.info(`[INIT] ✅ Session cleanup tugadi, buzilgan sessiya topilmadi (${sessionCleanupDuration}ms)`);
                 }
             } catch (cleanupError) {
-                log.warn('Buzilgan sessionlarni tozalashda xatolik:', cleanupError.message);
+                log.warn('[INIT] ⚠️ Buzilgan sessionlarni tozalashda xatolik:', cleanupError.message);
             }
             
             // Delay qo'shish
             await new Promise(resolve => setTimeout(resolve, 500));
             
             // Vaqtinchalik fayllarni tozalash mexanizmini ishga tushirish
+            log.info('[INIT] Vaqtinchalik fayllarni tozalash mexanizmi ishga tushirilmoqda...');
             // Har 1 soatda bir marta, 1 soatdan eski fayllarni o'chirish
             startCleanupInterval(1, 1);
+            log.info('[INIT] ✅ Vaqtinchalik fayllarni tozalash mexanizmi ishga tushirildi');
             
             // Delay qo'shish
             await new Promise(resolve => setTimeout(resolve, 500));
             
             // Orphaned yozuvlarni tozalash (server ishga tushganda) - background'da
+            log.info('[INIT] Orphaned yozuvlarni tozalash background\'da boshlandi...');
             // Bu operatsiyani background'ga o'tkazish, server bloklamasligi uchun
             setImmediate(async () => {
+                const orphanCleanupStartTime = Date.now();
                 try {
                     const existingUserIds = new Set();
                     const users = await db('users').select('id');
                     users.forEach(user => existingUserIds.add(user.id));
+                    log.info(`[INIT] [CLEANUP] ${existingUserIds.size} ta foydalanuvchi topildi`);
                     
                     const tablesToClean = [
                         { table: 'user_permissions', fkColumn: 'user_id' },
@@ -494,6 +520,7 @@ global.broadcastWebSocket = (type, payload) => {
                                     .del();
                                 if (deleted > 0) {
                                     totalDeleted += deleted;
+                                    log.info(`[INIT] [CLEANUP] ${table} jadvalidan ${deleted} ta orphaned yozuv o'chirildi`);
                                 }
                             }
                             // Har bir jadvaldan keyin kichik delay
@@ -503,19 +530,29 @@ global.broadcastWebSocket = (type, payload) => {
                         }
                     }
                     
-                    // Cleanup to'liq bajarildi (log olib tashlandi)
+                    const orphanCleanupDuration = Date.now() - orphanCleanupStartTime;
+                    if (totalDeleted > 0) {
+                        log.info(`[INIT] [CLEANUP] ✅ Jami ${totalDeleted} ta orphaned yozuv o'chirildi (${orphanCleanupDuration}ms)`);
+                    } else {
+                        log.info(`[INIT] [CLEANUP] ✅ Orphaned yozuvlar topilmadi (${orphanCleanupDuration}ms)`);
+                    }
                 } catch (cleanupError) {
-                    log.error('[CLEANUP] Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
+                    log.error('[INIT] [CLEANUP] ❌ Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
                 }
             });
             
             // Delay qo'shish
             await new Promise(resolve => setTimeout(resolve, 500));
             
+            // Bot initialization
+            log.info('[INIT] Bot initialization boshlandi...');
+            const botInitStartTime = Date.now();
             const { getSetting } = require('./utils/settingsCache.js');
             // Bot token: faqat telegram_bot_token ishlatiladi (bot bitta)
             const botToken = await getSetting('telegram_bot_token', null);
             const telegramEnabled = await getSetting('telegram_enabled', 'false');
+            
+            log.info(`[INIT] Bot token mavjud: ${!!botToken}, Telegram enabled: ${telegramEnabled}`);
 
             // Bot token mavjud bo'lsa, bot'ni ishga tushirish
             // telegram_enabled sozlamasiga bog'liq emas, chunki debt_bot_token alohida bot uchun
@@ -529,57 +566,92 @@ global.broadcastWebSocket = (type, payload) => {
                         const webhookUrl = `${appBaseUrl}/telegram-webhook/${botToken}`;
                         const telegramApiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
                         
+                        log.info(`[INIT] [BOT] Webhook URL: ${webhookUrl}`);
+                        
                         try {
                             // Avval eski webhookni o'chirish (agar mavjud bo'lsa)
                             try {
                                 await axios.post(`${telegramApiUrl}`, { url: '' });
+                                log.info('[INIT] [BOT] Eski webhook o'chirildi');
                             } catch (deleteError) {
                                 // Xatolik bo'lsa ham davom etamiz
+                                log.debug('[INIT] [BOT] Eski webhook o'chirishda xatolik (e\'tiborsiz qoldirildi)');
                             }
                             
                             // Yangi webhookni o'rnatish
+                            log.info('[INIT] [BOT] Yangi webhook o\'rnatilmoqda...');
                             const response = await axios.post(telegramApiUrl, { 
                                 url: webhookUrl,
                                 allowed_updates: ['message', 'callback_query', 'my_chat_member']
                             });
                             
                             if (response.data.ok) {
+                                log.info('[INIT] [BOT] ✅ Webhook muvaffaqiyatli o\'rnatildi');
                                 // Webhook rejimida botni ishga tushirish
                                 await initializeBot(botToken, { polling: false });
+                                const botInitDuration = Date.now() - botInitStartTime;
+                                log.info(`[INIT] [BOT] ✅ Bot webhook rejimida ishga tushirildi (${botInitDuration}ms)`);
                             } else {
-                                botLog.error('[INIT] Telegram webhookni o\'rnatishda xatolik:', response.data.description);
+                                botLog.error('[INIT] [BOT] ❌ Telegram webhookni o\'rnatishda xatolik:', response.data.description);
                                 
                                 // Fallback: polling rejimi (faqat development uchun)
                                 if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
+                                    log.info('[INIT] [BOT] Fallback: polling rejimi ishga tushirilmoqda...');
                                     await initializeBot(botToken, { polling: true });
+                                    const botInitDuration = Date.now() - botInitStartTime;
+                                    log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi (${botInitDuration}ms)`);
                                 }
                             }
                         } catch (error) {
-                            botLog.error('[INIT] Telegram API\'ga ulanishda xatolik:', error.message);
+                            botLog.error('[INIT] [BOT] ❌ Telegram API\'ga ulanishda xatolik:', error.message);
                             
                             // Fallback: polling rejimi (faqat development uchun)
                             if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
+                                log.info('[INIT] [BOT] Fallback: polling rejimi ishga tushirilmoqda...');
                                 await initializeBot(botToken, { polling: true });
+                                const botInitDuration = Date.now() - botInitStartTime;
+                                log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi (${botInitDuration}ms)`);
                             }
                         }
                     } else {
                         // Lokal yoki webhook sozlanmagan - polling rejimi (faqat development uchun)
+                        log.info('[INIT] [BOT] Lokal environment - polling rejimi ishga tushirilmoqda...');
                         await initializeBot(botToken, { polling: true });
+                        const botInitDuration = Date.now() - botInitStartTime;
+                        log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi (${botInitDuration}ms)`);
                     }
                 })(); // Async IIFE - bot initialization server bloklamaydi
+            } else {
+                log.info('[INIT] [BOT] Bot token topilmadi, bot ishga tushirilmadi');
             }
             
             // Server initialization muvaffaqiyatli tugadi
             serverInitialized = true;
-            log.info('✅ Server initialization muvaffaqiyatli tugadi');
+            const totalInitDuration = Date.now() - serverStartTime;
+            log.info('═══════════════════════════════════════════════════════════');
+            log.info(`✅ SERVER INITIALIZATION MUVAFFAQIYATLI TUGADI`);
+            log.info(`⏱️  Jami vaqt: ${totalInitDuration}ms`);
+            log.info('═══════════════════════════════════════════════════════════');
         } catch (initError) {
             serverInitError = initError;
-            log.error('❌ Server initialization xatolik:', initError.message);
+            const totalInitDuration = Date.now() - serverStartTime;
+            log.error('═══════════════════════════════════════════════════════════');
+            log.error('❌ SERVER INITIALIZATION XATOLIK');
+            log.error(`⏱️  Vaqt: ${totalInitDuration}ms`);
+            log.error(`📝 Xatolik: ${initError.message}`);
+            log.error(`📚 Stack: ${initError.stack}`);
+            log.error('═══════════════════════════════════════════════════════════');
             // Xatolik bo'lsa ham server ishlaydi, lekin ba'zi funksiyalar ishlamasligi mumkin
         }
     } catch (err) {
         serverInitError = err;
-        log.error('Serverni ishga tushirishda xatolik:', err.message);
+        const totalInitDuration = Date.now() - serverStartTime;
+        log.error('═══════════════════════════════════════════════════════════');
+        log.error('❌ SERVER STARTUP XATOLIK');
+        log.error(`⏱️  Vaqt: ${totalInitDuration}ms`);
+        log.error(`📝 Xatolik: ${err.message}`);
+        log.error(`📚 Stack: ${err.stack}`);
+        log.error('═══════════════════════════════════════════════════════════');
         // Xatolik bo'lsa ham server ishlaydi, lekin ba'zi funksiyalar ishlamasligi mumkin
     }
 })();

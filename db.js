@@ -281,29 +281,44 @@ const logAction = async (userId, action, targetType = null, targetId = null, det
 };
 
 const initializeDB = async () => {
+    const initStartTime = Date.now();
+    log.info('[DB] ═══════════════════════════════════════════════════════════');
+    log.info('[DB] 🗄️  DATABASE INITIALIZATION BOSHLANDI');
+    log.info(`[DB] 📅 Vaqt: ${new Date().toISOString()}`);
+    log.info(`[DB] 🔧 Database Type: ${isPostgres ? 'PostgreSQL' : isSqlite ? 'SQLite' : 'Unknown'}`);
+    log.info(`[DB] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    log.info('[DB] ═══════════════════════════════════════════════════════════');
+    
     // Migration'larni bajarishdan oldin connection pool'ni tozalash
     // Railway.com'da connection pool to'lib qolmasligi uchun
+    log.info('[DB] Connection pool tozalash uchun kutish (1000ms)...');
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     // Migration'larni bajarish - connection pool to'lib qolmasligi uchun retry mexanizmi bilan
     let migrationRetries = 5;
     let migrationLastError = null;
     
+    log.info(`[DB] Migration bajarish boshlandi (${migrationRetries} ta retry imkoniyati)`);
+    
     while (migrationRetries > 0) {
         try {
             // Connection pool'ni test qilish
+            log.info('[DB] Connection pool test qilinmoqda...');
             try {
                 await db.raw('SELECT 1');
+                log.info('[DB] ✅ Connection pool test muvaffaqiyatli');
             } catch (testError) {
-                log.warn(`[DB] Connection test xatolik, ${1000}ms kutib qayta urinilmoqda...`);
+                log.warn(`[DB] ⚠️ Connection test xatolik, ${1000}ms kutib qayta urinilmoqda...`);
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 migrationRetries--;
                 continue;
             }
             
             log.info('[DB] Migrationlarni bajarish boshlandi...');
+            const migrationStartTime = Date.now();
             await db.migrate.latest();
-            log.info('[DB] Migrationlar muvaffaqiyatli bajarildi');
+            const migrationDuration = Date.now() - migrationStartTime;
+            log.info(`[DB] ✅ Migrationlar muvaffaqiyatli bajarildi (${migrationDuration}ms)`);
             migrationRetries = 0;
             break;
         } catch (migrationError) {
@@ -320,30 +335,35 @@ const initializeDB = async () => {
             if (isRetryableMigrationError && migrationRetries > 0) {
                 // Exponential backoff - har safar kutish vaqti oshadi
                 const delay = Math.min(2000 * (6 - migrationRetries), 10000); // 2s, 4s, 6s, 8s, 10s
-                log.warn(`[DB] Migration retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${migrationRetries} qoldi)`);
-                log.warn(`[DB] Xatolik: ${migrationError.message}`);
+                log.warn(`[DB] ⚠️ Migration retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${migrationRetries} qoldi)`);
+                log.warn(`[DB] 📝 Xatolik: ${migrationError.message}`);
                 
                 // Connection pool'ni tozalash uchun delay
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
                 // Boshqa xatolik yoki retry'lar tugagan
-                log.error('[DB] Migration xatolik:', migrationError.message);
+                log.error('[DB] ❌ Migration xatolik:', migrationError.message);
                 throw migrationError;
             }
         }
     }
     
     if (migrationLastError && migrationRetries === 0) {
-        log.error('[DB] Migration bajarishda barcha retry urinishlari tugadi');
+        log.error('[DB] ❌ Migration bajarishda barcha retry urinishlari tugadi');
         throw migrationLastError;
     }
     
     // Migration'lardan keyin connection pool'ni tozalash
+    log.info('[DB] Migration\'lardan keyin connection pool tozalash (500ms)...');
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // --- BOSHLANG'ICH MA'LUMOTLARNI (SEEDS) YARATISH VA YANGILASH ---
     // YANGI LOGIKA: Faqat superadmin standart rol bo'ladi, boshqa rollar superadmin tomonidan yaratiladi
 
+    log.info('[DB] ═══════════════════════════════════════════════════════════');
+    log.info('[DB] 🌱 SEEDS (BOSHLANG\'ICH MA\'LUMOTLAR) BOSHLANDI');
+    log.info('[DB] ═══════════════════════════════════════════════════════════');
+    
     const initialRoles = ['superadmin']; // Faqat superadmin standart rol
     
     const initialPermissions = [
@@ -384,16 +404,20 @@ const initializeDB = async () => {
 
     // Tranzaksiya ichida boshlang'ich ma'lumotlarni kiritish
     // Retry mexanizmi bilan - SQLite BUSY va PostgreSQL connection pool xatoliklarini hal qilish
+    log.info('[DB] [SEEDS] Roles va permissions yaratish boshlandi...');
+    const seedsStartTime = Date.now();
     let retries = 5;
     let lastError = null;
     
     while (retries > 0) {
         try {
+            log.info(`[DB] [SEEDS] Tranzaksiya boshlandi (${retries} ta retry imkoniyati qoldi)...`);
             // Connection pool to'lib qolmasligi uchun timeout qo'shish
             await db.transaction(async trx => {
                 // Import oldidan rollarni tekshirish
                 const rolesBefore = await trx('roles').select('role_name');
                 const roleNamesBefore = rolesBefore.map(r => r.role_name);
+                log.info(`[DB] [SEEDS] Mavjud rollar: ${roleNamesBefore.length} ta`);
                 
                 // Faqat superadmin rolini yaratish - retry bilan
                 try {
@@ -401,6 +425,7 @@ const initializeDB = async () => {
                         .insert(initialRoles.map(r => ({ role_name: r })))
                         .onConflict('role_name')
                         .ignore();
+                    log.info(`[DB] [SEEDS] ✅ Superadmin roli yaratildi/yangilandi`);
                 } catch (insertError) {
                     // Agar insert xatolik bo'lsa, ignore qilish (chunki onConflict.ignore() ishlashi kerak)
                     if (!isConstraintError(insertError)) {
@@ -408,42 +433,45 @@ const initializeDB = async () => {
                     }
                 }
         
-        // Permissions yaratish
-        await trx('permissions')
-            .insert(initialPermissions)
-            .onConflict('permission_key')
-            .ignore();
+                // Permissions yaratish
+                log.info(`[DB] [SEEDS] ${initialPermissions.length} ta permission yaratilmoqda...`);
+                await trx('permissions')
+                    .insert(initialPermissions)
+                    .onConflict('permission_key')
+                    .ignore();
+                log.info(`[DB] [SEEDS] ✅ Permissions yaratildi/yangilandi`);
 
-        // Superadmin uchun barcha huquqlarni biriktirish
-        await trx('role_permissions').where({ role_name: 'superadmin' }).del();
-        const permsToInsert = rolePerms.superadmin.map(pKey => ({
-            role_name: 'superadmin',
-            permission_key: pKey
-        }));
-        if (permsToInsert.length > 0) {
-            await trx('role_permissions').insert(permsToInsert);
-        }
+                // Superadmin uchun barcha huquqlarni biriktirish
+                log.info(`[DB] [SEEDS] Superadmin uchun ${rolePerms.superadmin.length} ta permission biriktirilmoqda...`);
+                await trx('role_permissions').where({ role_name: 'superadmin' }).del();
+                const permsToInsert = rolePerms.superadmin.map(pKey => ({
+                    role_name: 'superadmin',
+                    permission_key: pKey
+                }));
+                if (permsToInsert.length > 0) {
+                    await trx('role_permissions').insert(permsToInsert);
+                }
+                log.info(`[DB] [SEEDS] ✅ Superadmin permissions biriktirildi`);
         
-        // Superadmin uchun shartlar null (cheksiz dostup)
-        await trx('roles')
-            .where('role_name', 'superadmin')
-            .update({ requires_locations: null, requires_brands: null });
+                // Superadmin uchun shartlar null (cheksiz dostup)
+                await trx('roles')
+                    .where('role_name', 'superadmin')
+                    .update({ requires_locations: null, requires_brands: null });
+                log.info(`[DB] [SEEDS] ✅ Superadmin sozlamalari yangilandi`);
         
-        // EHTIYOT: Eski standart rollarni o'chirish kodi olib tashlandi
-        // Chunki bu kod har safar server ishga tushganda rollarni o'chiryapti
-        // Rollar endi import yoki admin panel orqali boshqariladi
-        // Agar eski rollarni tozalash kerak bo'lsa, buni qo'lda qilish kerak
+                // Import keyin rollarni tekshirish
+                const rolesAfter = await trx('roles').select('role_name');
+                const roleNamesAfter = rolesAfter.map(r => r.role_name);
         
-        // Import keyin rollarni tekshirish
-        const rolesAfter = await trx('roles').select('role_name');
-        const roleNamesAfter = rolesAfter.map(r => r.role_name);
-        
-        // Yo'qolgan rollarni topish
-        const lostRoles = roleNamesBefore.filter(role => !roleNamesAfter.includes(role));
-        if (lostRoles.length > 0) {
-            log.error(`[ROLES] XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
-        }
+                // Yo'qolgan rollarni topish
+                const lostRoles = roleNamesBefore.filter(role => !roleNamesAfter.includes(role));
+                if (lostRoles.length > 0) {
+                    log.error(`[DB] [SEEDS] ❌ XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
+                }
             });
+            
+            const seedsDuration = Date.now() - seedsStartTime;
+            log.info(`[DB] [SEEDS] ✅ Roles va permissions muvaffaqiyatli yaratildi (${seedsDuration}ms)`);
             
             // Agar muvaffaqiyatli bo'lsa, retry loop'ni to'xtatish
             retries = 0;
@@ -462,28 +490,35 @@ const initializeDB = async () => {
             if (isRetryableError && retries > 0) {
                 // Exponential backoff - har safar kutish vaqti oshadi
                 const delay = Math.min(1000 * (6 - retries), 5000); // 1s, 2s, 3s, 4s, 5s
-                log.warn(`[DB] Retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
+                log.warn(`[DB] [SEEDS] ⚠️ Retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
+                log.warn(`[DB] [SEEDS] 📝 Xatolik: ${error.message}`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
                 // Boshqa xatolik yoki retry'lar tugagan
+                log.error(`[DB] [SEEDS] ❌ Xatolik: ${error.message}`);
                 throw error;
             }
         }
     }
     
     if (lastError && retries === 0) {
+        log.error(`[DB] [SEEDS] ❌ Barcha retry urinishlari tugadi`);
         throw lastError;
     }
 
     // Seeds faylini ishga tushirish (kengaytirilgan permission'lar)
+    log.info('[DB] [SEEDS] Kengaytirilgan permissions seed fayli ishga tushirilmoqda...');
+    const expandedSeedStartTime = Date.now();
     // Connection pool to'lib qolmasligi uchun delay qo'shish
     try {
         await new Promise(resolve => setTimeout(resolve, 200));
         const expandedPermissionsSeed = require('./seeds/02_expanded_permissions.js');
         await expandedPermissionsSeed.seed(db);
         await new Promise(resolve => setTimeout(resolve, 200));
+        const expandedSeedDuration = Date.now() - expandedSeedStartTime;
+        log.info(`[DB] [SEEDS] ✅ Kengaytirilgan permissions seed muvaffaqiyatli bajarildi (${expandedSeedDuration}ms)`);
     } catch (error) {
-        log.warn('Seeds faylini ishga tushirishda xatolik:', error.message);
+        log.warn(`[DB] [SEEDS] ⚠️ Seeds faylini ishga tushirishda xatolik: ${error.message}`);
         // Xatolik bo'lsa ham davom etamiz
     }
 
@@ -491,9 +526,12 @@ const initializeDB = async () => {
     await new Promise(resolve => setTimeout(resolve, 200));
     
     // Superadmin yaratish (agar mavjud bo'lmasa)
+    log.info('[DB] [SEEDS] Superadmin foydalanuvchi tekshirilmoqda...');
+    const superadminStartTime = Date.now();
     // Eski super_admin va yangi superadmin ni tekshirish
     const superAdminUser = await db('users').whereIn('role', ['super_admin', 'superadmin']).first();
     if (!superAdminUser) {
+        log.info('[DB] [SEEDS] Superadmin foydalanuvchi topilmadi, yaratilmoqda...');
         const hashedPassword = await bcrypt.hash('superadmin123', saltRounds);
         await db('users').insert({ 
             username: 'superadmin', 
@@ -502,14 +540,22 @@ const initializeDB = async () => {
             status: 'active',
             device_limit: 999 // Superadmin uchun cheksiz device limit
         });
-        log.info('Superadmin foydalanuvchi yaratildi');
+        const superadminDuration = Date.now() - superadminStartTime;
+        log.info(`[DB] [SEEDS] ✅ Superadmin foydalanuvchi yaratildi (${superadminDuration}ms)`);
     } else if (superAdminUser.role === 'super_admin') {
         // Eski super_admin ni superadmin ga o'zgartirish
+        log.info('[DB] [SEEDS] Eski super_admin roli yangilanmoqda...');
         await db('users').where({ id: superAdminUser.id }).update({ role: 'superadmin' });
-        log.info('Eski super_admin roli superadmin ga o\'zgartirildi');
+        const superadminDuration = Date.now() - superadminStartTime;
+        log.info(`[DB] [SEEDS] ✅ Eski super_admin roli superadmin ga o'zgartirildi (${superadminDuration}ms)`);
+    } else {
+        const superadminDuration = Date.now() - superadminStartTime;
+        log.info(`[DB] [SEEDS] ✅ Superadmin foydalanuvchi mavjud (${superadminDuration}ms)`);
     }
     
     // Telegram sozlamalarini tekshirish va qo'yish (agar mavjud bo'lmasa)
+    log.info('[DB] [SEEDS] Telegram sozlamalari tekshirilmoqda...');
+    const telegramSettingsStartTime = Date.now();
     // Faqat mavjud bo'lmaganda bo'sh yaratish, avtomatik to'ldirmaslik
     const telegramSettings = [
         { key: 'telegram_bot_token', value: '' },
@@ -531,20 +577,31 @@ const initializeDB = async () => {
     if (settingsToInsert.length > 0) {
         try {
             await db('settings').insert(settingsToInsert);
-            log.debug(`Telegram sozlamalari qo'shildi: ${settingsToInsert.length} ta`);
+            const telegramSettingsDuration = Date.now() - telegramSettingsStartTime;
+            log.info(`[DB] [SEEDS] ✅ Telegram sozlamalari qo'shildi: ${settingsToInsert.length} ta (${telegramSettingsDuration}ms)`);
         } catch (insertError) {
             // Agar batch insert xatolik bersa, alohida insert qilish
-            log.warn('Batch settings insert xatolik, alohida insert qilinmoqda:', insertError.message);
+            log.warn(`[DB] [SEEDS] ⚠️ Batch settings insert xatolik, alohida insert qilinmoqda: ${insertError.message}`);
             for (const setting of settingsToInsert) {
                 try {
                     await db('settings').insert(setting);
                 } catch (individualError) {
-                    log.warn(`Setting insert xatolik (${setting.key}):`, individualError.message);
+                    log.warn(`[DB] [SEEDS] ⚠️ Setting insert xatolik (${setting.key}): ${individualError.message}`);
                 }
             }
         }
+    } else {
+        const telegramSettingsDuration = Date.now() - telegramSettingsStartTime;
+        log.info(`[DB] [SEEDS] ✅ Barcha telegram sozlamalari mavjud (${telegramSettingsDuration}ms)`);
     }
     
+    const totalSeedsDuration = Date.now() - seedsStartTime;
+    const totalInitDuration = Date.now() - initStartTime;
+    log.info('[DB] ═══════════════════════════════════════════════════════════');
+    log.info(`[DB] ✅ DATABASE INITIALIZATION MUVAFFAQIYATLI TUGADI`);
+    log.info(`[DB] ⏱️  Seeds vaqt: ${totalSeedsDuration}ms`);
+    log.info(`[DB] ⏱️  Jami vaqt: ${totalInitDuration}ms`);
+    log.info('[DB] ═══════════════════════════════════════════════════════════');
 };
 
 // Connection string olish (session store uchun)
