@@ -17,9 +17,19 @@ function getDbConfig() {
     const hasDatabaseUrl = !!databaseUrl;
     const hasPostgresConfig = !!(process.env.POSTGRES_HOST && process.env.POSTGRES_DB);
     
+    // Debug ma'lumotlari (faqat Railway.com'da)
+    if (isRailway) {
+        log.debug(`[DB] Railway.com environment detected`);
+        log.debug(`[DB] DATABASE_URL exists: ${hasDatabaseUrl}`);
+        log.debug(`[DB] DATABASE_URL value: ${databaseUrl ? (databaseUrl.includes('${{') ? 'Reference (will be resolved at runtime)' : 'Connection string') : 'NOT SET'}`);
+        log.debug(`[DB] POSTGRES_HOST exists: ${!!process.env.POSTGRES_HOST}`);
+        log.debug(`[DB] POSTGRES_DB exists: ${!!process.env.POSTGRES_DB}`);
+    }
+    
     // Railway.com'da va DATABASE_URL mavjud bo'lsa (reference yoki oddiy), to'g'ridan-to'g'ri PostgreSQL config qaytarish
     // Railway runtime'da reference'lar avtomatik resolve qilinadi
     if (isRailway && hasDatabaseUrl) {
+        // Reference bo'lsa ham, Railway runtime'da resolve qilinadi
         return {
             client: 'pg',
             connection: databaseUrl, // Reference yoki oddiy connection string bo'lishi mumkin
@@ -45,10 +55,20 @@ function getDbConfig() {
         log.error('❌ [DB] ❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
         log.error('❌ [DB] ❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
         log.error('❌ [DB] ❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
+        log.error(`[DB] Debug: RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT || 'NOT SET'}`);
+        log.error(`[DB] Debug: RAILWAY_PROJECT_ID=${process.env.RAILWAY_PROJECT_ID || 'NOT SET'}`);
+        log.error(`[DB] Debug: RAILWAY_SERVICE_NAME=${process.env.RAILWAY_SERVICE_NAME || 'NOT SET'}`);
         throw new Error(
             'Railway.com\'da DATABASE_URL sozlanmagan!\n' +
             'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
-            'PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.'
+            'PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.\n\n' +
+            'Qo\'llanma:\n' +
+            '1. Railway.com dashboard\'ga kiring\n' +
+            '2. WeB service\'ning Variables bo\'limiga o\'ting\n' +
+            '3. "+ New Variable" tugmasini bosing\n' +
+            '4. Key: DATABASE_URL\n' +
+            '5. Value: ${{Postgres.DATABASE_URL}} (Postgres service nomi to\'g\'ri bo\'lishi kerak)\n' +
+            '6. Saqlang va qayta deploy qiling'
         );
     }
     
