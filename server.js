@@ -156,7 +156,7 @@ if (isPostgres) {
             const url = require('url');
             const parsedUrl = new URL(pgConnection);
             
-            // pg Pool: max:2 (Knex bilan jami ulanishlar ~7), keepAlive (ECONNRESET kamayadi), connectionTimeoutMillis
+            // pg Pool: max:1 (Knex 3 + Session 1 = 4 jami, Railway Postgres max_connections ostida)
             const pool = new Pool({
                 host: parsedUrl.hostname,
                 port: parseInt(parsedUrl.port) || 5432,
@@ -164,7 +164,7 @@ if (isPostgres) {
                 user: parsedUrl.username,
                 password: parsedUrl.password,
                 ssl: { rejectUnauthorized: false },
-                max: 2,
+                max: 1,
                 idleTimeoutMillis: 10000,
                 connectionTimeoutMillis: 10000,
                 keepAlive: true
@@ -431,20 +431,7 @@ global.broadcastWebSocket = (type, payload) => {
     log.info('═══════════════════════════════════════════════════════════');
     
     try {
-        // Server'ni darhol listen qilish (healthcheck uchun)
-        // Initialization background'da davom etadi
-        server.listen(PORT, '0.0.0.0', () => {
-            const listenDuration = Date.now() - serverStartTime;
-            log.info(`✅ Server ${PORT} portida ishga tushdi (${listenDuration}ms)`);
-            log.info(`🌐 Healthcheck: http://0.0.0.0:${PORT}/health`);
-            
-            // PM2 uchun ready signal
-            if (process.send) {
-                process.send('ready');
-            }
-        });
-        
-        // Database initialization (background'da)
+        // Database initialization BIRINCHI (listen'dan oldin – HTTP so'rovlar poolni to'ldirmasligi uchun)
         log.info('[INIT] Database initialization boshlandi...');
         const dbInitStartTime = Date.now();
         try {
@@ -662,8 +649,15 @@ global.broadcastWebSocket = (type, payload) => {
             log.error(`📝 Xatolik: ${initError.message}`);
             log.error(`📚 Stack: ${initError.stack}`);
             log.error('═══════════════════════════════════════════════════════════');
-            // Xatolik bo'lsa ham server ishlaydi, lekin ba'zi funksiyalar ishlamasligi mumkin
         }
+
+        // Har qanday holatda listen (DB init muvaffaqiyatsiz bo'lsa ham /health 503 qaytaradi)
+        server.listen(PORT, '0.0.0.0', () => {
+            const listenDuration = Date.now() - serverStartTime;
+            log.info(`✅ Server ${PORT} portida ishga tushdi (${listenDuration}ms)`);
+            log.info(`🌐 Healthcheck: http://0.0.0.0:${PORT}/health`);
+            if (process.send) process.send('ready');
+        });
     } catch (err) {
         serverInitError = err;
         const totalInitDuration = Date.now() - serverStartTime;

@@ -69,7 +69,7 @@ function getDbConfig() {
             },
             pool: {
                 min: 1,
-                max: 5,
+                max: 3,
                 acquireTimeoutMillis: 10000,
                 idleTimeoutMillis: 30000,
                 createTimeoutMillis: 60000,
@@ -116,7 +116,7 @@ function getDbConfig() {
                 },
                 pool: {
                     min: 1,
-                    max: 5,
+                    max: 3,
                     acquireTimeoutMillis: 10000,
                     idleTimeoutMillis: 30000,
                     createTimeoutMillis: 60000,

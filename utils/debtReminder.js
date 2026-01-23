@@ -123,7 +123,7 @@ async function loadReminderSettings() {
     }
     
     if (lastError && retries === 0 && (lastError.code !== 'SQLITE_ERROR' || !lastError.message?.includes('no such table'))) {
-        log.error('[DEBT_REMINDER] Reminder sozlamalarini yuklashda barcha retry urinishlari tugadi');
+        log.error('Reminder sozlamalarini yuklashda barcha retry urinishlari tugadi');
     }
 }
 
@@ -769,7 +769,7 @@ async function startRemindersForPendingRequests() {
     }
     
     if (lastError && retries === 0) {
-        log.error('[DEBT_REMINDER] Pending requestlar uchun reminder boshlashda barcha retry urinishlari tugadi');
+        log.error('Pending requestlar uchun reminder boshlashda barcha retry urinishlari tugadi');
     }
 }
 
@@ -792,26 +792,15 @@ function updateReminderSettings(interval, maxCount) {
     // log.info(`Reminder sozlamalari yangilandi: interval=${reminderInterval}min, maxCount=${reminderMaxCount}`);
 }
 
-// Initialization - server ishga tushganda delay bilan
-// Connection pool to'lib qolmasligi uchun delay qo'shish
-// Delay'ni oshirish - database initialization va migration'lar tugaguncha kutish
+// Initialization - server ishga tushganda uzoqroq delay (Railway: init va listen ketma-ket, pool bo'sh bo'lishi uchun)
 setTimeout(() => {
     loadReminderSettings().then(() => {
-        // 5 daqiqadan keyin barcha pending requestlar uchun reminder boshlash
-        // Delay'ni oshirish - connection pool to'lib qolmasligi uchun
-        setTimeout(() => {
-            startRemindersForPendingRequests();
-        }, 5 * 60 * 1000);
+        setTimeout(() => startRemindersForPendingRequests(), 5 * 60 * 1000);
     }).catch((error) => {
         log.warn('[DEBT_REMINDER] Initialization xatolik (ignored):', error.message);
-        // Xatolik bo'lsa ham, retry qilish uchun keyinroq urinib ko'rish
-        setTimeout(() => {
-            loadReminderSettings().catch(() => {
-                // Ikkinchi urinish ham muvaffaqiyatsiz bo'lsa, e'tiborsiz qoldirish
-            });
-        }, 30 * 1000); // 30 soniyadan keyin qayta urinish
+        setTimeout(() => loadReminderSettings().catch(() => {}), 30 * 1000);
     });
-}, 10000); // 10 soniya delay - database initialization va migration'lar tugaguncha kutish
+}, 60000); // 60 soniya - DB init va birinchi so'rovlar tugaguncha
 
 /**
  * Reminder'ni database'ga saqlash
