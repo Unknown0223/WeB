@@ -567,29 +567,31 @@ const initializeDB = async () => {
         { key: 'telegram_enabled', value: 'false' } // Telegram aktiv/neaktiv holati
     ];
     
-    // Batch insert - barcha telegram sozlamalarini bir vaqtda
-    const settingsToInsert = [];
-    for (const setting of telegramSettings) {
-        const existing = await db('settings').where({ key: setting.key }).first();
-        if (!existing) {
-            settingsToInsert.push(setting);
-        }
-    }
+    // OPTIMALLASHTIRISH: Barcha mavjud setting'larni bitta query bilan olish (connection pool optimallashtirish)
+    const settingKeys = telegramSettings.map(s => s.key);
+    const existingSettings = await db('settings').whereIn('key', settingKeys).select('key');
+    const existingKeys = new Set(existingSettings.map(s => s.key));
+    
+    // Faqat mavjud bo'lmaganlarini insert qilish
+    const settingsToInsert = telegramSettings.filter(s => !existingKeys.has(s.key));
     
     if (settingsToInsert.length > 0) {
         try {
+            // Bitta batch insert (connection pool optimallashtirish)
             await db('settings').insert(settingsToInsert);
             const telegramSettingsDuration = Date.now() - telegramSettingsStartTime;
             log.info(`[DB] [SEEDS] ✅ Telegram sozlamalari qo'shildi: ${settingsToInsert.length} ta (${telegramSettingsDuration}ms)`);
         } catch (insertError) {
-            // Agar batch insert xatolik bersa, alohida insert qilish
-            log.warn(`[DB] [SEEDS] ⚠️ Batch settings insert xatolik, alohida insert qilinmoqda: ${insertError.message}`);
+            log.warn(`[DB] [SEEDS] ⚠️ Batch settings insert xatolik: ${insertError.message}`);
+            // Retry mexanizmi - har birini alohida qo'shish (connection pool to'lib qolmasligi uchun delay bilan)
             for (const setting of settingsToInsert) {
                 try {
-                    await db('settings').insert(setting);
+                    await db('settings').insert(setting).onConflict('key').ignore();
                 } catch (individualError) {
                     log.warn(`[DB] [SEEDS] ⚠️ Setting insert xatolik (${setting.key}): ${individualError.message}`);
                 }
+                // Connection pool to'lib qolmasligi uchun delay
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
     } else {

@@ -793,7 +793,22 @@ function updateReminderSettings(interval, maxCount) {
 }
 
 // Initialization - server ishga tushganda uzoqroq delay (Railway: init va listen ketma-ket, pool bo'sh bo'lishi uchun)
-setTimeout(() => {
+setTimeout(async () => {
+    // DB init tugaguncha kutish (serverInitialized flag'ni tekshirish)
+    let maxWait = 120000; // 2 daqiqa maksimal kutish
+    const startWait = Date.now();
+    while (Date.now() - startWait < maxWait) {
+        try {
+            // server.js dan serverInitialized flag'ni tekshirish (global variable orqali)
+            if (global.serverInitialized === true) {
+                break;
+            }
+        } catch (e) {
+            // Ignore
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 soniya kutish
+    }
+    
     loadReminderSettings().then(() => {
         setTimeout(() => startRemindersForPendingRequests(), 5 * 60 * 1000);
     }).catch((error) => {

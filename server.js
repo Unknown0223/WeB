@@ -244,6 +244,9 @@ app.use('/api', require('./routes'));
 let serverInitialized = false;
 let serverInitError = null;
 
+// Global variable sifatida export qilish (debtReminder uchun)
+global.serverInitialized = false;
+
 // Health check endpoint (Railway va boshqa platformalar uchun)
 app.get('/health', (req, res) => {
     if (!serverInitialized) {
@@ -640,6 +643,7 @@ global.broadcastWebSocket = (type, payload) => {
             }
             
             // Server initialization muvaffaqiyatli tugadi
+            global.serverInitialized = true;
             serverInitialized = true;
             const totalInitDuration = Date.now() - serverStartTime;
             log.info('═══════════════════════════════════════════════════════════');
