@@ -44,3 +44,5 @@ tmp/
 temp/
 *.tmp
 
+# Local / nested copy (submodule o'rniga qo'lda qo'shilgan)
+web_main/
