@@ -69,7 +69,7 @@ function getDbConfig() {
             },
             pool: {
                 min: 1,
-                max: 20,
+                max: 10,
                 acquireTimeoutMillis: 120000,
                 idleTimeoutMillis: 30000,
                 createTimeoutMillis: 60000,
@@ -116,7 +116,7 @@ function getDbConfig() {
                 },
                 pool: {
                     min: 1,
-                    max: 20,
+                    max: 10,
                     acquireTimeoutMillis: 120000,
                     idleTimeoutMillis: 30000,
                     createTimeoutMillis: 60000,
@@ -287,6 +287,8 @@ const initializeDB = async () => {
     log.info(`[DB] 📅 Vaqt: ${new Date().toISOString()}`);
     log.info(`[DB] 🔧 Database Type: ${isPostgres ? 'PostgreSQL' : isSqlite ? 'SQLite' : 'Unknown'}`);
     log.info(`[DB] 🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    const poolCfg = dbConfig.pool || {};
+    log.info(`[DB] 📦 Pool: min=${poolCfg.min ?? '?'} max=${poolCfg.max ?? '?'} acquireTimeout=${poolCfg.acquireTimeoutMillis ?? dbConfig.acquireConnectionTimeout ?? '?'}ms`);
     log.info('[DB] ═══════════════════════════════════════════════════════════');
     
     // Migration'larni bajarishdan oldin connection pool'ni tozalash

@@ -628,7 +628,7 @@ async function handleSecurityRequest(payload) {
                     botLog.warn(`[BOT] [SEND-MARKDOWN-V2] ⚠️ Reply markup Telegram API javobida yo'q!`);
                 }
             }
-            
+
             return result;
         } catch (error) {
             const body = error.response?.body;
@@ -2624,7 +2624,7 @@ const initializeBot = async (botToken, options = { polling: true }) => {
         } else if (data.startsWith('password_approve_') || data.startsWith('password_reject_')) {
             // Parol tiklash so'rovlarini tasdiqlash/rad etish
             await handlePasswordChangeRequestCallback(query, bot);
-            return;
+                    return;
         } else {
             // Boshqa callback'lar (retry, block, unblock...)
             let endpoint = '';

@@ -1,5 +1,6 @@
 const { db } = require('../db.js');
 const { createLogger } = require('../utils/logger.js');
+const { getSetting } = require('../utils/settingsCache.js');
 const log = createLogger('AUTH');
 
 /**
@@ -7,6 +8,10 @@ const log = createLogger('AUTH');
  * (agar admin bo'lmasa) Telegramga ulanganligini tekshiradi.
  */
 const isAuthenticated = async (req, res, next) => {
+    const _path = req.path || req.url || '/';
+    const _sid = (req.sessionID || '').slice(0, 12);
+    log.debug(`[AUTH] isAuthenticated start path=${_path} sid=${_sid}...`);
+
     try {
         // 1. Sessiya va foydalanuvchi mavjudligini tekshirish
         if (!req.session || !req.session.user) {
@@ -20,6 +25,7 @@ const isAuthenticated = async (req, res, next) => {
         const userId = userSessionData.id;
 
         // 2. Sessiya bazada mavjudligini tekshirish
+        log.debug(`[AUTH] DB: sessions tekshiruvi sid=${_sid}...`);
         const sessionExists = await db('sessions').where({ sid: req.sessionID }).first();
         if (!sessionExists) {
             req.session.destroy((err) => {
@@ -33,6 +39,7 @@ const isAuthenticated = async (req, res, next) => {
         }
 
         // 3. Foydalanuvchining joriy ma'lumotlarini bazadan olish
+        log.debug(`[AUTH] DB: users userId=${userId}`);
         const user = await db('users').where({ id: userId }).select('id', 'status', 'telegram_chat_id', 'is_telegram_connected').first();
 
         // Agar foydalanuvchi bazadan o'chirilgan bo'lsa
@@ -53,9 +60,9 @@ const isAuthenticated = async (req, res, next) => {
         const userRole = userSessionData.role;
         const userStatus = user.status;
 
-        // Telegram aktiv holatini tekshirish
-        const telegramEnabledSetting = await db('settings').where({ key: 'telegram_enabled' }).first();
-        const telegramEnabled = telegramEnabledSetting && (telegramEnabledSetting.value === 'true' || telegramEnabledSetting.value === true);
+        // Telegram aktiv holatini tekshirish (settingsCache orqali - DB yukini kamaytiradi)
+        const telegramEnabledRaw = await getSetting('telegram_enabled', 'false');
+        const telegramEnabled = telegramEnabledRaw === 'true' || telegramEnabledRaw === true;
 
         // Superadmin uchun telegram tekshiruvi o'tkazib yuboriladi
         // Telegram neaktiv bo'lsa, bot obunasi shartdan shart emasga o'tadi
@@ -65,8 +72,7 @@ const isAuthenticated = async (req, res, next) => {
 
             // Agar telegram obunasi bekor qilingan bo'lsa (telegram_chat_id null), foydalanuvchini tizimdan chiqarish
             if (!isTelegramConnected || !hasTelegramChatId) {
-                const botUsernameSetting = await db('settings').where({ key: 'telegram_bot_username' }).first();
-                const botUsername = botUsernameSetting ? botUsernameSetting.value : null;
+                const botUsername = (await getSetting('telegram_bot_username', '')) || null;
 
                 // Sessiyani tugatish
                 req.session.destroy((err) => {
@@ -89,7 +95,18 @@ const isAuthenticated = async (req, res, next) => {
         next();
 
     } catch (error) {
-        log.error("isAuthenticated middleware xatoligi:", error);
+        const isPoolTimeout = 
+            error.name === 'KnexTimeoutError' ||
+            (error.message && (
+                String(error.message).includes('Timeout acquiring a connection') ||
+                String(error.message).includes('pool is probably full')
+            ));
+
+        if (isPoolTimeout) {
+            log.error(`[AUTH] POOL TIMEOUT path=${_path} sid=${_sid} - Knex ulanish ololmayapti. Tekshiring: 1) DB max_connections (Postgres), 2) Session store pool (server.js max:5), 3) Uzoq so'rovlar.`, error.message);
+        } else {
+            log.error("[AUTH] isAuthenticated middleware xatoligi:", error.message || error);
+        }
         res.status(500).json({ message: "Sessiyani tekshirishda ichki xatolik." });
     }
 };

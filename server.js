@@ -154,7 +154,7 @@ if (isPostgres) {
             const url = require('url');
             const parsedUrl = new URL(pgConnection);
             
-            // pg Pool yaratish SSL sozlamalari bilan
+            // pg Pool yaratish SSL sozlamalari bilan (max:5 - Knex pool bilan jami DB ulanishlarini cheklash)
             const pool = new Pool({
                 host: parsedUrl.hostname,
                 port: parseInt(parsedUrl.port) || 5432,
@@ -163,7 +163,9 @@ if (isPostgres) {
                 password: parsedUrl.password,
                 ssl: {
                     rejectUnauthorized: false // Railway.com'da self-signed certificate uchun
-                }
+                },
+                max: 5,
+                idleTimeoutMillis: 10000
             });
             
             // connect-pg-simple'ga pool'ni berish
