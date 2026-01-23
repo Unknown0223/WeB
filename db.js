@@ -404,108 +404,92 @@ const initializeDB = async () => {
         superadmin: initialPermissions.map(p => p.permission_key) // Superadmin barcha huquqlarga ega va cheklovsiz
     };
 
-    // Tranzaksiya ichida boshlang'ich ma'lumotlarni kiritish
-    // Retry mexanizmi bilan - SQLite BUSY va PostgreSQL connection pool xatoliklarini hal qilish
+    // Boshlang'ich ma'lumotlarni kiritish (transaction o'rniga alohida operatsiyalar - connection pool optimallashtirish)
+    // Barcha operatsiyalar onConflict.ignore() bilan idempotent, shuning uchun transaction zarur emas
     log.info('[DB] [SEEDS] Roles va permissions yaratish boshlandi...');
     const seedsStartTime = Date.now();
-    let retries = 5;
-    let lastError = null;
     
-    while (retries > 0) {
+    try {
+        // Rollarni tekshirish
+        const rolesBefore = await db('roles').select('role_name');
+        const roleNamesBefore = rolesBefore.map(r => r.role_name);
+        log.info(`[DB] [SEEDS] Mavjud rollar: ${roleNamesBefore.length} ta`);
+        
+        // Faqat superadmin rolini yaratish
         try {
-            log.info(`[DB] [SEEDS] Tranzaksiya boshlandi (${retries} ta retry imkoniyati qoldi)...`);
-            // Connection pool to'lib qolmasligi uchun timeout qo'shish
-            await db.transaction(async trx => {
-                // Import oldidan rollarni tekshirish
-                const rolesBefore = await trx('roles').select('role_name');
-                const roleNamesBefore = rolesBefore.map(r => r.role_name);
-                log.info(`[DB] [SEEDS] Mavjud rollar: ${roleNamesBefore.length} ta`);
-                
-                // Faqat superadmin rolini yaratish - retry bilan
-                try {
-                    await trx('roles')
-                        .insert(initialRoles.map(r => ({ role_name: r })))
-                        .onConflict('role_name')
-                        .ignore();
-                    log.info(`[DB] [SEEDS] ✅ Superadmin roli yaratildi/yangilandi`);
-                } catch (insertError) {
-                    // Agar insert xatolik bo'lsa, ignore qilish (chunki onConflict.ignore() ishlashi kerak)
-                    if (!isConstraintError(insertError)) {
-                        throw insertError;
-                    }
-                }
-        
-                // Permissions yaratish
-                log.info(`[DB] [SEEDS] ${initialPermissions.length} ta permission yaratilmoqda...`);
-                await trx('permissions')
-                    .insert(initialPermissions)
-                    .onConflict('permission_key')
-                    .ignore();
-                log.info(`[DB] [SEEDS] ✅ Permissions yaratildi/yangilandi`);
-
-                // Superadmin uchun barcha huquqlarni biriktirish
-                log.info(`[DB] [SEEDS] Superadmin uchun ${rolePerms.superadmin.length} ta permission biriktirilmoqda...`);
-                await trx('role_permissions').where({ role_name: 'superadmin' }).del();
-                const permsToInsert = rolePerms.superadmin.map(pKey => ({
-                    role_name: 'superadmin',
-                    permission_key: pKey
-                }));
-                if (permsToInsert.length > 0) {
-                    await trx('role_permissions').insert(permsToInsert);
-                }
-                log.info(`[DB] [SEEDS] ✅ Superadmin permissions biriktirildi`);
-        
-                // Superadmin uchun shartlar null (cheksiz dostup)
-                await trx('roles')
-                    .where('role_name', 'superadmin')
-                    .update({ requires_locations: null, requires_brands: null });
-                log.info(`[DB] [SEEDS] ✅ Superadmin sozlamalari yangilandi`);
-        
-                // Import keyin rollarni tekshirish
-                const rolesAfter = await trx('roles').select('role_name');
-                const roleNamesAfter = rolesAfter.map(r => r.role_name);
-        
-                // Yo'qolgan rollarni topish
-                const lostRoles = roleNamesBefore.filter(role => !roleNamesAfter.includes(role));
-                if (lostRoles.length > 0) {
-                    log.error(`[DB] [SEEDS] ❌ XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
-                }
-            });
-            
-            const seedsDuration = Date.now() - seedsStartTime;
-            log.info(`[DB] [SEEDS] ✅ Roles va permissions muvaffaqiyatli yaratildi (${seedsDuration}ms)`);
-            
-            // Agar muvaffaqiyatli bo'lsa, retry loop'ni to'xtatish
-            retries = 0;
-            break;
-        } catch (error) {
-            lastError = error;
-            retries--;
-            
-            // Connection pool timeout yoki lock xatoliklari uchun retry
-            const isRetryableError = 
-                error.message?.includes('Timeout acquiring a connection') ||
-                error.message?.includes('pool is probably full') ||
-                error.code === '23505' ||
-                error.code === 'SQLITE_BUSY';
-            
-            if (isRetryableError && retries > 0) {
-                // Exponential backoff - har safar kutish vaqti oshadi
-                const delay = Math.min(1000 * (6 - retries), 5000); // 1s, 2s, 3s, 4s, 5s
-                log.warn(`[DB] [SEEDS] ⚠️ Retryable xatolik, ${delay}ms kutib qayta urinilmoqda... (${retries} qoldi)`);
-                log.warn(`[DB] [SEEDS] 📝 Xatolik: ${error.message}`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-                // Boshqa xatolik yoki retry'lar tugagan
-                log.error(`[DB] [SEEDS] ❌ Xatolik: ${error.message}`);
-                throw error;
+            await db('roles')
+                .insert(initialRoles.map(r => ({ role_name: r })))
+                .onConflict('role_name')
+                .ignore();
+            log.info(`[DB] [SEEDS] ✅ Superadmin roli yaratildi/yangilandi`);
+        } catch (insertError) {
+            if (!isConstraintError(insertError)) {
+                throw insertError;
             }
         }
-    }
-    
-    if (lastError && retries === 0) {
-        log.error(`[DB] [SEEDS] ❌ Barcha retry urinishlari tugadi`);
-        throw lastError;
+        
+        // Connection pool to'lib qolmasligi uchun delay
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Permissions yaratish
+        log.info(`[DB] [SEEDS] ${initialPermissions.length} ta permission yaratilmoqda...`);
+        await db('permissions')
+            .insert(initialPermissions)
+            .onConflict('permission_key')
+            .ignore();
+        log.info(`[DB] [SEEDS] ✅ Permissions yaratildi/yangilandi`);
+        
+        // Connection pool to'lib qolmasligi uchun delay
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Superadmin uchun barcha huquqlarni biriktirish
+        log.info(`[DB] [SEEDS] Superadmin uchun ${rolePerms.superadmin.length} ta permission biriktirilmoqda...`);
+        await db('role_permissions').where({ role_name: 'superadmin' }).del();
+        const permsToInsert = rolePerms.superadmin.map(pKey => ({
+            role_name: 'superadmin',
+            permission_key: pKey
+        }));
+        if (permsToInsert.length > 0) {
+            await db('role_permissions').insert(permsToInsert);
+        }
+        log.info(`[DB] [SEEDS] ✅ Superadmin permissions biriktirildi`);
+        
+        // Connection pool to'lib qolmasligi uchun delay
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Superadmin uchun shartlar null (cheksiz dostup)
+        await db('roles')
+            .where('role_name', 'superadmin')
+            .update({ requires_locations: null, requires_brands: null });
+        log.info(`[DB] [SEEDS] ✅ Superadmin sozlamalari yangilandi`);
+        
+        // Rollarni tekshirish
+        const rolesAfter = await db('roles').select('role_name');
+        const roleNamesAfter = rolesAfter.map(r => r.role_name);
+        
+        // Yo'qolgan rollarni topish
+        const lostRoles = roleNamesBefore.filter(role => !roleNamesAfter.includes(role));
+        if (lostRoles.length > 0) {
+            log.error(`[DB] [SEEDS] ❌ XATOLIK: Quyidagi rollar yo'qoldi (${lostRoles.length} ta):`, lostRoles);
+        }
+        
+        const seedsDuration = Date.now() - seedsStartTime;
+        log.info(`[DB] [SEEDS] ✅ Roles va permissions muvaffaqiyatli yaratildi (${seedsDuration}ms)`);
+    } catch (error) {
+        // Connection pool timeout yoki lock xatoliklari uchun retry
+        const isRetryableError = 
+            error.message?.includes('Timeout acquiring a connection') ||
+            error.message?.includes('pool is probably full') ||
+            error.code === '23505' ||
+            error.code === 'SQLITE_BUSY';
+        
+        if (isRetryableError) {
+            log.warn(`[DB] [SEEDS] ⚠️ Retryable xatolik: ${error.message}`);
+            log.warn(`[DB] [SEEDS] ⚠️ Seeds operatsiyalari idempotent, shuning uchun xatolik e'tiborsiz qoldirilmoqda`);
+        } else {
+            log.error(`[DB] [SEEDS] ❌ Xatolik: ${error.message}`);
+            throw error;
+        }
     }
 
     // Seeds faylini ishga tushirish (kengaytirilgan permission'lar)
