@@ -230,6 +230,13 @@ const renderKpiCards = (stats) => {
                 }
             }, 1000);
 
+            // current-user'dan keyin ketma-ket: /api/notifications (parallel yuklanishni kamaytirish, 499 oldini olish)
+            if (typeof window.checkUnreadNotifications === 'function') {
+                await window.checkUnreadNotifications().catch(() => {});
+            }
+            if (window.notificationCheckInterval) clearInterval(window.notificationCheckInterval);
+            window.notificationCheckInterval = setInterval(() => { (typeof window.checkUnreadNotifications === 'function' && window.checkUnreadNotifications().catch(() => {})); }, 30000);
+
             try {
                 const settingsRes = await fetch('/api/settings');
                 if (settingsRes.ok) {
@@ -2962,23 +2969,10 @@ const renderKpiCards = (stats) => {
 
     // formatNumber funksiyasi allaqachon mavjud (134-qatorda)
 
-    // Sayt yuklanganda va har 30 soniyada notification'larni tekshirish
-    // Memory leak'ni oldini olish uchun interval'ni saqlash
-    let notificationCheckInterval = null;
-    
-    // Eski interval'ni tozalash (agar mavjud bo'lsa)
-    if (window.notificationCheckInterval) {
-        clearInterval(window.notificationCheckInterval);
-    }
-    
-    checkUnreadNotifications();
-    notificationCheckInterval = setInterval(checkUnreadNotifications, 30000); // 30 soniyada bir marta
-    window.notificationCheckInterval = notificationCheckInterval; // Global cleanup uchun
-    
-    // Sahifa yopilganda interval'ni tozalash
+    // Sahifa yopilganda notification interval'ni tozalash (interval init() ichida o'rnatiladi)
     window.addEventListener('beforeunload', () => {
-        if (notificationCheckInterval) {
-            clearInterval(notificationCheckInterval);
+        if (window.notificationCheckInterval) {
+            clearInterval(window.notificationCheckInterval);
         }
     });
 

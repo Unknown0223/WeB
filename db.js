@@ -69,8 +69,8 @@ function getDbConfig() {
             },
             pool: {
                 min: 1,
-                max: 10,
-                acquireTimeoutMillis: 120000,
+                max: 5,
+                acquireTimeoutMillis: 10000,
                 idleTimeoutMillis: 30000,
                 createTimeoutMillis: 60000,
                 destroyTimeoutMillis: 5000,
@@ -78,7 +78,7 @@ function getDbConfig() {
                 createRetryIntervalMillis: 500,
                 propagateCreateError: false
             },
-            acquireConnectionTimeout: 120000,
+            acquireConnectionTimeout: 10000,
             asyncStackTraces: false,
             debug: false
         };
@@ -116,8 +116,8 @@ function getDbConfig() {
                 },
                 pool: {
                     min: 1,
-                    max: 10,
-                    acquireTimeoutMillis: 120000,
+                    max: 5,
+                    acquireTimeoutMillis: 10000,
                     idleTimeoutMillis: 30000,
                     createTimeoutMillis: 60000,
                     destroyTimeoutMillis: 5000,
@@ -125,7 +125,7 @@ function getDbConfig() {
                     createRetryIntervalMillis: 500,
                     propagateCreateError: false
                 },
-                acquireConnectionTimeout: 120000,
+                acquireConnectionTimeout: 10000,
                 asyncStackTraces: false,
                 debug: false
             };

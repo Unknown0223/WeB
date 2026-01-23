@@ -584,7 +584,8 @@ router.post('/login', async (req, res) => {
             username: user.username,
             role: user.role,
             locations: locations,
-            permissions: finalPermissions
+            permissions: finalPermissions,
+            preferred_currency: user.preferred_currency || null
         };
 
         req.session.ip_address = ipAddress;
@@ -679,7 +680,8 @@ router.post('/login', async (req, res) => {
                 role: user.role,
                 locations: locations,
                 permissions: finalPermissions,
-                requires_bot_connection: true // Flag qo'shildi
+                requires_bot_connection: true, // Flag qo'shildi
+                preferred_currency: user.preferred_currency || null
             };
             req.session.ip_address = ipAddress;
             req.session.user_agent = userAgent;
@@ -861,7 +863,8 @@ router.get('/verify-session/:token', async (req, res) => {
                     username: user.username,
                     role: user.role,
                     locations: locations,
-                    permissions: finalPermissions
+                    permissions: finalPermissions,
+                    preferred_currency: user.preferred_currency || null
                 };
                 req.session.ip_address = ipAddress;
                 req.session.user_agent = userAgent;
@@ -953,24 +956,27 @@ router.post('/logout', isAuthenticated, async (req, res) => {
     });
 });
 
-// GET /api/current-user - Joriy foydalanuvchi ma'lumotlari
+// GET /api/current-user - Joriy foydalanuvchi ma'lumotlari (preferred_currency sessiyada bo'lsa DB so'rovsiz)
 router.get('/current-user', isAuthenticated, async (req, res) => {
     try {
-        const user = await db('users').where({ id: req.session.user.id }).first();
+        let preferred_currency = req.session.user.preferred_currency;
+        if (preferred_currency === undefined) {
+            const row = await db('users').where({ id: req.session.user.id }).select('preferred_currency').first();
+            preferred_currency = row?.preferred_currency || null;
+        }
         const userWithSession = {
             ...req.session.user,
-            preferred_currency: user?.preferred_currency || null,
+            preferred_currency,
             sessionId: req.sessionID
         };
         res.json(userWithSession);
     } catch (error) {
         log.error('Current user fetch error:', error.message);
-        const userWithSession = {
+        res.json({
             ...req.session.user,
-            preferred_currency: null,
+            preferred_currency: req.session.user.preferred_currency ?? null,
             sessionId: req.sessionID
-        };
-        res.json(userWithSession);
+        });
     }
 });
 

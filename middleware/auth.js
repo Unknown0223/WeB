@@ -103,9 +103,9 @@ const isAuthenticated = async (req, res, next) => {
             ));
 
         if (isPoolTimeout) {
-            log.error(`[AUTH] POOL TIMEOUT path=${_path} sid=${_sid} - Knex ulanish ololmayapti. Tekshiring: 1) DB max_connections (Postgres), 2) Session store pool (server.js max:5), 3) Uzoq so'rovlar.`, error.message);
+            log.error(`POOL TIMEOUT path=${_path} sid=${_sid} - Knex ulanish ololmayapti. Tekshiring: 1) DB max_connections (Postgres), 2) Session store pool (server.js), 3) Uzoq so'rovlar.`, error.message);
         } else {
-            log.error("[AUTH] isAuthenticated middleware xatoligi:", error.message || error);
+            log.error("isAuthenticated middleware xatoligi:", error.message || error);
         }
         res.status(500).json({ message: "Sessiyani tekshirishda ichki xatolik." });
     }

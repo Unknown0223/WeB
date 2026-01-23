@@ -116,10 +116,12 @@ if (isPostgres) {
     // db.js dan connection string olish (Railway.com uchun to'g'ri config)
     let pgConnection = getDbConnectionString();
     
-    // Agar db.js dan connection string topilmasa, fallback sifatida DATABASE_URL yoki knexfile.js dan olish
+    // Agar db.js dan connection string topilmasa, fallback: DATABASE_URL, DATABASE_PUBLIC_URL yoki knexfile
     if (!pgConnection) {
-        if (process.env.DATABASE_URL) {
+        if (process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim()) {
             pgConnection = process.env.DATABASE_URL;
+        } else if (process.env.DATABASE_PUBLIC_URL && String(process.env.DATABASE_PUBLIC_URL).trim()) {
+            pgConnection = process.env.DATABASE_PUBLIC_URL;
         } else {
             // Boshqa holatda knexfile.js dan config olish
             const config = require('./knexfile.js');
@@ -154,18 +156,18 @@ if (isPostgres) {
             const url = require('url');
             const parsedUrl = new URL(pgConnection);
             
-            // pg Pool yaratish SSL sozlamalari bilan (max:5 - Knex pool bilan jami DB ulanishlarini cheklash)
+            // pg Pool: max:2 (Knex bilan jami ulanishlar ~7), keepAlive (ECONNRESET kamayadi), connectionTimeoutMillis
             const pool = new Pool({
                 host: parsedUrl.hostname,
                 port: parseInt(parsedUrl.port) || 5432,
-                database: parsedUrl.pathname?.slice(1) || parsedUrl.pathname?.substring(1),
+                database: (parsedUrl.pathname || '').replace(/^\//, '') || 'postgres',
                 user: parsedUrl.username,
                 password: parsedUrl.password,
-                ssl: {
-                    rejectUnauthorized: false // Railway.com'da self-signed certificate uchun
-                },
-                max: 5,
-                idleTimeoutMillis: 10000
+                ssl: { rejectUnauthorized: false },
+                max: 2,
+                idleTimeoutMillis: 10000,
+                connectionTimeoutMillis: 10000,
+                keepAlive: true
             });
             
             // connect-pg-simple'ga pool'ni berish
