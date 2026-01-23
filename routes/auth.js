@@ -306,6 +306,7 @@ router.post('/login', async (req, res) => {
     // Retry mexanizmi bilan user'ni topish
     let user = null;
     let userRetries = 3;
+    const userFindStartTime = Date.now();
     while (userRetries > 0 && !user) {
         try {
             log.debug(`[LOGIN] User'ni topishga urinilmoqda... (${userRetries} qoldi)`);
