@@ -431,18 +431,43 @@ const initializeDB = async () => {
         // Connection pool to'lib qolmasligi uchun delay
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Permissions yaratish
+        // Permissions yaratish - kichik chunk'larga bo'lib (connection pool optimallashtirish)
         log.info(`[DB] [SEEDS] ${initialPermissions.length} ta permission yaratilmoqda...`);
-        await db('permissions')
-            .insert(initialPermissions)
-            .onConflict('permission_key')
-            .ignore();
+        const chunkSize = 5; // Har safar 5 ta permission insert qilish
+        for (let i = 0; i < initialPermissions.length; i += chunkSize) {
+            const chunk = initialPermissions.slice(i, i + chunkSize);
+            try {
+                await db('permissions')
+                    .insert(chunk)
+                    .onConflict('permission_key')
+                    .ignore();
+                log.debug(`[DB] [SEEDS] ${chunk.length} ta permission insert qilindi (${i + 1}-${Math.min(i + chunkSize, initialPermissions.length)}/${initialPermissions.length})`);
+            } catch (chunkError) {
+                // Agar chunk insert xatolik bersa, har birini alohida qo'shish
+                log.warn(`[DB] [SEEDS] ⚠️ Chunk insert xatolik, alohida insert qilinmoqda: ${chunkError.message}`);
+                for (const perm of chunk) {
+                    try {
+                        await db('permissions')
+                            .insert(perm)
+                            .onConflict('permission_key')
+                            .ignore();
+                    } catch (individualError) {
+                        // Individual insert xatolik - e'tiborsiz qoldirish (onConflict.ignore() bilan idempotent)
+                        log.debug(`[DB] [SEEDS] Permission ${perm.permission_key} insert xatolik (e'tiborsiz): ${individualError.message}`);
+                    }
+                    // Har bir permission'dan keyin delay
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+            }
+            // Har bir chunk'dan keyin delay (connection pool bo'shatish uchun)
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
         log.info(`[DB] [SEEDS] ✅ Permissions yaratildi/yangilandi`);
         
         // Connection pool to'lib qolmasligi uchun delay
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Superadmin uchun barcha huquqlarni biriktirish
+        // Superadmin uchun barcha huquqlarni biriktirish - kichik chunk'larga bo'lib (connection pool optimallashtirish)
         log.info(`[DB] [SEEDS] Superadmin uchun ${rolePerms.superadmin.length} ta permission biriktirilmoqda...`);
         await db('role_permissions').where({ role_name: 'superadmin' }).del();
         const permsToInsert = rolePerms.superadmin.map(pKey => ({
@@ -450,7 +475,28 @@ const initializeDB = async () => {
             permission_key: pKey
         }));
         if (permsToInsert.length > 0) {
-            await db('role_permissions').insert(permsToInsert);
+            const chunkSize = 10; // Har safar 10 ta role_permission insert qilish
+            for (let i = 0; i < permsToInsert.length; i += chunkSize) {
+                const chunk = permsToInsert.slice(i, i + chunkSize);
+                try {
+                    await db('role_permissions').insert(chunk);
+                    log.debug(`[DB] [SEEDS] ${chunk.length} ta role_permission insert qilindi (${i + 1}-${Math.min(i + chunkSize, permsToInsert.length)}/${permsToInsert.length})`);
+                } catch (chunkError) {
+                    // Agar chunk insert xatolik bersa, har birini alohida qo'shish
+                    log.warn(`[DB] [SEEDS] ⚠️ Role permission chunk insert xatolik, alohida insert qilinmoqda: ${chunkError.message}`);
+                    for (const perm of chunk) {
+                        try {
+                            await db('role_permissions').insert(perm).onConflict(['role_name', 'permission_key']).ignore();
+                        } catch (individualError) {
+                            log.debug(`[DB] [SEEDS] Role permission insert xatolik (e'tiborsiz): ${individualError.message}`);
+                        }
+                        // Har bir permission'dan keyin delay
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                }
+                // Har bir chunk'dan keyin delay (connection pool bo'shatish uchun)
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
         }
         log.info(`[DB] [SEEDS] ✅ Superadmin permissions biriktirildi`);
         
