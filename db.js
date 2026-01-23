@@ -71,11 +71,11 @@ function getDbConfig() {
                 min: 1,
                 max: 3,
                 acquireTimeoutMillis: 10000,
-                idleTimeoutMillis: 30000,
+                idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash, SSL handshake kamayishi
                 createTimeoutMillis: 60000,
                 destroyTimeoutMillis: 5000,
-                reapIntervalMillis: 1000,
-                createRetryIntervalMillis: 500,
+                reapIntervalMillis: 5000, // 5s - kamroq tekshirish, kamroq overhead
+                createRetryIntervalMillis: 1000, // 1s - retry orasida biroz kutish
                 propagateCreateError: false
             },
             acquireConnectionTimeout: 10000,
@@ -118,11 +118,11 @@ function getDbConfig() {
                     min: 1,
                     max: 3,
                     acquireTimeoutMillis: 10000,
-                    idleTimeoutMillis: 30000,
+                    idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash, SSL handshake kamayishi
                     createTimeoutMillis: 60000,
                     destroyTimeoutMillis: 5000,
-                    reapIntervalMillis: 1000,
-                    createRetryIntervalMillis: 500,
+                    reapIntervalMillis: 5000, // 5s - kamroq tekshirish, kamroq overhead
+                    createRetryIntervalMillis: 1000, // 1s - retry orasida biroz kutish
                     propagateCreateError: false
                 },
                 acquireConnectionTimeout: 10000,

@@ -163,11 +163,17 @@ if (isPostgres) {
                 database: (parsedUrl.pathname || '').replace(/^\//, '') || 'postgres',
                 user: parsedUrl.username,
                 password: parsedUrl.password,
-                ssl: { rejectUnauthorized: false },
+                ssl: { 
+                    rejectUnauthorized: false,
+                    // SSL handshake'ni optimallashtirish
+                    requestCert: false,
+                    agent: false // Keepalive agent'ni o'chirish, pool o'zi boshqaradi
+                },
                 max: 1,
-                idleTimeoutMillis: 10000,
+                idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash
                 connectionTimeoutMillis: 10000,
-                keepAlive: true
+                // keepAlive ni o'chirish - pool o'zi ulanishlarni boshqaradi
+                // keepAlive: true - bu ba'zida SSL handshake muammolariga sabab bo'lishi mumkin
             });
             
             // connect-pg-simple'ga pool'ni berish
