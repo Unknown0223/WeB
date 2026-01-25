@@ -3,6 +3,9 @@
  * Har bir modul uchun elementar huquqlar
  */
 
+const { createLogger } = require('../utils/logger.js');
+const log = createLogger('SEEDS');
+
 exports.seed = async function(knex) {
   // Yangi huquqlarni qo'shish (mavjudlari update qilish)
   const permissions = [
@@ -451,7 +454,7 @@ exports.seed = async function(knex) {
         .merge(['description', 'category']);
     } catch (error) {
       // Agar batch insert xatolik bersa, alohida insert qilish (fallback)
-      console.warn('Batch insert xatolik, alohida insert qilinmoqda:', error.message);
+      log.warn('Batch insert xatolik, alohida insert qilinmoqda:', error.message);
       for (const perm of permissions) {
         try {
           await knex('permissions')
@@ -460,7 +463,7 @@ exports.seed = async function(knex) {
             .merge(['description', 'category']);
         } catch (individualError) {
           // Alohida insert ham xatolik bersa, log qilish va davom etish
-          console.warn(`Permission insert xatolik (${perm.permission_key}):`, individualError.message);
+          log.warn(`Permission insert xatolik (${perm.permission_key}):`, individualError.message);
         }
       }
     }

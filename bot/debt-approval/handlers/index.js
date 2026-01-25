@@ -27,46 +27,8 @@ async function handleDebtApprovalCallback(query, bot) {
         const cashierHandlers = require('./cashier.js');
         const operatorHandlers = require('./operator.js');
         const leaderHandlers = require('./leader.js');
-        const blockedHandlers = require('./blocked.js');
         const supervisorHandlers = require('./supervisor.js');
-        
-        // Block handlers (avval tekshirish)
-        if (data === 'block_item' || data === 'unblock_item' || data === 'list_blocked' || 
-            data.startsWith('block_type:') || data.startsWith('block_select_item:') || 
-            data.startsWith('unblock_item:') || data === 'block_back' || data === 'block_cancel' ||
-            data === 'block_skip_comment' || data === 'block_confirm') {
-            if (data === 'block_item') {
-                await blockedHandlers.handleBlockItem(query, bot);
-            } else if (data === 'unblock_item') {
-                await blockedHandlers.handleUnblockItem(query, bot);
-            } else if (data === 'list_blocked') {
-                await blockedHandlers.handleListBlocked(query, bot);
-            } else if (data.startsWith('block_type:')) {
-                await blockedHandlers.handleBlockTypeSelection(query, bot);
-            } else if (data.startsWith('block_select_item:')) {
-                await blockedHandlers.handleBlockItemSelection(query, bot);
-            } else if (data.startsWith('unblock_item:')) {
-                await blockedHandlers.handleUnblockConfirm(query, bot);
-            } else if (data === 'block_back') {
-                await blockedHandlers.handleBlockBack(query, bot);
-            } else if (data === 'block_cancel') {
-                await bot.answerCallbackQuery(query.id);
-                const stateManager = require('../../unified/stateManager.js');
-                stateManager.clearUserState(userId);
-                await bot.sendMessage(chatId, '❌ Jarayon bekor qilindi.');
-            } else if (data === 'block_skip_comment') {
-                // Comment o'tkazib yuborish
-                const stateManager = require('../../unified/stateManager.js');
-                const state = stateManager.getUserState(userId);
-                if (state && state.data) {
-                    state.data.comment = null;
-                    await blockedHandlers.handleBlockConfirm(query, bot);
-                }
-            } else if (data === 'block_confirm') {
-                await blockedHandlers.handleBlockConfirm(query, bot);
-            }
-            return true;
-        }
+        // Bloklash faqat WEB orqali qilinadi (bot callback'lari olib tashlandi)
         
         // Reminder handlers (avval tekshirish)
         const reminderHandlers = require('./reminder.js');
@@ -735,29 +697,7 @@ async function handleDebtApprovalMessage(msg, bot) {
             return true;
         }
         
-        // Block handlers
-        const blockedHandlers = require('./blocked.js');
-        if (text && (text.includes('🚫 Bloklash') || text.includes('Bloklash'))) {
-            const user = await userHelper.getUserByTelegram(chatId, userId);
-            // debt:block, debt:admin, roles:manage yoki backward compatibility uchun debt:create, debt:approve_leader
-            if (user && (await userHelper.hasPermission(user.id, 'debt:block') || 
-                        await userHelper.hasPermission(user.id, 'debt:admin') ||
-                        await userHelper.hasPermission(user.id, 'roles:manage') ||
-                        await userHelper.hasPermission(user.id, 'debt:create') || 
-                        await userHelper.hasPermission(user.id, 'debt:approve_leader'))) {
-                await blockedHandlers.handleBlockStart(msg, bot);
-                return true;
-            } else {
-                await getBot().sendMessage(chatId, '❌ Sizda bloklash huquqi yo\'q.');
-                return true;
-            }
-        }
-        
-        // Block reason handler
-        const blockReasonHandled = await blockedHandlers.handleBlockReason(msg, bot);
-        if (blockReasonHandled) {
-            return true;
-        }
+        // Bloklash faqat WEB orqali qilinadi (botdagi bloklash olib tashlandi)
         
         // "Rolni o'zgartirish" knopkasi handler
         if (text && text === "🔄 Rolni o'zgartirish") {

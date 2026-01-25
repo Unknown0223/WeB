@@ -598,7 +598,8 @@ async function createDebtDataPage(data) {
         // ✅ MUHIM: Agar request_id mavjud bo'lsa, database'dan mavjud URL'ni tekshirish
         if (request_id) {
             try {
-                const db = require('./db.js').db;
+                // utils/telegraph.js -> project root db.js
+                const db = require('../db.js').db;
                 const existingRequest = await db('debt_requests')
                     .select('telegraph_url')
                     .where('id', request_id)
@@ -633,7 +634,8 @@ async function createDebtDataPage(data) {
             // ✅ MUHIM: Yangi yaratilgan URL'ni database'ga saqlash (agar request_id mavjud bo'lsa)
             if (request_id) {
                 try {
-                    const db = require('./db.js').db;
+                    // utils/telegraph.js -> project root db.js
+                    const db = require('../db.js').db;
                     await db('debt_requests')
                         .where('id', request_id)
                         .update({ telegraph_url: pageUrl });

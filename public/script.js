@@ -1,4 +1,4 @@
-﻿// --- Modern Confirm Dialog ---
+// --- Modern Confirm Dialog ---
 window.showConfirm = function(message, title = 'Tasdiqlash') {
     return new Promise((resolve) => {
         const modal = document.getElementById('confirm-modal');
@@ -2280,14 +2280,40 @@ const renderKpiCards = (stats) => {
             });
         });
 
+        function extractLateReasonWords(text) {
+            const s = (text ?? '').trim();
+            if (!s) return [];
+            // So'zlarni Unicode bo'yicha ajratamiz.
+            // "yo'l", "yo‘q", "to'g'ri" kabi apostrofli so'zlar ham qo'llansin.
+            const matches = s.match(/[\p{L}\p{N}]+(?:[’'ʻ`][\p{L}\p{N}]+)*/gu) || [];
+            // 1 harfli tokenlar ("f f f") so'z hisoblanmasin.
+            return matches
+                .map(w => w.replace(/[’'ʻ`]/g, '')) // uzunlik hisobida apostrofni chiqaramiz
+                .filter(w => w.length >= 2);
+        }
+
+        function isValidLateReason(text) {
+            const words = extractLateReasonWords(text);
+            // Minimal talab: 2 tadan ko'p so'z (ya'ni kamida 3 ta)
+            if (words.length < 3) return false;
+            // Juda qisqa "aa bb cc" kabi narsalarni ham o'tkazmaslik uchun
+            // umumiy harf/raqamlar sonini ham tekshiramiz.
+            const totalChars = words.reduce((sum, w) => sum + w.length, 0);
+            return totalChars >= 8;
+        }
+
         addSafeListener(DOM.lateCommentForm, 'submit', e => {
             e.preventDefault();
             const comment = DOM.lateCommentInput.value.trim();
-            if (comment) {
+            // Qat'iy validatsiya:
+            // - "ok", "ha", "yo'q" kabi 1-2 so'zli sabablar o'tmasin
+            // - "." "," "..." kabi belgilar o'tmasin
+            // - Kamida 3 ta so'z bo'lsin
+            if (isValidLateReason(comment)) {
                 DOM.lateCommentModal?.classList.add('hidden');
                 handleConfirm(comment);
             } else {
-                showToast("Iltimos, kechikish sababini kiriting!", true);
+                showToast("Kechikish sababini aniq yozing (kamida 3 ta so'z, har bir so'z kamida 2 harf)!", true);
             }
         });
         addSafeListener(DOM.excelBtn, 'click', exportToExcel);

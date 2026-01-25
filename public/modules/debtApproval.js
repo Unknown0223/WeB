@@ -4,6 +4,7 @@ import { state } from './state.js';
 import { DOM } from './dom.js';
 import { hasPermission, showToast, showConfirmDialog, createLogger } from './utils.js';
 import { safeFetch } from './api.js';
+import { removeDuplicatesById } from './arrayUtils.js';
 
 const logger = createLogger('DEBT_APPROVAL');
 
@@ -7756,7 +7757,7 @@ window.openUserBindingsModal = async function(userId) {
                                         Filiallar
                                     </h6>
                                     <div id="user-bindings-branches" style="max-height: 300px; overflow-y: auto; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px;">
-                                        ${getUniqueBranchesHTML(available.branches, bindings.branches, 'updateUserBrandsFromBranch')}
+                                        ${getUniqueBranchesHTML(available.branches, bindings.branches, 'updateUserBrandsFromBranch', 'bindings', available.brands)}
                                     </div>
                                 </div>
                             </div>
@@ -7833,32 +7834,24 @@ window.openUserBindingsModal = async function(userId) {
             const brandsContainer = modal.querySelector('#user-bindings-brands');
             const branchesContainer = modal.querySelector('#user-bindings-branches');
             const selectedBrands = Array.from(brandsContainer.querySelectorAll('input:checked')).map(cb => parseInt(cb.value));
-            const branchLabels = branchesContainer.querySelectorAll('label[data-brand-id]');
+            const branchLabels = branchesContainer.querySelectorAll('label[data-branch-map]');
             
-            // Agar hech qanday brend tanlanmagan bo'lsa, barcha filiallar ko'rsatiladi (nom bo'yicha unique)
+            // Endi filiallar ro'yxati nom bo'yicha allaqachon unique.
+            // Brend tanlanmasa - hammasini ko'rsatamiz.
             if (selectedBrands.length === 0) {
-                const shownNames = new Set();
                 branchLabels.forEach(label => {
-                    const branchName = label.querySelector('span').textContent.trim().toLowerCase();
-                    if (!shownNames.has(branchName)) {
-                        label.style.display = 'flex';
-                        shownNames.add(branchName);
-                    } else {
-                        label.style.display = 'none';
-                    }
+                    label.style.display = 'flex';
                 });
             } else {
-                // Tanlangan brendlarga tegishli barcha filiallar ko'rsatiladi, lekin avtomatik tanlanmaydi
-                // Avtomatik tanlash OLIB TASHLANDI - foydalanuvchi o'zi tanlaydi
+                // Tanlangan brendlarga tegishli filial nomlari ko'rsatiladi (unique ko'rinishda)
                 branchLabels.forEach(label => {
-                    const brandId = parseInt(label.getAttribute('data-brand-id'));
-                    
-                    if (selectedBrands.includes(brandId)) {
-                        label.style.display = 'flex'; // Faqat ko'rsatish
-                        // checkbox.checked = true; // OLIB TASHLANDI
-                    } else {
-                        label.style.display = 'none';
-                    }
+                    const brandIdsStr = label.getAttribute('data-brand-ids') || '';
+                    const brandIds = brandIdsStr
+                        .split(',')
+                        .map(x => parseInt(x, 10))
+                        .filter(n => !Number.isNaN(n));
+                    const shouldShow = brandIds.some(id => selectedBrands.includes(id));
+                    label.style.display = shouldShow ? 'flex' : 'none';
                 });
             }
         };
@@ -7867,20 +7860,17 @@ window.openUserBindingsModal = async function(userId) {
         window.updateUserBrandsFromBranch = function() {
             const brandsContainer = modal.querySelector('#user-bindings-brands');
             const branchesContainer = modal.querySelector('#user-bindings-branches');
-            const selectedBranches = Array.from(branchesContainer.querySelectorAll('input:checked')).map(cb => parseInt(cb.value));
-            const branchLabels = branchesContainer.querySelectorAll('label[data-brand-id]');
+            const selectedBranchLabels = Array.from(branchesContainer.querySelectorAll('input:checked'))
+                .map(cb => cb.closest('label'))
+                .filter(Boolean);
             
             // Tanlangan filiallarga tegishli brendlarni olish va ko'rsatish
             const relatedBrandIds = new Set();
-            selectedBranches.forEach(branchId => {
-                branchLabels.forEach(label => {
-                    const checkbox = label.querySelector('input[type="checkbox"]');
-                    if (checkbox && parseInt(checkbox.value) === branchId) {
-                        const brandId = parseInt(label.getAttribute('data-brand-id'));
-                        if (brandId) {
-                            relatedBrandIds.add(brandId);
-                        }
-                    }
+            selectedBranchLabels.forEach(label => {
+                const brandIdsStr = label.getAttribute('data-brand-ids') || '';
+                brandIdsStr.split(',').forEach(x => {
+                    const id = parseInt(x, 10);
+                    if (!Number.isNaN(id)) relatedBrandIds.add(id);
                 });
             });
             
@@ -8135,7 +8125,7 @@ window.toggleTaskType = function(taskType, checked) {
  * @param {string} mode - 'bindings' yoki 'tasks'
  * @returns {string} HTML string
  */
-function getUniqueBranchesHTML(availableBranches, bindingsBranches = [], onChangeHandler = null, mode = 'bindings') {
+function getUniqueBranchesHTML(availableBranches, bindingsBranches = [], onChangeHandler = null, mode = 'bindings', availableBrands = []) {
     if (availableBranches.length === 0) {
         return '<p style="text-align: center; color: rgba(255,255,255,0.5); padding: 10px; font-size: 13px;">Filiallar topilmadi</p>';
     }
@@ -8164,33 +8154,92 @@ function getUniqueBranchesHTML(availableBranches, bindingsBranches = [], onChang
         if (nameCompare !== 0) return nameCompare;
         return (a.brand_id || 0) - (b.brand_id || 0);
     });
+
+    // Filiallar ro'yxatida dublikat bo'lmasligi kerak.
+    // Shu sabab filiallarni NOM bo'yicha guruhlaymiz (masalan, "Andijon" bitta chiqadi),
+    // lekin keyin saqlashda tanlangan brend(lar)ga mos filial ID'lar expand qilinadi.
+    const normalized = (s) => (s || '').toString().trim().toLowerCase();
+    const groupsByName = new Map(); // nameKey -> { displayName, branches: [{id, brand_id}] }
+    uniqueBranches.forEach(br => {
+        const key = normalized(br.name);
+        if (!key) return;
+        if (!groupsByName.has(key)) {
+            groupsByName.set(key, { displayName: br.name, branches: [] });
+        }
+        groupsByName.get(key).branches.push({ id: br.id, brand_id: br.brand_id });
+    });
+
+    const groupedBranches = Array.from(groupsByName.entries())
+        .map(([nameKey, group]) => ({ nameKey, ...group }))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
     
-    if (mode === 'tasks') {
-        // Tasks rejimi
-    return uniqueBranches.map(branch => `
-        <label style="display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; margin-bottom: 5px;" 
-               data-brand-id="${branch.brand_id}"
-               onmouseover="this.style.background='rgba(79, 172, 254, 0.1)'" 
-               onmouseout="this.style.background='transparent'">
-                <input type="checkbox" value="${branch.id}" class="user-task-branch-checkbox"
-                       style="width: 18px; height: 18px; cursor: pointer;">
-            <span style="flex: 1; font-size: 14px;">${branch.name}</span>
-        </label>
-    `).join('');
-        } else {
-        // Bindings rejimi
-        const onChangeAttr = onChangeHandler ? `onchange="${onChangeHandler}(); updateUserBranchesFilter();"` : '';
-    return uniqueBranches.map(branch => `
-        <label style="display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; margin-bottom: 5px;" 
-               data-brand-id="${branch.brand_id}"
-               onmouseover="this.style.background='rgba(79, 172, 254, 0.1)'" 
-               onmouseout="this.style.background='transparent'">
-                <input type="checkbox" value="${branch.id}" ${bindingsBranches.some(b => b.id === branch.id) ? 'checked' : ''} 
-                       style="width: 18px; height: 18px; cursor: pointer;" ${onChangeAttr}>
-            <span style="flex: 1; font-size: 14px;">${branch.name}</span>
-        </label>
-    `).join('');
-    }
+    const renderGrouped = (mode) => {
+        const onChangeAttr = (mode === 'bindings' && onChangeHandler)
+            ? `onchange="${onChangeHandler}(); updateUserBranchesFilter();"`
+            : '';
+        
+        const cssClass = mode === 'tasks' ? 'user-task-branch-checkbox' : '';
+        
+        return groupedBranches.map(group => {
+            // data-branch-map: "branchId:brandId,branchId:brandId" (expand uchun)
+            const branchMap = group.branches.map(x => `${x.id}:${x.brand_id || ''}`).join(',');
+            const brandIds = Array.from(new Set(group.branches.map(x => x.brand_id).filter(Boolean))).join(',');
+            const checked = group.branches.some(x => bindingsBranches.some(b => b.id === x.id));
+            
+            return `
+                <label style="display: flex; align-items: center; gap: 10px; padding: 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; margin-bottom: 5px;" 
+                       data-brand-ids="${brandIds}"
+                       data-branch-map="${branchMap}"
+                       data-branch-name="${group.nameKey}"
+                       onmouseover="this.style.background='rgba(79, 172, 254, 0.1)'" 
+                       onmouseout="this.style.background='transparent'">
+                        <input type="checkbox" value="${group.nameKey}" ${checked ? 'checked' : ''} 
+                               style="width: 18px; height: 18px; cursor: pointer;" class="${cssClass}" ${onChangeAttr}>
+                    <span style="flex: 1; font-size: 14px;">${group.displayName}</span>
+                </label>
+            `;
+        }).join('');
+    };
+    
+    return mode === 'tasks' ? renderGrouped('tasks') : renderGrouped('bindings');
+}
+
+function getSelectedBranchIdsFromGroupedBindings(modal) {
+    const branchesContainer = modal?.querySelector('#user-bindings-branches');
+    const brandsContainer = modal?.querySelector('#user-bindings-brands');
+    if (!branchesContainer || !brandsContainer) return [];
+
+    const selectedBrandIds = new Set(
+        Array.from(brandsContainer.querySelectorAll('input:checked'))
+            .map(cb => parseInt(cb.value, 10))
+            .filter(n => !Number.isNaN(n))
+    );
+
+    const selected = new Set();
+    const selectedInputs = branchesContainer.querySelectorAll('input[type="checkbox"]:checked');
+    selectedInputs.forEach(input => {
+        const label = input.closest('label');
+        const mapStr = label?.getAttribute('data-branch-map') || '';
+        if (!mapStr) return;
+
+        mapStr.split(',').forEach(pair => {
+            const [idStr, brandStr] = pair.split(':');
+            const branchId = parseInt(idStr, 10);
+            const brandId = parseInt(brandStr, 10);
+            if (Number.isNaN(branchId)) return;
+
+            // Brend(lar) tanlangan bo'lsa, faqat o'sha brendlarga mos filiallarni olamiz
+            if (selectedBrandIds.size > 0) {
+                if (!Number.isNaN(brandId) && selectedBrandIds.has(brandId)) {
+                    selected.add(branchId);
+                }
+            } else {
+                selected.add(branchId);
+            }
+        });
+    });
+
+    return Array.from(selected.values());
 }
 
 // Save user bindings
@@ -8209,7 +8258,7 @@ window.saveUserBindings = async function(userId) {
         
         // "Bog'lanishlar" tab'idagi filial va brendlarni olish
         const bindingsBrands = Array.from(modal.querySelectorAll('#user-bindings-brands input:checked')).map(cb => parseInt(cb.value));
-        const bindingsBranches = Array.from(modal.querySelectorAll('#user-bindings-branches input:checked')).map(cb => parseInt(cb.value));
+        const bindingsBranches = getSelectedBranchIdsFromGroupedBindings(modal);
         
         // Kassir va Operator uchun "Bog'lanishlar" tab'idagi filiallarni olish
         const userRole = modal.dataset.userRole || '';
@@ -8386,7 +8435,7 @@ window.saveUserBindings = async function(userId) {
         
         // Faqat tanlangan brendlar va filiallar (avtomatik qo'shish yo'q)
         const selectedBrands = Array.from(brandsContainer.querySelectorAll('input:checked')).map(cb => parseInt(cb.value));
-        const selectedBranches = Array.from(branchesContainer.querySelectorAll('input:checked')).map(cb => parseInt(cb.value));
+        const selectedBranches = getSelectedBranchIdsFromGroupedBindings(modal);
         
         log(`[SAVE_USER_BINDINGS] Saqlash boshlanmoqda: userId=${userId}, brands=${JSON.stringify(selectedBrands)}, branches=${JSON.stringify(selectedBranches)}`);
         

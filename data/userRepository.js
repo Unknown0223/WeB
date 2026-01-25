@@ -14,19 +14,29 @@ const CACHE_TTL = 2 * 60 * 1000; // 2 daqiqa (qisqartirildi)
 async function findByUsername(username) {
     const trimmedUsername = username.trim();
     
-    // Avval to'g'ridan-to'g'ri qidiruv
-    let user = await db('users')
-        .where('username', trimmedUsername)
-        .first();
-    
-    if (user) return user;
-    
-    // Agar topilmasa, case-insensitive qidiruv
-    user = await db('users')
-        .whereRaw('LOWER(TRIM(username)) = LOWER(?)', [trimmedUsername])
-        .first();
-    
-    return user;
+    try {
+        // Avval to'g'ridan-to'g'ri qidiruv
+        let user = await db('users')
+            .where('username', trimmedUsername)
+            .first();
+        
+        if (user) return user;
+        
+        // Agar topilmasa, case-insensitive qidiruv
+        user = await db('users')
+            .whereRaw('LOWER(TRIM(username)) = LOWER(?)', [trimmedUsername])
+            .first();
+        
+        return user;
+    } catch (error) {
+        // Connection pool timeout xatoliklarini qayta chiqarish
+        if (error.message?.includes('Timeout acquiring a connection') || 
+            error.message?.includes('pool is probably full')) {
+            throw error;
+        }
+        // Boshqa xatoliklarni ham qayta chiqarish
+        throw error;
+    }
 }
 
 async function findById(id, withDetails = false) {

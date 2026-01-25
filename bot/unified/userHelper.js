@@ -15,13 +15,25 @@ const log = createLogger('USER_HELPER');
  */
 async function getUserByTelegram(chatId, userId) {
     try {
-        // Cache key
-        const cacheKey = `user_${chatId}_${userId}`;
+        // Cache key'lar:
+        // - lookupKey: telegram chat/user -> internal DB userId mapping (tezkor)
+        // - userKey: internal DB userId -> user object (clearUserCache(userId) bilan tozalanadi)
+        const lookupKey = `tg_lookup_${chatId}_${userId}`;
         
-        // Cache'dan olish (5 daqiqa)
-        const cached = cacheManager.get('users', cacheKey);
-        if (cached) {
-            return cached;
+        // 0) Agar mapping cache mavjud bo'lsa, avval userKey orqali qaytarishga harakat qilamiz
+        const cachedDbId = cacheManager.get('users', lookupKey);
+        if (cachedDbId) {
+            const userKey = `user_${cachedDbId}`;
+            const cachedUser = cacheManager.get('users', userKey);
+            if (cachedUser) {
+                return cachedUser;
+            }
+            // Agar userKey cache yo'q bo'lsa (invalidation bo'lgan), DB'dan ID bo'yicha olib yangilaymiz
+            const userById = await db('users').where({ id: cachedDbId }).first();
+            if (userById) {
+                cacheManager.set('users', userKey, userById, 5 * 60 * 1000);
+                return userById;
+            }
         }
         
         // 1. Avval telegram_chat_id orqali qidirish (asosiy usul - shaxsiy chat uchun)
@@ -29,7 +41,8 @@ async function getUserByTelegram(chatId, userId) {
         
         if (user) {
             // Cache'ga saqlash
-            cacheManager.set('users', cacheKey, user, 5 * 60 * 1000);
+            cacheManager.set('users', lookupKey, user.id, 5 * 60 * 1000);
+            cacheManager.set('users', `user_${user.id}`, user, 5 * 60 * 1000);
             return user;
         }
         
@@ -48,7 +61,8 @@ async function getUserByTelegram(chatId, userId) {
                 
                 if (user) {
                     // Cache'ga saqlash
-                    cacheManager.set('users', cacheKey, user, 5 * 60 * 1000);
+                    cacheManager.set('users', lookupKey, user.id, 5 * 60 * 1000);
+                    cacheManager.set('users', `user_${user.id}`, user, 5 * 60 * 1000);
                     return user;
                 }
             } else {
@@ -58,7 +72,8 @@ async function getUserByTelegram(chatId, userId) {
                     
                     if (user) {
                         // Cache'ga saqlash
-                        cacheManager.set('users', cacheKey, user, 5 * 60 * 1000);
+                        cacheManager.set('users', lookupKey, user.id, 5 * 60 * 1000);
+                        cacheManager.set('users', `user_${user.id}`, user, 5 * 60 * 1000);
                         return user;
                     }
                 }

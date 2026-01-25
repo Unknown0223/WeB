@@ -47,19 +47,10 @@ function getDbConfig() {
         // Reference bo'lsa ham, Railway runtime'da resolve qilinadi
         // Knex.js reference'ni connection string sifatida qabul qiladi va Railway runtime'da resolve qiladi
         
-        // Railway.com'da SSL kerak bo'lishi mumkin
-        // Connection string'ga SSL parametrlarini qo'shish
-        let connectionConfig = databaseUrl;
-        
-        // Agar connection string bo'lsa va SSL parametrlari yo'q bo'lsa, qo'shish
-        if (typeof databaseUrl === 'string' && databaseUrl.startsWith('postgresql://')) {
-            // Connection string'ga SSL parametrlarini qo'shish (agar yo'q bo'lsa)
-            if (!databaseUrl.includes('?ssl=') && !databaseUrl.includes('?sslmode=')) {
-                // Railway.com'da SSL kerak
-                connectionConfig = databaseUrl + (databaseUrl.includes('?') ? '&' : '?') + 'sslmode=require';
-                log.debug(`[DB] Added SSL parameter to connection string for Railway.com`);
-            }
-        }
+        // Eslatma: Railway Postgres'da SSL'ni majburan yoqish ba'zi holatlarda
+        // handshake muammolari keltirib chiqarishi mumkin. Shuning uchun connection string'ga
+        // sslmode qo'shmaymiz; kerak bo'lsa pg config orqali boshqariladi.
+        const connectionConfig = databaseUrl;
         
         return {
             client: 'pg',
@@ -107,9 +98,8 @@ function getDbConfig() {
                     database: pgDatabase,
                     user: pgUser,
                     password: pgPassword,
-                    ssl: {
-                        rejectUnauthorized: false // Railway.com'da self-signed certificate bo'lishi mumkin
-                    }
+                    // Railway ichki tarmog'ida ko'pincha SSL majburiy emas.
+                    // SSL handshake muammolarini oldini olish uchun bu yerda SSL'ni majburlamaymiz.
                 },
                 migrations: {
                     directory: path.resolve(__dirname, 'migrations')
@@ -307,10 +297,38 @@ const initializeDB = async () => {
             // Connection pool'ni test qilish
             log.info('[DB] Connection pool test qilinmoqda...');
             try {
+                // Knex ba'zan faqat timeout qaytaradi va asl sababni yashiradi.
+                // Shuning uchun avval pg Client bilan tezkor probe qilamiz.
+                try {
+                    const { Client } = require('pg');
+                    const connection = dbConfig?.connection;
+                    const probeStart = Date.now();
+                    
+                    let clientOptions = {};
+                    if (typeof connection === 'string') {
+                        clientOptions = { connectionString: connection };
+                    } else if (connection && typeof connection === 'object') {
+                        clientOptions = { ...connection };
+                    }
+                    
+                    const probeClient = new Client({
+                        ...clientOptions,
+                        connectionTimeoutMillis: 8000
+                    });
+                    
+                    await probeClient.connect();
+                    await probeClient.query('SELECT 1');
+                    await probeClient.end();
+                    const probeMs = Date.now() - probeStart;
+                    log.info(`[DB] ✅ PG probe OK (${probeMs}ms)`);
+                } catch (probeError) {
+                    log.warn(`[DB] ⚠️ PG probe FAIL (${probeError?.code || 'NO_CODE'}): ${probeError?.message || probeError}`);
+                }
+                
                 await db.raw('SELECT 1');
                 log.info('[DB] ✅ Connection pool test muvaffaqiyatli');
             } catch (testError) {
-                log.warn(`[DB] ⚠️ Connection test xatolik, ${1000}ms kutib qayta urinilmoqda...`);
+                log.warn(`[DB] ⚠️ Connection test xatolik (${testError?.code || 'NO_CODE'}): ${testError?.message || testError}. ${1000}ms kutib qayta urinilmoqda...`);
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 migrationRetries--;
                 continue;
@@ -654,25 +672,14 @@ function getDbConnectionString() {
         // Connection string bo'lsa, SSL parametrlarini qo'shish (Railway.com uchun)
         let connectionString = config.connection;
         
-        if (isRailway && connectionString.startsWith('postgresql://')) {
-            // Railway.com'da SSL kerak, lekin self-signed certificate bo'lishi mumkin
-            // Connection string'ga SSL parametrlarini qo'shish
-            if (!connectionString.includes('?ssl=') && !connectionString.includes('?sslmode=')) {
-                // SSL mode'ni require qilish, lekin rejectUnauthorized false (self-signed certificate uchun)
-                connectionString = connectionString + (connectionString.includes('?') ? '&' : '?') + 'sslmode=require';
-                log.debug(`[DB] Added SSL parameter to connection string for session store`);
-            }
-        }
+        // SSL mode'ni majburan qo'shmaymiz (Railway'da SSL handshake muammolari bo'lishi mumkin)
         
         return connectionString;
     } else if (config.connection && typeof config.connection === 'object') {
         const conn = config.connection;
         let connectionString = `postgresql://${conn.user}:${conn.password}@${conn.host}:${conn.port}/${conn.database}`;
         
-        // Railway.com'da SSL parametrlarini qo'shish
-        if (isRailway) {
-            connectionString = connectionString + '?sslmode=require';
-        }
+        // SSL parametrlarini qo'shmaymiz (zarur bo'lsa session store pg Pool orqali boshqariladi)
         
         return connectionString;
     }

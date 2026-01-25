@@ -8,6 +8,42 @@ const { createLogger } = require('../utils/logger.js');
 const router = express.Router();
 const log = createLogger('REPORTS');
 
+function extractLateReasonWords(text) {
+    const s = String(text ?? '').trim();
+    if (!s) return [];
+    const matches = s.match(/[\p{L}\p{N}]+(?:[’'ʻ`][\p{L}\p{N}]+)*/gu) || [];
+    return matches
+        .map(w => w.replace(/[’'ʻ`]/g, ''))
+        .filter(w => w.length >= 2);
+}
+
+function isValidLateReason(text) {
+    const words = extractLateReasonWords(text);
+    // Minimal talab: 2 tadan ko'p so'z (ya'ni kamida 3 ta)
+    if (words.length < 3) return false;
+    const totalChars = words.reduce((sum, w) => sum + w.length, 0);
+    return totalChars >= 8;
+}
+
+function isLateReportNow(dateStr) {
+    // Frontend logikasi: reportDate + 1 kun, 09:00 dan keyin kechikkan hisoblanadi.
+    // Server UTC'da ishlashi mumkin, lekin Uzbekistan (Asia/Tashkent) doim UTC+5 (DST yo'q).
+    // dateStr: "YYYY-MM-DD"
+    if (!dateStr || typeof dateStr !== 'string') return false;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (!m) return false;
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const d = Number(m[3]);
+    if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return false;
+
+    // cutoff Tashkent time: next day 09:00
+    // Convert to UTC by subtracting 5 hours.
+    const tashkentOffsetMinutes = 5 * 60;
+    const cutoffUtcMs = Date.UTC(y, mo, d + 1, 9, 0, 0) - tashkentOffsetMinutes * 60 * 1000;
+    return Date.now() > cutoffUtcMs;
+}
+
 // GET /api/reports - Hisobotlar ro'yxatini olish
 router.get('/', isAuthenticated, hasPermission(['reports:view_own', 'reports:view_assigned', 'reports:view_all']), async (req, res) => {
     try {
@@ -230,6 +266,22 @@ router.post('/', isAuthenticated, hasPermission('reports:create'), async (req, r
         return res.status(400).json({ message: "Sana va filial tanlanishi shart." });
     }
 
+    // Kechikkan hisobot bo'lsa, kechikish sababi majburiy va mazmunli bo'lishi kerak
+    if (isLateReportNow(date)) {
+        if (!isValidLateReason(late_comment)) {
+            return res.status(400).json({
+                message: "Kechikish sababini aniq yozing (kamida 3 ta so'z)!"
+            });
+        }
+    } else if (late_comment != null && String(late_comment).trim() !== '') {
+        // Kechikmagan bo'lsa ham, agar comment yuborilgan bo'lsa, mazmunli bo'lsin
+        if (!isValidLateReason(late_comment)) {
+            return res.status(400).json({
+                message: "Kechikish sababi noto'g'ri (kamida 3 ta so'z)!"
+            });
+        }
+    }
+
     // Data validatsiyasi
     if (!data || typeof data !== 'object') {
         return res.status(400).json({ message: "Hisobot ma'lumotlari noto'g'ri formatda." });
@@ -397,6 +449,15 @@ router.put('/:id', isAuthenticated, async (req, res) => {
     const reportId = req.params.id;
     const { date, location, data, settings, brand_id, currency, late_comment } = req.body;
     const user = req.session.user;
+
+    // Agar late_comment yuborilgan bo'lsa, mazmunli bo'lishi shart
+    if (late_comment != null && String(late_comment).trim() !== '') {
+        if (!isValidLateReason(late_comment)) {
+            return res.status(400).json({
+                message: "Kechikish sababi noto'g'ri (kamida 3 ta so'z)!"
+            });
+        }
+    }
 
     const totalSum = Object.values(data).reduce((sum, value) => sum + (Number(value) || 0), 0);
     if (totalSum === 0) {

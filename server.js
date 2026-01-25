@@ -14,6 +14,18 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/ws' });
 const PORT = process.env.PORT || 3000;
 
+// Railway.com va boshqa cloud platformalar uchun environment detection
+const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
+const isProduction = process.env.NODE_ENV === 'production' || isRailway;
+
+// Railway.com'da production mode va log level'ni avtomatik sozlash
+if (isRailway && !process.env.NODE_ENV) {
+    process.env.NODE_ENV = 'production';
+}
+if (isRailway && !process.env.LOG_LEVEL) {
+    process.env.LOG_LEVEL = 'warn'; // Railway'da default warn (error va warn loglar)
+}
+
 // Railway.com va boshqa reverse proxy'lar uchun trust proxy sozlash
 // Bu X-Forwarded-* header'larni to'g'ri ishlatish uchun kerak
 app.set('trust proxy', 1);
@@ -100,9 +112,6 @@ app.post('/telegram-webhook/:token', async (req, res) => {
 // Static files va session middleware (webhook'dan keyin)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Production yoki development rejimini aniqlash (session store'dan oldin)
-const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production';
-
 // Sessiyani sozlash
 const session = require('express-session');
 const { isPostgres, isSqlite, getDbConnectionString } = require('./db.js');
@@ -139,7 +148,7 @@ if (isPostgres) {
     }
     
     // Railway.com'da SSL sozlamalarini qo'shish (self-signed certificate uchun)
-    const isRailway = !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID || !!process.env.RAILWAY_SERVICE_NAME;
+    // isRailway allaqachon yuqorida e'lon qilingan (18-qator)
     
     // connect-pg-simple uchun config
     let pgConnectionConfig = {
@@ -434,7 +443,8 @@ global.broadcastWebSocket = (type, payload) => {
     log.info('🚀 SERVER INITIALIZATION BOSHLANDI');
     log.info(`📅 Vaqt: ${new Date().toISOString()}`);
     log.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    log.info(`🔧 Railway Environment: ${process.env.RAILWAY_ENVIRONMENT || 'NO'}`);
+    log.info(`🔧 Railway Environment: ${isRailway ? process.env.RAILWAY_ENVIRONMENT || 'YES' : 'NO'}`);
+    log.info(`📊 Log Level: ${process.env.LOG_LEVEL || 'auto'}`);
     log.info(`🔌 Port: ${PORT}`);
     log.info(`🌐 APP_BASE_URL: ${process.env.APP_BASE_URL || 'NOT SET'}`);
     log.info('═══════════════════════════════════════════════════════════');
@@ -568,12 +578,15 @@ global.broadcastWebSocket = (type, payload) => {
             // Bot token: faqat telegram_bot_token ishlatiladi (bot bitta)
             const botToken = await getSetting('telegram_bot_token', null);
             const telegramEnabled = await getSetting('telegram_enabled', 'false');
+            const telegramEnabledBool = String(telegramEnabled).toLowerCase() === 'true' || String(telegramEnabled) === '1';
             
             log.info(`[INIT] Bot token mavjud: ${!!botToken}, Telegram enabled: ${telegramEnabled}`);
 
-            // Bot token mavjud bo'lsa, bot'ni ishga tushirish
-            // telegram_enabled sozlamasiga bog'liq emas, chunki debt_bot_token alohida bot uchun
-            if (botToken && botToken.trim() !== '') {
+            // Telegram o'chirilgan bo'lsa, botni umuman ishga tushirmaymiz.
+            // Aks holda, lokal tarmoq cheklovlarida polling/reminderlar EFATAL/ENOTFOUND spam beradi.
+            if (!telegramEnabledBool) {
+                log.info('[INIT] [BOT] Telegram o\'chirilgan (telegram_enabled=false) - bot ishga tushirilmadi');
+            } else if (botToken && botToken.trim() !== '') {
                 (async () => {
                     // Deploy uchun webhook rejimida ishga tushirish
                     const appBaseUrl = process.env.APP_BASE_URL;

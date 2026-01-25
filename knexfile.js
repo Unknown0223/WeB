@@ -3,6 +3,8 @@
 require('dotenv').config(); // .env faylini yuklash (migration'lar uchun)
 
 const path = require('path');
+const { createLogger } = require('./utils/logger.js');
+const log = createLogger('KNEXFILE');
 
 // Database type ni aniqlash - SQLite yoki PostgreSQL
 // Railway.com, Render.com, Heroku kabi platformalarda PostgreSQL majburiy
@@ -36,7 +38,7 @@ if (useSqlite) {
       pool: {
         afterCreate: (conn, cb) => {
           conn.run('PRAGMA journal_mode = WAL;', (err) => {
-            if (err) console.warn('⚠️ WAL mode xatolik:', err.message);
+            if (err) log.warn('WAL mode xatolik:', err.message);
             conn.run('PRAGMA busy_timeout = 5000;', (err2) => {
               cb(err || err2, conn);
             });
@@ -121,7 +123,7 @@ if (useSqlite) {
     if (isRailway && !hasDatabaseUrl && !hasPostgresConfig) {
       // Build vaqtida migration o'tkazib yuboriladi, start vaqtida to'g'ri config bo'ladi
       // db.js da initializeDB() chaqirilganda, DATABASE_URL allaqachon mavjud bo'ladi
-      console.warn('⚠️ [KNEXFILE] Railway.com\'da DATABASE_URL hali sozlanmagan. Migration start vaqtida ishlaydi (db.js orqali).');
+      log.warn('Railway.com\'da DATABASE_URL hali sozlanmagan. Migration start vaqtida ishlaydi (db.js orqali).');
       // Dummy config - build vaqtida migration o'tkazib yuboriladi
       // Start vaqtida DATABASE_URL mavjud bo'ladi va to'g'ri config ishlatiladi
       module.exports = {
@@ -159,15 +161,15 @@ if (useSqlite) {
         pool: {
           min: 1,
           max: 20,
-          acquireTimeoutMillis: 120000,
-          idleTimeoutMillis: 30000,
-          createTimeoutMillis: 60000,
+          acquireTimeoutMillis: 30000,
+          idleTimeoutMillis: 10000,
+          createTimeoutMillis: 20000,
           destroyTimeoutMillis: 5000,
           reapIntervalMillis: 1000,
-          createRetryIntervalMillis: 500,
+          createRetryIntervalMillis: 200,
           propagateCreateError: false
         },
-        acquireConnectionTimeout: 120000,
+        acquireConnectionTimeout: 60000,
         asyncStackTraces: false,
         debug: false
       };
@@ -178,10 +180,10 @@ if (useSqlite) {
           ...mainDbConfig,
           pool: {
             ...mainDbConfig.pool,
-            min: 2,
-            max: 25
+            min: 1,
+            max: 20
           },
-          acquireConnectionTimeout: 120000
+          acquireConnectionTimeout: 60000
         }
       };
       return;
@@ -191,11 +193,9 @@ if (useSqlite) {
         'Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.\n' +
         'PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.'
       );
-      if (typeof console !== 'undefined') {
-        console.error('❌ [DB] ❌ [DB] Railway.com\'da DATABASE_URL sozlanmagan!');
-        console.error('❌ [DB] ❌ [DB] Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
-        console.error('❌ [DB] ❌ [DB] PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
-      }
+      log.error('Railway.com\'da DATABASE_URL sozlanmagan!');
+      log.error('Iltimos, Railway.com\'da PostgreSQL service qo\'shing va uni web service bilan bog\'lang.');
+      log.error('PostgreSQL service qo\'shilganda, DATABASE_URL avtomatik yaratiladi.');
       throw error;
     } else {
       throw new Error(
@@ -231,15 +231,15 @@ if (useSqlite) {
         pool: {
           min: 1,
           max: 20,
-          acquireTimeoutMillis: 120000,
-          idleTimeoutMillis: 30000,
-          createTimeoutMillis: 60000,
+          acquireTimeoutMillis: 30000,
+          idleTimeoutMillis: 10000,
+          createTimeoutMillis: 20000,
           destroyTimeoutMillis: 5000,
           reapIntervalMillis: 1000,
-          createRetryIntervalMillis: 500,
+          createRetryIntervalMillis: 200,
           propagateCreateError: false
         },
-        acquireConnectionTimeout: 120000,
+        acquireConnectionTimeout: 60000,
     asyncStackTraces: false,
     debug: false
   };
@@ -250,10 +250,10 @@ if (useSqlite) {
       ...mainDbConfig,
       pool: {
         ...mainDbConfig.pool,
-        min: 2,
-        max: 25
+        min: 1,
+        max: 20
       },
-      acquireConnectionTimeout: 120000
+      acquireConnectionTimeout: 60000
     }
   };
 }

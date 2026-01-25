@@ -36,6 +36,17 @@ async function getButtonsFromDatabase(roleName, permissions) {
         // Permission tekshiruvi
         const filteredButtons = [];
         for (const btn of visibleButtons) {
+            // Bloklash faqat WEB orqali (bot menyusidan olib tashlangan)
+            if (
+                btn.button_key === 'block' ||
+                btn.button_key === 'block_leader' ||
+                (btn.button_text && String(btn.button_text).includes('Bloklash')) ||
+                btn.permission_required === 'debt:block' ||
+                btn.permission_required === 'debt:unblock'
+            ) {
+                continue;
+            }
+
             // Agar permission_required bo'sh bo'lsa, har doim ko'rsatish
             if (!btn.permission_required) {
                 filteredButtons.push(btn);
@@ -157,9 +168,6 @@ async function createUnifiedKeyboard(user, activeRole = null) {
                 { text: "✅ Tasdiqlangan so'rovlar" },
                 { text: "📊 Brend va Filiallar statistikasi" }
             ]);
-            keyboard.push([
-                { text: "🚫 Bloklash" }
-            ]);
         }
         
         if (isCashier || permissions.includes('debt:approve_cashier')) {
@@ -183,9 +191,6 @@ async function createUnifiedKeyboard(user, activeRole = null) {
                 { text: "📥 SET so'rovlari" },
                 { text: "📋 Tasdiqlangan so'rovlar" }
             ]);
-            keyboard.push([
-                { text: "🚫 Bloklash" }
-            ]);
         }
         
         if (permissions.includes('debt:approve_supervisor')) {
@@ -195,12 +200,7 @@ async function createUnifiedKeyboard(user, activeRole = null) {
             ]);
         }
         
-        if (permissions.includes('debt:block') || permissions.includes('debt:admin') || ADMIN_ROLES.includes(user.role)) {
-            const hasBlockButton = keyboard.some(row => row.some(btn => btn.text && btn.text.includes('🚫 Bloklash')));
-            if (!hasBlockButton) {
-                keyboard.push([{ text: "🚫 Bloklash" }]);
-            }
-        }
+        // Bloklash faqat WEB orqali qilinadi (botdan olib tashlandi)
         
         if (permissions.includes('debt:admin') || permissions.includes('debt:manage_bindings') || ADMIN_ROLES.includes(user.role)) {
             keyboard.push([{ text: "⚙️ Sozlamalar" }]);

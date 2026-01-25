@@ -395,6 +395,8 @@ async function formatAndSendReport(payload) {
         const formattedNewDate = format(new Date(date), 'dd.MM.yyyy');
         
         messageText += `✍️ <b>Hisobot Tahrirlandi #${String(report_id).padStart(4, '0')}</b>\n`;
+        // Filial nomini qo'shish (yangi hisobot kabi)
+        messageText += `<b>${escapeHtml(location.toUpperCase())} filiali</b>\n`;
         if (formattedOldDate) {
             messageText += `📅 ${formattedOldDate} uchun hisobot\n`;
         }
@@ -1228,14 +1230,12 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     if (leadersGroup && leadersGroup.telegram_group_id === chatId) {
                         // Rahbarlar guruhida /start bosilganda reply keyboard yuborish
                         const welcomeText = `✅ <b>Bot ishga tushdi!</b>\n\n` +
-                            `Rahbarlar uchun bloklash va boshqaruv funksiyalari mavjud.\n\n` +
                             `Quyidagi tugmalardan foydalaning:`;
                         
                         const keyboard = {
                             keyboard: [
                                 [{ text: "📥 SET so'rovlari" }],
-                                [{ text: "📋 Tasdiqlangan so'rovlar" }],
-                                [{ text: "🚫 Bloklash" }]
+                                [{ text: "📋 Tasdiqlangan so'rovlar" }]
                             ],
                             resize_keyboard: true,
                             one_time_keyboard: false
@@ -1872,7 +1872,6 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                                 `${userInfoText}${bindingsText}\n\n` +
                                 `📋 <b>Rahbarlar uchun funksiyalar:</b>\n` +
                                 `• SET so'rovlarni ko'rish va tasdiqlash\n` +
-                                `• Bloklangan elementlarni boshqarish\n` +
                                 `• Tasdiqlangan so'rovlarni ko'rish\n\n` +
                                 `Quyidagi tugmalardan foydalaning:`;
                         } else {
@@ -2547,7 +2546,6 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                         `${userInfoText}${bindingsText}\n\n` +
                         `📋 <b>Rahbarlar uchun funksiyalar:</b>\n` +
                         `• SET so'rovlarni ko'rish va tasdiqlash\n` +
-                        `• Bloklangan elementlarni boshqarish\n` +
                         `• Tasdiqlangan so'rovlarni ko'rish\n\n` +
                         `Quyidagi tugmalardan foydalaning:`;
                 } else {
@@ -2728,15 +2726,13 @@ const initializeBot = async (botToken, options = { polling: true }) => {
                     // Yoki guruh uchun umumiy keyboard yaratish
                     // Guruhda keyboard yuborish uchun bot admin bo'lishi kerak
                     const welcomeText = `✅ <b>Bot guruhga qo'shildi!</b>\n\n` +
-                        `Rahbarlar uchun bloklash va boshqaruv funksiyalari mavjud.\n\n` +
                         `Quyidagi tugmalardan foydalaning:`;
                     
                     // Guruh uchun umumiy keyboard yaratish (rahbarlar uchun)
                     const keyboard = {
                         keyboard: [
                             [{ text: "📥 SET so'rovlari" }],
-                            [{ text: "📋 Tasdiqlangan so'rovlar" }],
-                            [{ text: "🚫 Bloklash" }]
+                            [{ text: "📋 Tasdiqlangan so'rovlar" }]
                         ],
                         resize_keyboard: true,
                         one_time_keyboard: false

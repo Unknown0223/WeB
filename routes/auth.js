@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
-const { db, logAction } = require('../db.js');
+const { db, logAction, isPostgres } = require('../db.js');
 const { isAuthenticated } = require('../middleware/auth.js');
 const { sendToTelegram } = require('../utils/bot.js');
 const userRepository = require('../data/userRepository.js');
@@ -133,7 +133,8 @@ router.get('/public/settings/branding', async (req, res) => {
         log.error("Public branding settings xatoligi:", lastError.message);
     }
     
-    res.status(lastError ? 500 : 200).json({ 
+    const statusCode = lastError ? 500 : 200;
+    res.status(statusCode).json({ 
         logo: {
             text: 'MANUS', 
             color: '#4CAF50', 
@@ -186,17 +187,33 @@ router.post('/register', async (req, res) => {
         ]);
 
         // Foydalanuvchini bazaga qo'shish
-        const insertResult = await db('users').insert({
-            username: username,
-            password: hashedPassword,
-            secret_word: hashedSecretWord,
-            fullname: fullname,
-            status: 'pending_telegram_subscription',
-            role: 'pending'
-        });
-        
-        // SQLite'da insert qilganda ID qaytariladi
-        const userId = Array.isArray(insertResult) ? insertResult[0] : insertResult;
+        // ⚠️ PostgreSQL'da oddiy .insert() ID qaytarmaydi (pg result object bo'lishi mumkin).
+        // Shuning uchun Postgresda returning('id') bilan ID ni olib ketamiz.
+        let userId;
+        if (isPostgres) {
+            const insertResult = await db('users')
+                .insert({
+                    username: username,
+                    password: hashedPassword,
+                    secret_word: hashedSecretWord,
+                    fullname: fullname,
+                    status: 'pending_telegram_subscription',
+                    role: 'pending'
+                })
+                .returning('id');
+            userId = insertResult[0]?.id || insertResult[0];
+        } else {
+            const insertResult = await db('users').insert({
+                username: username,
+                password: hashedPassword,
+                secret_word: hashedSecretWord,
+                fullname: fullname,
+                status: 'pending_telegram_subscription',
+                role: 'pending'
+            });
+            // SQLite'da insert qilganda ID qaytariladi
+            userId = Array.isArray(insertResult) ? insertResult[0] : insertResult;
+        }
         
         // Tekshirish: foydalanuvchi haqiqatan yaratildimi?
         const createdUser = await db('users').where({ id: userId }).first();
