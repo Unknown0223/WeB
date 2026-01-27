@@ -379,6 +379,220 @@ export function showConfirmDialog(options = {}) {
 }
 
 /**
+ * Chiroyli modal oyna - sabab kiritish uchun
+ * @param {Object} options - Modal sozlamalari
+ * @param {string} options.title - Modal sarlavhasi
+ * @param {string} options.message - Modal xabari
+ * @param {string} options.placeholder - Input placeholder
+ * @param {string} options.confirmText - Tasdiqlash tugmasi matni
+ * @param {string} options.cancelText - Bekor qilish tugmasi matni
+ * @returns {Promise<string|null>} - Kiritilgan sabab yoki null (bekor qilindi)
+ */
+export function showReasonInputModal(options = {}) {
+    return new Promise((resolve) => {
+        const {
+            title = 'Sababni kiriting',
+            message = '',
+            placeholder = 'Sababni kiriting (ixtiyoriy)',
+            confirmText = 'Davom ettirish',
+            cancelText = 'Bekor qilish'
+        } = options;
+        
+        // Modal yaratish
+        const modal = document.createElement('div');
+        modal.className = 'modal reason-input-modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        `;
+        
+        modal.innerHTML = `
+            <div class="reason-input-modal-content" style="
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                border-radius: 16px;
+                padding: 0;
+                max-width: 500px;
+                width: 90%;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                transform: scale(0.9);
+                transition: transform 0.3s ease;
+            ">
+                <div style="padding: 30px 30px 20px 30px;">
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+                        <div style="
+                            width: 50px;
+                            height: 50px;
+                            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+                            border-radius: 12px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ">
+                            <i data-feather="alert-circle" style="width: 28px; height: 28px; color: white;"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <h3 style="
+                                margin: 0;
+                                font-size: 20px;
+                                font-weight: 700;
+                                color: white;
+                                line-height: 1.3;
+                            ">${title}</h3>
+                        </div>
+                    </div>
+                    
+                    ${message ? `
+                    <p style="
+                        margin: 0 0 20px 0;
+                        font-size: 14px;
+                        color: rgba(255, 255, 255, 0.7);
+                        line-height: 1.6;
+                    ">${message}</p>
+                    ` : ''}
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="
+                            display: block;
+                            margin-bottom: 10px;
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: rgba(255, 255, 255, 0.9);
+                        ">Sababni kiriting (ixtiyoriy):</label>
+                        <textarea 
+                            id="reason-input-textarea" 
+                            placeholder="${placeholder}"
+                            style="
+                                width: 100%;
+                                min-height: 100px;
+                                padding: 12px 16px;
+                                background: rgba(255, 255, 255, 0.05);
+                                border: 2px solid rgba(255, 255, 255, 0.1);
+                                border-radius: 10px;
+                                color: white;
+                                font-size: 14px;
+                                font-family: inherit;
+                                resize: vertical;
+                                transition: all 0.3s ease;
+                                box-sizing: border-box;
+                            "
+                            onfocus="this.style.borderColor='rgba(255, 107, 107, 0.5)'; this.style.background='rgba(255, 255, 255, 0.08)';"
+                            onblur="this.style.borderColor='rgba(255, 255, 255, 0.1)'; this.style.background='rgba(255, 255, 255, 0.05)';"
+                        ></textarea>
+                    </div>
+                </div>
+                
+                <div style="
+                    padding: 20px 30px 30px 30px;
+                    border-top: 1px solid rgba(255, 255, 255, 0.1);
+                    display: flex;
+                    gap: 12px;
+                    justify-content: flex-end;
+                ">
+                    <button class="reason-input-cancel-btn" style="
+                        padding: 12px 24px;
+                        background: rgba(255, 255, 255, 0.1);
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        border-radius: 8px;
+                        color: rgba(255, 255, 255, 0.8);
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    " onmouseover="this.style.background='rgba(255, 255, 255, 0.15)';" onmouseout="this.style.background='rgba(255, 255, 255, 0.1)';">
+                        ${cancelText}
+                    </button>
+                    <button class="reason-input-confirm-btn" style="
+                        padding: 12px 24px;
+                        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+                        border: none;
+                        border-radius: 8px;
+                        color: white;
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+                    " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(255, 107, 107, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(255, 107, 107, 0.3)';">
+                        ${confirmText}
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Feather icons yangilash
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+        
+        // Animation
+        setTimeout(() => {
+            modal.style.opacity = '1';
+            const content = modal.querySelector('.reason-input-modal-content');
+            content.style.transform = 'scale(1)';
+        }, 10);
+        
+        const textarea = modal.querySelector('#reason-input-textarea');
+        const confirmBtn = modal.querySelector('.reason-input-confirm-btn');
+        const cancelBtn = modal.querySelector('.reason-input-cancel-btn');
+        
+        // Focus textarea
+        setTimeout(() => textarea.focus(), 100);
+        
+        const closeDialog = (result) => {
+            modal.style.opacity = '0';
+            const content = modal.querySelector('.reason-input-modal-content');
+            content.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+                modal.remove();
+                resolve(result);
+            }, 300);
+        };
+        
+        confirmBtn.addEventListener('click', () => {
+            const value = textarea.value.trim();
+            closeDialog(value || null);
+        });
+        
+        cancelBtn.addEventListener('click', () => closeDialog(null));
+        
+        // Overlay bosilganda yopish
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeDialog(null);
+        });
+        
+        // ESC tugmasi bilan yopish
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeDialog(null);
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+        
+        // Enter + Ctrl/Cmd tugmalari bilan tasdiqlash
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                confirmBtn.click();
+            }
+        });
+    });
+}
+
+/**
  * Format number with thousand separators
  * @param {number} num - Number to format
  * @returns {string} - Formatted number string

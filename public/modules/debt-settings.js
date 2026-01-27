@@ -54,6 +54,12 @@ const BUTTON_DESCRIPTIONS = {
  * Debt settings modalini ko'rsatish - Faqat Bot Knopkalari Sozlamalari
  */
 export function showDebtSettingsModal() {
+    // Agar modal allaqachon mavjud bo'lsa, uni o'chirish
+    const existingModal = document.getElementById('debt-settings-modal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'debt-settings-modal';
@@ -86,6 +92,13 @@ export function showDebtSettingsModal() {
     `;
     
     document.body.appendChild(modal);
+    
+    // Modal tashqarisiga bosilganda yopish
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeDebtSettingsModal();
+        }
+    });
     
     // Sozlamalarni yuklash
     loadBotButtonsRoles();
@@ -177,12 +190,9 @@ function renderBotButtonsList(buttons, role) {
     
     let html = '<div>';
     
-    // Barchasini belgilash/olib tashlash va boshqa roldan qo'shish tugmalari
+    // Barchasini belgilash/olib tashlash va saqlash tugmalari
     html += `
-        <div style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: space-between; align-items: center;">
-            <button onclick="showCopyButtonsModal('${role}')" class="btn" style="padding: 8px 16px; font-size: 14px; background: rgba(79, 172, 254, 0.2); border: 1px solid rgba(79, 172, 254, 0.5); color: #4facfe;">
-                📋 Boshqa roldan qo'shish
-            </button>
+        <div style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap;">
             <div style="display: flex; gap: 10px;">
                 <button onclick="selectAllButtons('${role}')" class="btn btn-primary" style="padding: 8px 16px; font-size: 14px;">
                     ✓ Barchasini belgilash
@@ -191,6 +201,9 @@ function renderBotButtonsList(buttons, role) {
                     ☐ Barchasini olib tashlash
                 </button>
             </div>
+            <button onclick="saveAllButtons('${role}')" class="btn btn-primary" style="padding: 10px 24px; font-size: 15px; font-weight: 600; background: #4facfe; border: none; box-shadow: 0 2px 8px rgba(79, 172, 254, 0.3);">
+                💾 Saqlash
+            </button>
         </div>
     `;
     
@@ -222,8 +235,11 @@ function renderBotButtonsList(buttons, role) {
             }
             
             permissionButtons.forEach(btn => {
-                const isVisible = btn.is_visible !== false; // Default true
+                // is_visible ni aniq tekshirish (SQLite'da 1/0, JavaScript'da true/false)
+                // Agar is_visible 1 yoki true bo'lsa, checked bo'ladi
+                const isVisible = btn.is_visible === true || btn.is_visible === 1 || Boolean(btn.is_visible);
                 const description = BUTTON_DESCRIPTIONS[btn.button_key] || '';
+                
                 html += `
                     <div style="padding: 16px; background: rgba(255,255,255,0.05); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s;"
                          onmouseover="this.style.background='rgba(79,172,254,0.1)'; this.style.borderColor='rgba(79,172,254,0.3)';"
@@ -232,7 +248,6 @@ function renderBotButtonsList(buttons, role) {
                             <input type="checkbox" 
                                    id="btn-${btn.id}" 
                                    ${isVisible ? 'checked' : ''} 
-                                   onchange="updateButtonVisibility(${btn.id}, '${role}', this.checked)"
                                    style="margin-top: 2px; cursor: pointer; width: 20px; height: 20px; accent-color: #4facfe; flex-shrink: 0;">
                             <label for="btn-${btn.id}" style="flex: 1; cursor: pointer; margin: 0;">
                                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: ${description ? '6px' : '0'};">
@@ -310,7 +325,6 @@ window.selectAllButtons = async function(role) {
             const checkbox = document.getElementById(`btn-${btn.id}`);
             if (checkbox && !checkbox.checked) {
                 checkbox.checked = true;
-                updateButtonVisibility(btn.id, role, true);
             }
         });
         
@@ -340,7 +354,6 @@ window.deselectAllButtons = async function(role) {
             const checkbox = document.getElementById(`btn-${btn.id}`);
             if (checkbox && checkbox.checked) {
                 checkbox.checked = false;
-                updateButtonVisibility(btn.id, role, false);
             }
         });
         
@@ -470,29 +483,81 @@ window.copyButtonsFromRole = async function(targetRole) {
 };
 
 /**
- * Knopka ko'rinishini yangilash
+ * Knopka ko'rinishini yangilash (faqat UI'da, saqlash emas)
  */
-window.updateButtonVisibility = async function(buttonId, role, isVisible) {
+window.updateButtonVisibility = function(buttonId, role, isVisible) {
+    // Faqat checkbox holatini o'zgartirish, avtomatik saqlash yo'q
+    // Saqlash "Saqlash" tugmasi orqali amalga oshiriladi
+};
+
+/**
+ * Barcha knopkalarni saqlash
+ */
+window.saveAllButtons = async function(role) {
     try {
+        console.log(`[SAVE] Saqlash boshlandi: role=${role}`);
+        
+        // Avval barcha knopkalarni yuklab olish (order_index uchun)
+        const res = await safeFetch(`${BUTTONS_API_URL}/${role}`);
+        if (!res || !res.ok) {
+            console.error('[SAVE] Ma\'lumotlarni yuklashda xatolik:', res);
+            showToast('Ma\'lumotlarni yuklashda xatolik', 'error');
+            return;
+        }
+        
+        const data = await res.json();
+        const allButtons = data.buttons || [];
+        
+        console.log(`[SAVE] Yuklandi: total=${allButtons.length}`);
+        
+        // Barcha checkbox'larni olish va ularning holatini saqlash
+        const buttons = [];
+        
+        allButtons.forEach(btn => {
+            const checkbox = document.getElementById(`btn-${btn.id}`);
+            if (checkbox) {
+                buttons.push({
+                    button_id: btn.id,
+                    is_visible: checkbox.checked,
+                    order_index: btn.order_index || btn.final_order_index || 0
+                });
+            } else {
+                console.warn(`[SAVE] Checkbox topilmadi: button_id=${btn.id}`);
+            }
+        });
+        
+        console.log(`[SAVE] Checkbox'lar tekshirildi: total=${buttons.length}, visible=${buttons.filter(b => b.is_visible).length}, hidden=${buttons.filter(b => !b.is_visible).length}`);
+        
+        if (buttons.length === 0) {
+            showToast('Saqlash uchun knopkalar topilmadi', 'warning');
+            return;
+        }
+        
+        // Saqlash
+        console.log(`[SAVE] Saqlash so'rovi yuborilmoqda: role=${role}, buttons=${buttons.length}`);
         const saveRes = await safeFetch(`${BUTTONS_API_URL}/${role}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ button_id: buttonId, is_visible: isVisible })
+            body: JSON.stringify({ buttons })
         });
         
         if (!saveRes || !saveRes.ok) {
-            showToast('Saqlashda xatolik', 'error');
-            const checkbox = document.getElementById(`btn-${buttonId}`);
-            if (checkbox) checkbox.checked = !isVisible;
+            const errorData = await saveRes.json().catch(() => ({ error: 'Saqlashda xatolik' }));
+            console.error('[SAVE] Saqlashda xatolik:', errorData);
+            showToast(errorData.error || 'Saqlashda xatolik', 'error');
             return;
         }
-        // Faqat individual o'zgarishlar uchun toast ko'rsatish (selectAll/deselectAll da alohida ko'rsatiladi)
-        // showToast('Sozlama saqlandi', 'success');
+        
+        const saveData = await saveRes.json();
+        console.log('[SAVE] Saqlash muvaffaqiyatli:', saveData);
+        
+        showToast('Knopkalar muvaffaqiyatli saqlandi', 'success');
+        
+        // Knopkalarni qayta yuklash
+        await loadBotButtonsForRole();
     } catch (error) {
-        console.error('Error updating button visibility:', error);
+        console.error('[SAVE] Xatolik:', error);
         showToast('Xatolik yuz berdi', 'error');
-        const checkbox = document.getElementById(`btn-${buttonId}`);
-        if (checkbox) checkbox.checked = !isVisible;
     }
 };
 

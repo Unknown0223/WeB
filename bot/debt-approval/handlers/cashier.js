@@ -632,6 +632,7 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
         let excelData = null;
         let excelHeaders = null;
         let excelColumns = null;
+        let telegraphUrl = null; // ✅ Funksiya boshida e'lon qilish (barcha holatlar uchun)
         
         if (request.type === 'SET' && request.excel_data) {
             // SET so'rov uchun formatSetRequestMessage ishlatish
@@ -666,14 +667,16 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                 }
             }
             
-            // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
-            // MUHIM: Kassirga har doim Telegraph link ishlatilishi kerak
-            let telegraphUrl = null;
-            if (excelData && Array.isArray(excelData) && excelData.length > 0) {
+            // ✅ MUHIM: Avval database'dan mavjud URL ni tekshirish
+            if (request.telegraph_url && typeof request.telegraph_url === 'string' && request.telegraph_url.trim() !== '') {
+                telegraphUrl = request.telegraph_url;
+                log.info(`[CASHIER] [SHOW_REQUEST] ✅ Telegraph URL database'dan olingan: requestId=${request.id}, URL=${telegraphUrl}`);
+            } else if (excelData && Array.isArray(excelData) && excelData.length > 0) {
+                // Agar database'da URL bo'lmasa, yangi yaratish
                 try {
                     const { createDebtDataPage } = require('../../../utils/telegraph.js');
                     telegraphUrl = await createDebtDataPage({
-                        request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                        request_id: request.id,
                         request_uid: request.request_uid,
                         brand_name: request.brand_name,
                         filial_name: request.filial_name,
@@ -684,15 +687,14 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
                         total_amount: request.excel_total,
-                        isForCashier: true // ✅ MUHIM: Kassir uchun agent bo'yicha guruhlash
+                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                     });
                     
                     if (!telegraphUrl) {
-                        log.warn(`[CASHIER] [SHOW_REQUEST] Telegraph sahifa yaratilmadi (null qaytdi): requestId=${request.id}`);
                         // Qayta urinish
                         try {
                             telegraphUrl = await createDebtDataPage({
-                                request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                                request_id: request.id,
                                 request_uid: request.request_uid,
                                 brand_name: request.brand_name,
                                 filial_name: request.filial_name,
@@ -703,7 +705,7 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                                 excel_headers: excelHeaders,
                                 excel_columns: excelColumns,
                                 total_amount: request.excel_total,
-                                isForCashier: true // ✅ MUHIM: Kassir uchun agent bo'yicha guruhlash
+                                isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                             });
                         } catch (retryError) {
                             log.error(`[CASHIER] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -714,7 +716,7 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                     // Qayta urinish
                     try {
                         telegraphUrl = await createDebtDataPage({
-                            request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                            request_id: request.id,
                             request_uid: request.request_uid,
                             brand_name: request.brand_name,
                             filial_name: request.filial_name,
@@ -725,7 +727,7 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                             excel_headers: excelHeaders,
                             excel_columns: excelColumns,
                             total_amount: request.excel_total,
-                            isForCashier: true // ✅ MUHIM: Kassir uchun agent bo'yicha guruhlash
+                            isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                         });
                     } catch (retryError) {
                         log.error(`[CASHIER] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -733,11 +735,12 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                 }
             }
             
-            // Debug: Telegraph URL tekshiruvi
-            if (telegraphUrl) {
+            
+            // Debug: telegraphUrl tekshiruvi
+            if (!telegraphUrl && excelData && excelData.length > 0) {
+                log.warn(`[CASHIER] [SHOW_REQUEST] ⚠️ Telegraph URL mavjud emas: requestId=${request.id}, excelDataLength=${excelData.length}, excelColumns=${!!excelColumns}`);
+            } else if (telegraphUrl) {
                 log.info(`[CASHIER] [SHOW_REQUEST] ✅ Telegraph URL mavjud: requestId=${request.id}, URL=${telegraphUrl}`);
-            } else {
-                log.warn(`[CASHIER] [SHOW_REQUEST] ⚠️ Telegraph URL mavjud emas: requestId=${request.id}, excelData=${!!excelData}, excelDataLength=${excelData?.length || 0}, excelColumns=${!!excelColumns}`);
             }
             
             message = formatSetRequestMessage({
@@ -750,8 +753,8 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                 excel_headers: excelHeaders,
                 excel_columns: excelColumns,
                 excel_total: request.excel_total,
-                is_for_cashier: true, // Kassirga yuborilayotgani
-                telegraph_url: telegraphUrl
+                is_for_cashier: true, // Kassirga yuborilayotgani (lekin Telegraph link ko'rsatiladi)
+                telegraph_url: telegraphUrl // ✅ MUHIM: telegraphUrl o'zgaruvchisini to'g'ridan-to'g'ri o'tkazish
             });
         } else {
             // Oddiy so'rov uchun formatNormalRequestMessage
@@ -864,7 +867,7 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
         try {
             const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
             trackMessage(chatId, sentMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, true, request.id, false); // shouldCleanup=true, isApproved=false - pending so'rov
-            log.debug(`[CASHIER] [SHOW_REQUEST] Xabar kuzatishga qo'shildi: chatId=${chatId}, messageId=${sentMessage.message_id}, requestId=${request.id}`);
+            log.info(`[CASHIER] [SHOW_REQUEST] ✅ Kassirga xabar yuborildi: requestId=${request.id}, requestUID=${request.request_uid}, chatId=${chatId}, messageId=${sentMessage.message_id}, chatType=personal, telegraphUrl=${telegraphUrl || 'yo\'q'}, format=client-based`);
         } catch (trackError) {
             log.debug(`[CASHIER] [SHOW_REQUEST] Xabarni kuzatishga qo'shishda xatolik (ignored): ${trackError.message}`);
         }
@@ -936,7 +939,18 @@ async function handleCashierApproval(query, bot) {
             log.warn(`[CASHIER] Callback query timeout: ${callbackError.message}`);
         }
         
+        // ✅ OPTIMALLASHTIRISH: Foydalanuvchini olish (cache'dan tezroq)
+        const user = await userHelper.getUserByTelegram(chatId, userId);
+        if (!user) {
+            await bot.sendMessage(chatId, '❌ Foydalanuvchi topilmadi.');
+            return;
+        }
+        
         // ✅ OPTIMALLASHTIRISH: Avval so'rovni tekshirish (eng tez)
+        // Eslatma: Raxbar tasdiqlagandan keyin operator tayinlanganda current_approver_type operatorga o'zgaradi,
+        // shuning uchun faqat current_approver_type = 'cashier' tekshiruvi yetarli emas.
+        // Agar so'rov APPROVED_BY_LEADER statusida bo'lsa va current_approver_id foydalanuvchi ID'siga teng bo'lsa,
+        // yoki current_approver_type = 'cashier' bo'lsa, tasdiqlashga ruxsat berish kerak.
         const request = await db('debt_requests')
             .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
             .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
@@ -948,8 +962,16 @@ async function handleCashierApproval(query, bot) {
                 'debt_svrs.name as svr_name'
             )
             .where('debt_requests.id', requestId)
-            .where('debt_requests.current_approver_type', 'cashier')
             .where('debt_requests.locked', false)
+            .where(function() {
+                // Agar so'rov APPROVED_BY_LEADER statusida bo'lsa va current_approver_id foydalanuvchi ID'siga teng bo'lsa,
+                // yoki current_approver_type = 'cashier' bo'lsa, tasdiqlashga ruxsat berish
+                this.where(function() {
+                    this.where('debt_requests.status', 'APPROVED_BY_LEADER')
+                        .where('debt_requests.current_approver_id', user.id);
+                })
+                .orWhere('debt_requests.current_approver_type', 'cashier');
+            })
             .first();
         
         if (!request) {
@@ -957,15 +979,15 @@ async function handleCashierApproval(query, bot) {
             return;
         }
         
-        // ✅ OPTIMALLASHTIRISH: Foydalanuvchini olish (cache'dan tezroq)
-        const user = await userHelper.getUserByTelegram(chatId, userId);
-        if (!user) {
-            await bot.sendMessage(chatId, '❌ Foydalanuvchi topilmadi.');
+        // Foydalanuvchiga tegishli ekanligini tekshirish
+        // Agar current_approver_type = 'cashier' bo'lsa, current_approver_id tekshirish kerak
+        // Agar status = APPROVED_BY_LEADER bo'lsa, current_approver_id tekshirish kerak
+        if (request.current_approver_type === 'cashier' && request.current_approver_id !== user.id) {
+            await bot.sendMessage(chatId, '❌ So\'rov topilmadi yoki sizga tegishli emas.');
             return;
         }
         
-        // Foydalanuvchiga tegishli ekanligini tekshirish
-        if (request.current_approver_id !== user.id) {
+        if (request.status === 'APPROVED_BY_LEADER' && request.current_approver_id !== user.id) {
             await bot.sendMessage(chatId, '❌ So\'rov topilmadi yoki sizga tegishli emas.');
             return;
         }
@@ -994,7 +1016,6 @@ async function handleCashierApproval(query, bot) {
         ]);
         
         // Operator tayinlash (avval, chunki u current_approver_id va current_approver_type ni o'rnatadi)
-        log.debug(`[CASHIER] [APPROVAL] 7. Operator tayinlash boshlanmoqda: brandId=${request.brand_id}, requestId=${requestId}`);
         const { assignOperatorToRequest } = require('../../../utils/cashierAssignment.js');
         const operator = await assignOperatorToRequest(request.brand_id, requestId);
         
@@ -1005,7 +1026,6 @@ async function handleCashierApproval(query, bot) {
         }
         
         // Status yangilash (current_approver_id va current_approver_type operator tayinlashda o'rnatilgan, agar operator topilsa)
-        log.debug(`[CASHIER] [APPROVAL] 8. Status yangilash: APPROVED_BY_CASHIER`);
         await db('debt_requests')
             .where('id', requestId)
             .update({
@@ -1018,7 +1038,6 @@ async function handleCashierApproval(query, bot) {
         log.info(`[CASHIER] [APPROVAL] 8.1. ✅ Status yangilandi: APPROVED_BY_CASHIER`);
         
         // Supervisor'larga yuborish (agar kasirlarga nazoratchi biriktirilgan bo'lsa)
-        log.debug(`[CASHIER] [APPROVAL] 9. Supervisor'larga yuborish tekshirilmoqda...`);
         const { getSupervisorsForCashiers } = require('../../../utils/supervisorAssignment.js');
         const supervisors = await getSupervisorsForCashiers(requestId, request.branch_id);
         
@@ -1047,14 +1066,10 @@ async function handleCashierApproval(query, bot) {
             log.info(`[CASHIER] [APPROVAL] 9.1. ⚠️ Supervisor'lar topilmadi, operatorga to'g'ridan-to'g'ri yuborilmoqda`);
             
             // Operatorga guruh orqali yuborish
-            log.debug(`[CASHIER] [APPROVAL] 9.2. Operatorga guruh orqali yuborish...`);
             const { showRequestToOperator } = require('./operator.js');
             
             if (operator) {
-                log.info(`[CASHIER] [APPROVAL] 9.2.1. Operator topildi: OperatorId=${operator.user_id}, Name=${operator.fullname}`);
-                
                 // So'rovni to'liq ma'lumotlar bilan olish (brand_name, filial_name, svr_name bilan)
-                log.debug(`[CASHIER] [APPROVAL] 9.2.2. So'rov ma'lumotlarini olish: requestId=${requestId}`);
                 const fullRequest = await db('debt_requests')
                     .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
                     .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
@@ -1096,9 +1111,9 @@ async function handleCashierApproval(query, bot) {
                     
                     // HAR DOIM joriy so'rovni yuborish (fullRequest)
                     // pendingCount = boshqa pending so'rovlar soni (joriy so'rovni istisno qilgan holda)
-                    log.info(`[CASHIER] [APPROVAL] 9.2.4. Operatorlar guruhiga xabar yuborilmoqda: operatorId=${operator.user_id}, requestId=${requestId}, pendingCount=${operatorPendingCount} (type: ${typeof operatorPendingCount})`);
+                    log.info(`[CASHIER] [APPROVAL] 📤 Operatorlar guruhiga xabar yuborilmoqda: requestId=${requestId}, operatorId=${operator.user_id}, operatorName=${operator.fullname}, pendingCount=${operatorPendingCount}`);
                     await showRequestToOperator(fullRequest, operator.user_id, operatorUser || operator, operatorPendingCount);
-                    log.info(`[CASHIER] [APPROVAL] 9.2.5. ✅ So'rov operatorlar guruhiga yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, operatorId=${operator.user_id}, pendingCount=${operatorPendingCount}`);
+                    log.info(`[CASHIER] [APPROVAL] ✅ Operatorlar guruhiga xabar yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, operatorId=${operator.user_id}, operatorName=${operator.fullname}, pendingCount=${operatorPendingCount}, chatType=group`);
                 } else {
                     log.error(`[CASHIER] [APPROVAL] 9.2.3. ❌ So'rov ma'lumotlari topilmadi: requestId=${requestId}`);
                 }
@@ -1107,7 +1122,7 @@ async function handleCashierApproval(query, bot) {
             }
         }
         
-        log.info(`[CASHIER] [APPROVAL] ✅ Kassir tasdiqlash muvaffaqiyatli yakunlandi: requestId=${requestId}, requestUID=${request.request_uid}, cashierId=${user.id}, cashierName=${user.fullname}`);
+        log.info(`[CASHIER] [APPROVAL] ✅ Kassir tasdiqladi: requestId=${requestId}, requestUID=${request.request_uid}, cashierId=${user.id}, cashierName=${user.fullname}, brand=${request.brand_name}, branch=${request.filial_name}`);
         
         // ✅ MUHIM: "Qarzi bor" bosilganda yuborilgan xabarlarni tozalash
         // Agar state mavjud bo'lsa va "Qarzi bor" bosilgan bo'lsa, namuna va xatolik xabarlarini o'chirish
@@ -1224,7 +1239,7 @@ async function handleCashierApproval(query, bot) {
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
                         total_amount: request.excel_total,
-                        isForCashier: true // ✅ MUHIM: Kassir uchun agent bo'yicha guruhlash
+                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                     });
                 } catch (telegraphError) {
                     // Telegraph xatolari silent qilinadi (ixtiyoriy xizmat)
@@ -2589,7 +2604,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     excel_headers: debtData.excel_headers,
                     excel_columns: debtData.excel_columns,
                     total_amount: debtData.total_amount,
-                    isForCashier: true // ✅ Kassir uchun agent bo'yicha guruhlash
+                    isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                 });
                 
                 if (!telegraphUrl) {
@@ -2607,7 +2622,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                             excel_headers: debtData.excel_headers,
                             excel_columns: debtData.excel_columns,
                             total_amount: debtData.total_amount,
-                            isForCashier: true // ✅ Kassir uchun agent bo'yicha guruhlash
+                            isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                         });
                     } catch (retryError) {
                         log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -2628,7 +2643,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                         excel_headers: debtData.excel_headers,
                         excel_columns: debtData.excel_columns,
                         total_amount: debtData.total_amount,
-                        isForCashier: true // ✅ Kassir uchun agent bo'yicha guruhlash
+                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                     });
                 } catch (retryError) {
                     log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -2897,7 +2912,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     excel_headers: debtData.excel_headers,
                     excel_columns: debtData.excel_columns,
                     total_amount: debtData.total_amount,
-                    isForCashier: true // ✅ Kassir uchun agent bo'yicha guruhlash
+                    isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                 });
                 
                 if (!telegraphUrl) {
@@ -2915,7 +2930,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                             excel_headers: debtData.excel_headers,
                             excel_columns: debtData.excel_columns,
                             total_amount: debtData.total_amount,
-                            isForCashier: true // ✅ Kassir uchun agent bo'yicha guruhlash
+                            isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                         });
                     } catch (retryError) {
                         log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -2936,7 +2951,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                         excel_headers: debtData.excel_headers,
                         excel_columns: debtData.excel_columns,
                         total_amount: debtData.total_amount,
-                        isForCashier: true // ✅ Kassir uchun agent bo'yicha guruhlash
+                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
                     });
                 } catch (retryError) {
                     log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);

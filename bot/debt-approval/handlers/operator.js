@@ -270,7 +270,7 @@ async function showNextOperatorRequest(userId, chatId) {
  */
 async function showRequestToOperator(request, operatorId, operatorUser, pendingCount = 0, shouldCleanup = false) {
     try {
-        log.info(`[OPERATOR] [SHOW_REQUEST] Operatorlar guruhiga so'rov ko'rsatish boshlanmoqda: requestId=${request.id}, requestUID=${request.request_uid}, operatorId=${operatorId}`);
+        log.info(`[OPERATOR] [SHOW_REQUEST] 📤 Operatorlar guruhiga xabar yuborilmoqda: requestId=${request.id}, requestUID=${request.request_uid}, operatorId=${operatorId}, operatorName=${operatorUser?.fullname || 'N/A'}`);
         
         const bot = getBot();
         if (!bot) {
@@ -374,6 +374,9 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
         
         log.debug(`[OPERATOR] [SHOW_REQUEST] 1. So'rov ma'lumotlari: RequestId=${request.id}, Type=${request.type}, Brand=${request.brand_name}, Branch=${request.filial_name}, SVR=${request.svr_name}, OperatorId=${operatorId}, OperatorName=${operatorFullname}, OperatorUsername=${operatorUsername || 'yo\'q'}`);
         
+        // Telegraph URL ni funksiya boshida aniqlash (har doim mavjud bo'lishi uchun)
+        let telegraphUrl = null;
+        
         // Agar SET so'rov bo'lsa va Excel ma'lumotlari bo'lsa, ularni qo'shish
         let message;
         if (request.type === 'SET' && request.excel_data) {
@@ -417,8 +420,10 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
             
             // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
             // MUHIM: Operatorlar guruhida har doim Telegraph link ishlatilishi kerak
-            let telegraphUrl = null;
+            // ✅ MUHIM: Mavjud URL ni qayta ishlatmaymiz, chunki u kassir uchun yaratilgan bo'lishi mumkin (agent bo'yicha)
+            // Operator uchun har doim yangi URL yaratamiz (klient bo'yicha)
             if (excelData && Array.isArray(excelData) && excelData.length > 0) {
+                // Agar Telegraph URL mavjud bo'lmasa, yangi yaratish
                 try {
                     const { createDebtDataPage } = require('../../../utils/telegraph.js');
                     telegraphUrl = await createDebtDataPage({
@@ -432,10 +437,13 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                         excel_data: excelData,
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
-                        total_amount: request.excel_total
+                        total_amount: request.excel_total,
+                        isForCashier: false // ✅ MUHIM: Operator uchun klient bo'yicha format
                     });
                     
-                    if (!telegraphUrl) {
+                    if (telegraphUrl) {
+                        log.info(`[OPERATOR] [SHOW_REQUEST] ✅ Telegraph sahifa yaratildi: requestId=${request.id}, URL=${telegraphUrl}`);
+                    } else {
                         log.warn(`[OPERATOR] [SHOW_REQUEST] Telegraph sahifa yaratilmadi (null qaytdi): requestId=${request.id}`);
                         // Qayta urinish
                         try {
@@ -447,11 +455,12 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                                 svr_name: request.svr_name,
                                 month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
                                 extra_info: request.extra_info,
-                                excel_data: excelData,
-                                excel_headers: excelHeaders,
-                                excel_columns: excelColumns,
-                                total_amount: request.excel_total
-                            });
+                        excel_data: excelData,
+                        excel_headers: excelHeaders,
+                        excel_columns: excelColumns,
+                        total_amount: request.excel_total,
+                        isForCashier: false // ✅ MUHIM: Operator uchun klient bo'yicha format
+                    });
                         } catch (retryError) {
                             log.error(`[OPERATOR] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
                         }
@@ -468,11 +477,12 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                             svr_name: request.svr_name,
                             month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
                             extra_info: request.extra_info,
-                            excel_data: excelData,
-                            excel_headers: excelHeaders,
-                            excel_columns: excelColumns,
-                            total_amount: request.excel_total
-                        });
+                        excel_data: excelData,
+                        excel_headers: excelHeaders,
+                        excel_columns: excelColumns,
+                        total_amount: request.excel_total,
+                        isForCashier: false // ✅ MUHIM: Operator uchun klient bo'yicha format
+                    });
                     } catch (retryError) {
                         log.error(`[OPERATOR] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
                     }
@@ -493,9 +503,7 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                 telegraph_url: telegraphUrl
             });
             
-            log.debug(`[OPERATOR] [SHOW_REQUEST] 2.4. SET so'rov xabari formatlandi: messageLength=${message.length}`);
         } else {
-            log.debug(`[OPERATOR] [SHOW_REQUEST] 2. NORMAL so'rov, oddiy xabar formatlash...`);
             // Oddiy so'rov uchun formatNormalRequestMessage
             const { formatNormalRequestMessage } = require('../../../utils/messageTemplates.js');
             message = formatNormalRequestMessage({
@@ -505,7 +513,6 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                 request_uid: request.request_uid
             });
             
-            log.debug(`[OPERATOR] [SHOW_REQUEST] 2.1. NORMAL so'rov xabari formatlandi: messageLength=${message.length}`);
         }
         
         // Operatorning ismini va username'ni xabarga qo'shish
@@ -535,7 +542,7 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                 parse_mode: 'HTML'
             });
             
-            log.info(`[OPERATOR] [SHOW_REQUEST] ✅ Operatorlar guruhiga xabar muvaffaqiyatli yuborildi: requestId=${request.id}, requestUID=${request.request_uid}, groupId=${groupId}, messageId=${sentMessage.message_id}, operatorId=${operatorId}`);
+            log.info(`[OPERATOR] [SHOW_REQUEST] ✅ Operatorlar guruhiga xabar yuborildi: requestId=${request.id}, requestUID=${request.request_uid}, groupId=${groupId}, messageId=${sentMessage.message_id}, operatorId=${operatorId}, operatorName=${operatorUser?.fullname || 'N/A'}, pendingCount=${pendingCount}, chatType=group, telegraphUrl=${telegraphUrl || 'yo\'q'}`);
             
             // ✅ Avval eski "kutilayotgan so'rovlar" va "eslatma" xabarlarini o'chirish
             try {
@@ -717,14 +724,12 @@ async function handleOperatorApproval(query, bot) {
     const requestId = parseInt(parts[2]);
     const assignedOperatorId = parts.length > 3 ? parseInt(parts[3]) : null;
     
-    log.info(`[OPERATOR] [APPROVAL] Operator tasdiqlash boshlanmoqda: requestId=${requestId}, userId=${userId}, chatId=${chatId}, assignedOperatorId=${assignedOperatorId}`);
+        log.info(`[OPERATOR] [APPROVAL] 🔄 Operator tasdiqlash boshlanmoqda: requestId=${requestId}, userId=${userId}, chatId=${chatId}, assignedOperatorId=${assignedOperatorId}`);
     
     try {
-        log.debug(`[OPERATOR] [APPROVAL] 1. Callback query javob berilmoqda...`);
         await bot.answerCallbackQuery(query.id, { text: 'Tasdiqlanmoqda...' });
         
         // ✅ OPTIMALLASHTIRISH: Avval so'rovni tekshirish (eng tez)
-        log.debug(`[OPERATOR] [APPROVAL] 2. So'rov ma'lumotlarini olish: requestId=${requestId}`);
         let request = await db('debt_requests')
             .where('id', requestId)
             .whereIn('status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER'])
@@ -748,7 +753,6 @@ async function handleOperatorApproval(query, bot) {
         }
         
         // Foydalanuvchi ma'lumotlarini olish
-        log.debug(`[OPERATOR] [APPROVAL] 3. Foydalanuvchi ma'lumotlarini olish: userId=${userId}, chatId=${chatId}`);
         const user = await userHelper.getUserByTelegram(chatId, userId);
         
         if (!user) {
@@ -869,10 +873,8 @@ async function handleOperatorApproval(query, bot) {
         }
         
         // Operatorning brendiga tegishli ekanligini tekshirish
-        log.debug(`[OPERATOR] [APPROVAL] 5. Operatorning brendiga tegishli ekanligini tekshirish: current_approver_id=${request.current_approver_id}, user.id=${user.id}, current_approver_type=${request.current_approver_type}`);
         // Agar current_approver_id null bo'lsa, operatorning brendiga tegishli ekanligini tekshiramiz
         if (request.current_approver_id !== user.id || request.current_approver_type !== 'operator') {
-            log.debug(`[OPERATOR] [APPROVAL] 5.1. Operatorning brendlarini olish: userId=${user.id}`);
             // Operatorning brendlarini olish (debt_operators, debt_user_brands va debt_user_tasks jadvallaridan)
             const [operatorBrandsFromTable, operatorBrandsFromBindings, operatorTask] = await Promise.all([
                 db('debt_operators')
@@ -908,7 +910,6 @@ async function handleOperatorApproval(query, bot) {
             }
             
             log.info(`[OPERATOR] [APPROVAL] 5.2. Birlashtirilgan brendlar: ${operatorBrands.length} ta`, operatorBrands);
-            log.debug(`[OPERATOR] [APPROVAL] 5.3. So'rov brendi: ${request.brand_id}, Operator brendlari: ${operatorBrands.join(', ')}`);
             
             if (operatorBrands.length === 0 || !operatorBrands.includes(request.brand_id)) {
                 log.warn(`[OPERATOR] [APPROVAL] ❌ Operator bu brendga tegishli emas: requestBrandId=${request.brand_id}, operatorBrands=${operatorBrands.join(', ')}`);
@@ -934,7 +935,6 @@ async function handleOperatorApproval(query, bot) {
         log.info(`[OPERATOR] [APPROVAL] 6.1. ✅ So'rov bloklandi`);
         
         // ✅ OPTIMALLASHTIRISH: Loglarni parallel qilish
-        log.debug(`[OPERATOR] [APPROVAL] 7. Tasdiqlashni log qilish...`);
         await Promise.all([
             logApproval(requestId, user.id, 'operator', 'approved', {}),
             logRequestAction(requestId, 'operator_approved', user.id, {
@@ -945,7 +945,6 @@ async function handleOperatorApproval(query, bot) {
         log.info(`[OPERATOR] [APPROVAL] 7.1. ✅ Tasdiqlash log qilindi`);
         
         // Status yangilash
-        log.debug(`[OPERATOR] [APPROVAL] 8. Status yangilash: APPROVED_BY_OPERATOR`);
         await db('debt_requests')
             .where('id', requestId)
             .update({
@@ -960,7 +959,6 @@ async function handleOperatorApproval(query, bot) {
         log.info(`[OPERATOR] [APPROVAL] 8.1. ✅ Status yangilandi: APPROVED_BY_OPERATOR`);
         
         // Supervisor'larga yuborish (agar operatorlarga nazoratchi biriktirilgan bo'lsa)
-        log.debug(`[OPERATOR] [APPROVAL] 9. Supervisor'larga yuborish tekshirilmoqda...`);
         const { getSupervisorsForOperators } = require('../../../utils/supervisorAssignment.js');
         const supervisors = await getSupervisorsForOperators(requestId, request.brand_id);
         
@@ -989,13 +987,12 @@ async function handleOperatorApproval(query, bot) {
             log.info(`[OPERATOR] [APPROVAL] 9.1. ⚠️ Supervisor'lar topilmadi, final guruhga to'g'ridan-to'g'ri yuborilmoqda`);
             
             // Final guruhga yuborish (status FINAL_APPROVED ga o'zgaradi)
-            log.debug(`[OPERATOR] [APPROVAL] 9.2. Final guruhga yuborish boshlanmoqda...`);
             await sendToFinalGroup(requestId);
-            log.info(`[OPERATOR] [APPROVAL] 9.3. ✅ Final guruhga yuborildi`);
+            log.info(`[OPERATOR] [APPROVAL] 📤 Final guruhga xabar yuborilmoqda: requestId=${requestId}`);
+            log.info(`[OPERATOR] [APPROVAL] ✅ Final guruhga xabar yuborildi: requestId=${requestId}, chatType=group`);
         }
         
         // Xabarni yangilash
-        log.debug(`[OPERATOR] [APPROVAL] 10. Xabarni yangilash...`);
         const newStatus = supervisors.length > 0 ? 'APPROVED_BY_OPERATOR' : 'FINAL_APPROVED';
         await updateRequestMessage(requestId, newStatus, {
             username: user.username,
@@ -1006,16 +1003,12 @@ async function handleOperatorApproval(query, bot) {
         log.info(`[OPERATOR] [APPROVAL] 10.1. ✅ Xabar yangilandi: status=${newStatus}`);
         
         // Eslatmalarni to'xtatish
-        log.debug(`[OPERATOR] [APPROVAL] 11. Eslatmalarni to'xtatish...`);
         cancelReminders(requestId);
-        log.info(`[OPERATOR] [APPROVAL] 11.1. ✅ Eslatmalar to'xtatildi`);
         
         // Keyingi so'rovni avtomatik ko'rsatish
         await showNextOperatorRequest(userId, chatId);
         
         // Tasdiqlash xabari - original xabar + barcha tasdiqlashlar
-        log.debug(`[OPERATOR] [APPROVAL] 12. Tasdiqlash xabari formatlash va yuborish...`);
-        
         // Agar SET so'rov bo'lsa va Excel ma'lumotlari bo'lsa, ularni parse qilish
         if (request.type === 'SET' && request.excel_data) {
             let excelData = request.excel_data;
@@ -1079,7 +1072,7 @@ async function handleOperatorApproval(query, bot) {
             }
         }
         
-        log.info(`[OPERATOR] [APPROVAL] ✅ Operator tasdiqlash muvaffaqiyatli yakunlandi: requestId=${requestId}, requestUID=${request.request_uid}, operatorId=${user.id}, operatorName=${user.fullname}`);
+        log.info(`[OPERATOR] [APPROVAL] ✅ Operator tasdiqladi: requestId=${requestId}, requestUID=${request.request_uid}, operatorId=${user.id}, operatorName=${user.fullname}, brand=${request.brand_name}, branch=${request.filial_name}`);
     } catch (error) {
         log.error('Error handling operator approval:', error);
         await bot.sendMessage(chatId, '❌ Xatolik yuz berdi.');
@@ -1233,6 +1226,7 @@ async function handleOperatorDebt(query, bot) {
  * Qarzi bor javobini yuborish
  */
 async function sendDebtResponse(requestId, userId, chatId, debtData) {
+    log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] 🔄 Qardorlik javobi yuborilmoqda: requestId=${requestId}, operatorId=${userId}, chatId=${chatId}, debtRows=${debtData.excel_data?.length || 0}, totalAmount=${debtData.total_amount || 0}`);
     try {
         const user = await userHelper.getUserByTelegram(chatId, userId);
         if (!user) {
@@ -1599,7 +1593,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                 await bot.sendMessage(recipient.id, debtMessage, {
                     parse_mode: 'HTML'
                 });
-                log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] Qardorlik javobi yuborildi: requestId=${requestId}, recipient=${recipient.role}, recipientId=${recipient.id}`);
+                log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] ✅ Qardorlik javobi yuborildi: requestId=${requestId}, recipientRole=${recipient.role}, recipientId=${recipient.id}, chatType=${recipient.role === 'leaders' ? 'group' : 'personal'}`);
             } catch (error) {
                 log.error(`Error sending debt response to ${recipient.role}:`, error);
             }
@@ -1646,7 +1640,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
         
         await logApproval(requestId, user.id, 'operator', 'debt_marked', logData);
         
-        log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] Qardorlik javobi yuborildi (teskari jarayon): requestId=${requestId}, operatorId=${user.id}, requestType=${request.type}`);
+        log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] ✅ Qardorlik javobi yuborildi (teskari jarayon): requestId=${requestId}, requestUID=${request.request_uid}, operatorId=${user.id}, operatorName=${user.fullname}, requestType=${request.type}, recipientsCount=${recipients.length}, telegraphUrl=${telegraphUrl || 'yo\'q'}`);
         
         // Keyingi so'rovni avtomatik ko'rsatish
         await showNextOperatorRequest(userId, chatId);

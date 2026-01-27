@@ -24,7 +24,6 @@ async function createTelegraphPage(data) {
             return null;
         }
         
-        log.info(`[TELEGRAPH] Telegraph API'ga so'rov yuborilmoqda: title="${title}", contentNodes=${Array.isArray(content) ? content.length : 'not array'}`);
         
         // Telegraph API endpoint
         const apiUrl = 'https://api.telegra.ph/createPage';
@@ -51,7 +50,6 @@ async function createTelegraphPage(data) {
             requestData.author_url = author_url;
         }
         
-        log.info(`[TELEGRAPH] Request data: title="${title}", author_name="${requestData.author_name || 'none'}", hasToken=${!!accessToken}, contentType=${Array.isArray(content) ? 'array' : typeof content}, contentLength=${Array.isArray(content) ? content.length : 'N/A'}`);
         
         const response = await axios.post(apiUrl, requestData, {
             headers: {
@@ -62,7 +60,6 @@ async function createTelegraphPage(data) {
         
         if (response.data && response.data.ok && response.data.result) {
             const pageUrl = `https://telegra.ph/${response.data.result.path}`;
-            log.info(`[TELEGRAPH] ✅ Sahifa yaratildi: URL=${pageUrl}`);
             return pageUrl;
         } else {
             // Telegraph API xatoliklarini silent qilish (ixtiyoriy xizmat)
@@ -565,7 +562,6 @@ async function createDifferencesPage(data) {
         
         // Telegraph Node array formatiga o'tkazish
         const telegraphContent = formatDifferencesToTelegraphNodes(data);
-        log.info(`[TELEGRAPH] Telegraph Node array formatiga o'tkazildi: nodesCount=${telegraphContent.length}`);
         
         const pageUrl = await createTelegraphPage({
             title: title,
@@ -593,34 +589,12 @@ async function createDifferencesPage(data) {
  */
 async function createDebtDataPage(data) {
     try {
-        const { request_id, request_uid } = data;
-        
-        // ✅ MUHIM: Agar request_id mavjud bo'lsa, database'dan mavjud URL'ni tekshirish
-        if (request_id) {
-            try {
-                // utils/telegraph.js -> project root db.js
-                const db = require('../db.js').db;
-                const existingRequest = await db('debt_requests')
-                    .select('telegraph_url')
-                    .where('id', request_id)
-                    .first();
-                
-                if (existingRequest && existingRequest.telegraph_url) {
-                    log.info(`[TELEGRAPH] ✅ Mavjud Telegraph URL qayta ishlatilmoqda: requestId=${request_id}, URL=${existingRequest.telegraph_url}`);
-                    return existingRequest.telegraph_url;
-                }
-            } catch (dbError) {
-                // Database xatoliklarini silent qilamiz va yangi sahifa yaratamiz
-                log.debug(`[TELEGRAPH] Database'dan URL olishda xatolik (yangi sahifa yaratiladi): ${dbError.message}`);
-            }
-        }
+        const { request_id, request_uid, isForCashier = false } = data;
         
         const title = `Muddat uzaytirilishi kerak bo'lgan klientlar - ${request_uid || 'N/A'}`;
-        log.info(`[TELEGRAPH] Qarzdorlik sahifasini yaratish boshlanmoqda: requestUID=${request_uid}, excelDataLength=${data.excel_data?.length || 0}`);
         
         // Telegraph Node array formatiga o'tkazish
         const telegraphContent = formatDebtDataToTelegraphNodes(data);
-        log.info(`[TELEGRAPH] Telegraph Node array formatiga o'tkazildi: nodesCount=${telegraphContent.length}`);
         
         const pageUrl = await createTelegraphPage({
             title: title,
@@ -628,22 +602,16 @@ async function createDebtDataPage(data) {
             author_name: 'Debt Approval System'
         });
         
-        if (pageUrl) {
-            log.info(`[TELEGRAPH] ✅ Qarzdorlik sahifasi muvaffaqiyatli yaratildi: requestUID=${request_uid}, URL=${pageUrl}`);
-            
-            // ✅ MUHIM: Yangi yaratilgan URL'ni database'ga saqlash (agar request_id mavjud bo'lsa)
-            if (request_id) {
-                try {
-                    // utils/telegraph.js -> project root db.js
-                    const db = require('../db.js').db;
-                    await db('debt_requests')
-                        .where('id', request_id)
-                        .update({ telegraph_url: pageUrl });
-                    log.debug(`[TELEGRAPH] ✅ Telegraph URL database'ga saqlandi: requestId=${request_id}`);
-                } catch (dbError) {
-                    // Database xatoliklarini silent qilamiz (ixtiyoriy)
-                    log.debug(`[TELEGRAPH] Database'ga URL saqlashda xatolik (ignored): ${dbError.message}`);
-                }
+        if (pageUrl && request_id) {
+            // ✅ MUHIM: Yangi yaratilgan URL'ni database'ga saqlash
+            try {
+                const db = require('../db.js').db;
+                await db('debt_requests')
+                    .where('id', request_id)
+                    .update({ telegraph_url: pageUrl });
+            } catch (dbError) {
+                // Database xatoliklarini silent qilamiz (ixtiyoriy)
+                log.debug(`[TELEGRAPH] Database'ga URL saqlashda xatolik (ignored): ${dbError.message}`);
             }
         }
         // Agar sahifa yaratilmagan bo'lsa, log qilmaymiz (ixtiyoriy xizmat)

@@ -11,6 +11,245 @@ const log = createLogger('COMPARISON');
 
 const router = express.Router();
 
+// Database client turini aniqlash
+const isPostgres = db.client.config.client === 'pg';
+const isSqlite = db.client.config.client === 'sqlite3';
+
+/**
+ * UPSERT funksiyasi - race conditionni oldini olish uchun
+ * PostgreSQL va SQLite uchun moslashgan
+ */
+async function upsertComparison(data) {
+    const {
+        comparison_date,
+        brand_id,
+        location,
+        operator_amount,
+        comparison_amount,
+        difference,
+        percentage,
+        created_by
+    } = data;
+
+    // Maksimal qiymatni tekshirish va cheklash (decimal(15, 2) uchun: 999,999,999,999,999.99)
+    const MAX_DECIMAL_VALUE = 999999999999999.99;
+    const MAX_PERCENTAGE_VALUE = 999.99;
+    
+    // Qiymatlarni cheklash
+    const safeOperatorAmount = Math.min(Math.max(operator_amount || 0, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE);
+    const safeComparisonAmount = comparison_amount !== null && comparison_amount !== undefined
+        ? Math.min(Math.max(comparison_amount, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE)
+        : null;
+    const safeDifference = difference !== null && difference !== undefined
+        ? Math.min(Math.max(difference, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE)
+        : null;
+    const safePercentage = percentage !== null && percentage !== undefined
+        ? Math.min(Math.max(percentage, -MAX_PERCENTAGE_VALUE), MAX_PERCENTAGE_VALUE)
+        : null;
+
+    if (isPostgres) {
+        // PostgreSQL uchun ON CONFLICT ishlatish
+        try {
+            const result = await db.raw(`
+                INSERT INTO comparisons (
+                    comparison_date, 
+                    brand_id, 
+                    location, 
+                    operator_amount, 
+                    comparison_amount, 
+                    difference, 
+                    percentage, 
+                    created_by, 
+                    created_at, 
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (comparison_date, brand_id, location) 
+                DO UPDATE SET
+                    operator_amount = EXCLUDED.operator_amount,
+                    comparison_amount = EXCLUDED.comparison_amount,
+                    difference = EXCLUDED.difference,
+                    percentage = EXCLUDED.percentage,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+            `, [
+                comparison_date,
+                brand_id,
+                location,
+                safeOperatorAmount,
+                safeComparisonAmount,
+                safeDifference,
+                safePercentage,
+                created_by
+            ]);
+            
+            // PostgreSQL'da result.rows[0] da natija bo'ladi
+            return result.rows && result.rows.length > 0 ? result.rows[0] : null;
+        } catch (error) {
+            // Agar primary key xatolik bo'lsa (sequence muammosi), sequence'ni tuzatish va qayta urinish
+            // Error constraint nomi turli formatlarda bo'lishi mumkin, shuning uchun message'ni ham tekshiramiz
+            const isPrimaryKeyError = error.code === '23505' && (
+                error.constraint === 'comparisons_pkey' || 
+                error.message?.includes('comparisons_pkey') ||
+                error.message?.includes('duplicate key value')
+            );
+            
+            if (isPrimaryKeyError) {
+                log.warn(`⚠️ [COMPARISON] Primary key xatolik aniqlandi (sequence muammosi), tuzatilmoqda...`, {
+                    code: error.code,
+                    constraint: error.constraint,
+                    message: error.message
+                });
+                
+                try {
+                    // Sequence'ni tuzatish - eng katta ID + 1 ga o'rnatish
+                    const maxIdResult = await db('comparisons').max('id as max_id').first();
+                    const maxId = maxIdResult?.max_id || 0;
+                    
+                    if (maxId > 0) {
+                        // Sequence'ni maxId + 1 ga o'rnatish (keyingi ID maxId + 1 bo'ladi)
+                        await db.raw(`SELECT setval('comparisons_id_seq', ${maxId}, true)`);
+                        log.debug(`✅ [COMPARISON] Sequence tuzatildi: ${maxId} (keyingi ID: ${maxId + 1})`);
+                    }
+                    
+                    // Qayta urinish - avval mavjud yozuvni tekshirish
+                    const existing = await db('comparisons')
+                        .where('comparison_date', comparison_date)
+                        .where('brand_id', brand_id)
+                        .where('location', location)
+                        .first();
+                    
+                    if (existing) {
+                        // Mavjud yozuvni yangilash
+                        await db('comparisons')
+                            .where('id', existing.id)
+                            .update({
+                                operator_amount: safeOperatorAmount,
+                                comparison_amount: safeComparisonAmount,
+                                difference: safeDifference,
+                                percentage: safePercentage,
+                                updated_at: db.fn.now()
+                            });
+                        return { id: existing.id };
+                    } else {
+                        // Yangi yozuv - qayta INSERT qilish
+                        const retryResult = await db.raw(`
+                            INSERT INTO comparisons (
+                                comparison_date, 
+                                brand_id, 
+                                location, 
+                                operator_amount, 
+                                comparison_amount, 
+                                difference, 
+                                percentage, 
+                                created_by, 
+                                created_at, 
+                                updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (comparison_date, brand_id, location) 
+                            DO UPDATE SET
+                                operator_amount = EXCLUDED.operator_amount,
+                                comparison_amount = EXCLUDED.comparison_amount,
+                                difference = EXCLUDED.difference,
+                                percentage = EXCLUDED.percentage,
+                                updated_at = CURRENT_TIMESTAMP
+                            RETURNING id
+                        `, [
+                            comparison_date,
+                            brand_id,
+                            location,
+                            safeOperatorAmount,
+                            safeComparisonAmount,
+                            safeDifference,
+                            safePercentage,
+                            created_by
+                        ]);
+                        
+                        return retryResult.rows && retryResult.rows.length > 0 ? retryResult.rows[0] : null;
+                    }
+                } catch (retryError) {
+                    log.error(`❌ [COMPARISON] Qayta urinishda xatolik:`, {
+                        message: retryError.message,
+                        code: retryError.code,
+                        constraint: retryError.constraint
+                    });
+                    throw retryError;
+                }
+            } else {
+                // Boshqa xatoliklar - log qilish va throw qilish
+                log.error(`❌ [COMPARISON] UPSERT xatolik:`, {
+                    code: error.code,
+                    constraint: error.constraint,
+                    message: error.message
+                });
+                throw error;
+            }
+        }
+    } else {
+        // SQLite uchun INSERT ... ON CONFLICT (SQLite 3.24.0+)
+        // Mavjud yozuvni tekshirish (created_at ni saqlash uchun)
+        const existing = await db('comparisons')
+            .where('comparison_date', comparison_date)
+            .where('brand_id', brand_id)
+            .where('location', location)
+            .first();
+
+        if (existing) {
+            // Yangilash
+            await db('comparisons')
+                .where('id', existing.id)
+                .update({
+                    operator_amount: safeOperatorAmount,
+                    comparison_amount: safeComparisonAmount,
+                    difference: safeDifference,
+                    percentage: safePercentage,
+                    updated_at: db.fn.now()
+                });
+            return { id: existing.id, ...existing };
+        } else {
+            // Yangi yozuv - INSERT OR IGNORE bilan himoyalash
+            try {
+                const [id] = await db('comparisons').insert({
+                    comparison_date,
+                    brand_id,
+                    location,
+                    operator_amount: safeOperatorAmount,
+                    comparison_amount: safeComparisonAmount,
+                    difference: safeDifference,
+                    percentage: safePercentage,
+                    created_by,
+                    created_at: db.fn.now(),
+                    updated_at: db.fn.now()
+                });
+                return { id };
+            } catch (error) {
+                // Agar race condition bo'lsa, qayta tekshirish va yangilash
+                if (error.code === 'SQLITE_CONSTRAINT' || 
+                    (error.message && error.message.includes('UNIQUE constraint failed'))) {
+                    const retryExisting = await db('comparisons')
+                        .where('comparison_date', comparison_date)
+                        .where('brand_id', brand_id)
+                        .where('location', location)
+                        .first();
+                    
+                    if (retryExisting) {
+                        await db('comparisons')
+                            .where('id', retryExisting.id)
+                            .update({
+                                operator_amount: safeOperatorAmount,
+                                comparison_amount: safeComparisonAmount,
+                                difference: safeDifference,
+                                percentage: safePercentage,
+                                updated_at: db.fn.now()
+                            });
+                        return { id: retryExisting.id, ...retryExisting };
+                    }
+                }
+                throw error;
+            }
+        }
+    }
+}
+
 // Multer konfiguratsiyasi - memory storage (faylni RAM'da saqlash)
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -488,15 +727,7 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                 }
             }
 
-            // Farq va foizni hisoblash
-            const difference = comparison_amount !== null 
-                ? (operatorAmount - comparison_amount) 
-                : null;
-            const percentage = comparison_amount && comparison_amount > 0
-                ? parseFloat(((operatorAmount / comparison_amount) * 100).toFixed(2))
-                : null;
-
-            // Mavjud yozuvni tekshirish
+            // Mavjud yozuvni tekshirish (oldingi qiymatlarni olish uchun)
             const existing = await db('comparisons')
                 .where('comparison_date', date)
                 .where('brand_id', brandId)
@@ -507,33 +738,43 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             const oldDifference = existing ? existing.difference : null;
             const oldOperatorAmount = existing ? existing.operator_amount : null;
             const oldComparisonAmount = existing ? existing.comparison_amount : null;
+            
+            // Maksimal qiymatni tekshirish (decimal(15, 2) uchun: 999,999,999,999,999.99)
+            const MAX_DECIMAL_VALUE = 999999999999999.99;
+            const MAX_PERCENTAGE_VALUE = 999.99;
+            
+            // Qiymatlarni cheklash
+            const safeOperatorAmount = Math.min(Math.max(operatorAmount, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE);
+            const safeComparisonAmount = comparison_amount !== null 
+                ? Math.min(Math.max(comparison_amount, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE)
+                : null;
+            
+            // Farq va foizni hisoblash (cheklangan qiymatlardan)
+            const difference = safeComparisonAmount !== null 
+                ? Math.min(Math.max(safeOperatorAmount - safeComparisonAmount, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE)
+                : null;
+            const percentage = safeComparisonAmount && safeComparisonAmount > 0
+                ? Math.min(Math.max(parseFloat(((safeOperatorAmount / safeComparisonAmount) * 100).toFixed(2)), -MAX_PERCENTAGE_VALUE), MAX_PERCENTAGE_VALUE)
+                : null;
+            
+            const wasExisting = !!existing;
 
-            if (existing) {
-                // Yangilash
-                await db('comparisons')
-                    .where('id', existing.id)
-                    .update({
-                        operator_amount: operatorAmount,
-                        comparison_amount: comparison_amount,
-                        difference: difference,
-                        percentage: percentage,
-                        updated_at: db.fn.now()
-                    });
+            // UPSERT: Race conditionni oldini olish uchun
+            // Bu bir vaqtda bir nechta so'rov kelganda ham xatolik bermaydi
+            await upsertComparison({
+                comparison_date: date,
+                brand_id: brandId,
+                location: location,
+                operator_amount: safeOperatorAmount,
+                comparison_amount: safeComparisonAmount,
+                difference: difference,
+                percentage: percentage,
+                created_by: userId
+            });
+
+            if (wasExisting) {
                 updatedCount++;
             } else {
-                // Yangi yozuv
-                await db('comparisons').insert({
-                    comparison_date: date,
-                    brand_id: brandId,
-                    location: location,
-                    operator_amount: operatorAmount,
-                    comparison_amount: comparison_amount,
-                    difference: difference,
-                    percentage: percentage,
-                    created_by: userId,
-                    created_at: db.fn.now(),
-                    updated_at: db.fn.now()
-                });
                 savedCount++;
             }
 
@@ -560,8 +801,8 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
             if (isNewDifference && !isFixed) {
                 differences.push({
                     location,
-                    operator_amount: operatorAmount,
-                    comparison_amount: comparison_amount,
+                    operator_amount: safeOperatorAmount,
+                    comparison_amount: safeComparisonAmount,
                     difference,
                     percentage
                 });
@@ -587,7 +828,8 @@ router.post('/save', isAuthenticated, checkComparisonEditPermission, async (req,
                         .select('id', 'name');
                     
                     if (branches.length === 0) {
-                        log.warn(`⚠️ [COMPARISON] Filial topilmadi: location=${locationName}`);
+                        // Filial topilmasa, debug log qilish (warning emas, chunki bu normal holat bo'lishi mumkin)
+                        log.debug(`[COMPARISON] Filial topilmadi (notification yuborilmaydi): location=${locationName}`);
                         continue;
                     }
                     
@@ -1131,46 +1373,44 @@ router.post('/import', isAuthenticated, checkComparisonEditPermission, upload.si
             }
 
             // Farq va foizni hisoblash
-            const difference = comparison_amount !== null 
-                ? (operatorAmount - comparison_amount) 
+            // Maksimal qiymatni tekshirish (decimal(15, 2) uchun: 999,999,999,999,999.99)
+            const MAX_DECIMAL_VALUE = 999999999999999.99;
+            
+            // Qiymatlarni cheklash
+            const safeOperatorAmount = Math.min(Math.max(operatorAmount, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE);
+            const safeComparisonAmount = comparison_amount !== null 
+                ? Math.min(Math.max(comparison_amount, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE)
                 : null;
-            const percentage = comparison_amount && comparison_amount > 0
-                ? parseFloat(((operatorAmount / comparison_amount) * 100).toFixed(2))
+            
+            const difference = safeComparisonAmount !== null 
+                ? Math.min(Math.max(safeOperatorAmount - safeComparisonAmount, -MAX_DECIMAL_VALUE), MAX_DECIMAL_VALUE)
+                : null;
+            const percentage = safeComparisonAmount && safeComparisonAmount > 0
+                ? Math.min(Math.max(parseFloat(((safeOperatorAmount / safeComparisonAmount) * 100).toFixed(2)), -999.99), 999.99)
                 : null;
 
-            // Mavjud yozuvni tekshirish
+            // Mavjud yozuvni tekshirish (savedCount/updatedCount uchun)
             const existing = await db('comparisons')
                 .where('comparison_date', date)
                 .where('brand_id', brandId)
                 .where('location', location)
                 .first();
 
+            // UPSERT: Race conditionni oldini olish uchun
+            await upsertComparison({
+                comparison_date: date,
+                brand_id: brandId,
+                location: location,
+                operator_amount: safeOperatorAmount,
+                comparison_amount: safeComparisonAmount,
+                difference: difference,
+                percentage: percentage,
+                created_by: userId
+            });
+
             if (existing) {
-                // Yangilash
-                await db('comparisons')
-                    .where('id', existing.id)
-                    .update({
-                        operator_amount: operatorAmount,
-                        comparison_amount: comparison_amount,
-                        difference: difference,
-                        percentage: percentage,
-                        updated_at: db.fn.now()
-                    });
                 updatedCount++;
             } else {
-                // Yangi yozuv
-                await db('comparisons').insert({
-                    comparison_date: date,
-                    brand_id: brandId,
-                    location: location,
-                    operator_amount: operatorAmount,
-                    comparison_amount: comparison_amount,
-                    difference: difference,
-                    percentage: percentage,
-                    created_by: userId,
-                    created_at: db.fn.now(),
-                    updated_at: db.fn.now()
-                });
                 savedCount++;
             }
         }

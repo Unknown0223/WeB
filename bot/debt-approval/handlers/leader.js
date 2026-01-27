@@ -202,7 +202,8 @@ async function showSetRequestToLeaders(request, groupId) {
                         excel_data: excelData,
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
-                        total_amount: request.excel_total
+                        total_amount: request.excel_total,
+                        isForCashier: false // ✅ MUHIM: Rahbar uchun klient bo'yicha format
                     });
                 } catch (retryError) {
                     log.error(`[LEADER] [TELEGRAPH] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -234,12 +235,16 @@ async function showSetRequestToLeaders(request, groupId) {
             ]
         };
         
+        log.info(`[LEADER] [SHOW_REQUEST] 📤 Rahbarlar guruhiga xabar yuborilmoqda: requestId=${request.id}, requestUID=${request.request_uid}, groupId=${groupId}, groupType=leaders, telegraphUrl=${telegraphUrl || 'yo\'q'}`);
+        
         let sentMessage;
         try {
             sentMessage = await bot.sendMessage(groupId, message, {
                 reply_markup: keyboard,
                 parse_mode: 'HTML'
             });
+            
+            log.info(`[LEADER] [SHOW_REQUEST] ✅ Rahbarlar guruhiga xabar yuborildi: requestId=${request.id}, requestUID=${request.request_uid}, groupId=${groupId}, messageId=${sentMessage.message_id}, telegraphUrl=${telegraphUrl || 'yo\'q'}`);
         } catch (sendError) {
             // Agar guruh supergroup'ga o'zgartirilgan bo'lsa
             const errorBody = sendError.response?.body;
@@ -267,15 +272,14 @@ async function showSetRequestToLeaders(request, groupId) {
                         parse_mode: 'HTML'
                     });
                     
-                    log.info(`[LEADER] [SHOW_REQUEST] ✅ Rahbarlar guruhiga xabar muvaffaqiyatli yuborildi (yangi chat ID): requestId=${request.id}, requestUID=${request.request_uid}, groupId=${newChatId}, messageId=${sentMessage.message_id}`);
+                    log.info(`[LEADER] [SHOW_REQUEST] ✅ Rahbarlar guruhiga xabar yuborildi (yangi chat ID): requestId=${request.id}, requestUID=${request.request_uid}, groupId=${newChatId}, messageId=${sentMessage.message_id}, telegraphUrl=${telegraphUrl || 'yo\'q'}`);
                     
                     // ✅ Xabarni messageTracker'ga qo'shish (yangi chat ID bilan)
                     try {
                         const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
-                        trackMessage(newChatId, sentMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, false, request.id, false); // shouldCleanup=false, requestId=request.id
-                        log.debug(`[LEADER] [SHOW_REQUEST] Xabar kuzatishga qo'shildi (yangi chat ID): groupId=${newChatId}, messageId=${sentMessage.message_id}, requestId=${request.id}`);
+                        trackMessage(newChatId, sentMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, false, request.id, false);
                     } catch (trackError) {
-                        log.debug(`[LEADER] [SHOW_REQUEST] Xabarni kuzatishga qo'shishda xatolik (ignored): ${trackError.message}`);
+                        // Silent fail
                     }
                 } else {
                     // migrate_to_chat_id yo'q - guruh allaqachon o'zgartirilgan, lekin database'da eski ID saqlangan
@@ -496,8 +500,12 @@ async function handleLeaderApproval(query, bot) {
             log.warn(`[LEADER] [APPROVAL] ❌ Kassir tayinlanmadi: branchId=${request.branch_id}`);
         }
         
+        log.info(`[LEADER] [APPROVAL] ✅ Rahbar tasdiqladi: requestId=${requestId}, requestUID=${request.request_uid}, leaderId=${user.id}, leaderName=${user.fullname}, brand=${request.brand_name}, branch=${request.filial_name}`);
+        
         // Kassirga xabar yuborish (agar mavjud bo'lsa)
         if (cashier) {
+            log.info(`[LEADER] [APPROVAL] 📤 Kassirga xabar yuborilmoqda: requestId=${requestId}, cashierId=${cashier.user_id}, cashierName=${cashier.fullname}`);
+            
             // Kassirning telegram_chat_id ni database'dan olish (agar assignCashierToRequest'da null bo'lsa)
             const cashierUser = await db('users').where('id', cashier.user_id).first();
             const telegramChatId = cashier.telegram_chat_id || cashierUser?.telegram_chat_id;
@@ -508,7 +516,7 @@ async function handleLeaderApproval(query, bot) {
                 const cashierBranches = await getCashierBranches(cashier.user_id);
                 
                 if (cashierBranches.length === 0) {
-                    log.warn(`[LEADER] [APPROVAL] Kassirga biriktirilgan filiallar topilmadi: cashierId=${cashier.user_id}`);
+                    log.warn(`[LEADER] [APPROVAL] ⚠️ Kassirga biriktirilgan filiallar topilmadi: cashierId=${cashier.user_id}`);
                 } else {
                     const existingRequests = await db('debt_requests')
                         .whereIn('branch_id', cashierBranches)
@@ -526,11 +534,13 @@ async function handleLeaderApproval(query, bot) {
                     // HAR DOIM joriy so'rovni yuborish (navbatli ko'rsatish uchun)
                     // pendingCount = boshqa pending so'rovlar soni (joriy so'rovni istisno qilgan holda)
                     await showRequestToCashier(request, telegramChatId, cashierUser || cashier, pendingCount);
-                    log.info(`[LEADER] [APPROVAL] ✅ Kassirga xabar yuborildi: cashierId=${cashier.user_id}, telegramChatId=${telegramChatId}, pendingCount=${pendingCount}`);
+                    log.info(`[LEADER] [APPROVAL] ✅ Kassirga xabar yuborildi: requestId=${requestId}, cashierId=${cashier.user_id}, cashierName=${cashier.fullname}, chatId=${telegramChatId}, pendingCount=${pendingCount}, chatType=personal`);
                 }
             } else {
                 log.warn(`[LEADER] [APPROVAL] ⚠️ Kassirga xabar yuborilmadi: cashierId=${cashier.user_id}, telegramChatId=yo'q`);
             }
+        } else {
+            log.warn(`[LEADER] [APPROVAL] ⚠️ Kassir tayinlanmadi: requestId=${requestId}, branchId=${request.branch_id}`);
         }
         
         // Rahbarlar guruhidagi xabarni yangilash (Excel ma'lumotlari va tasdiqlash ma'lumotlari bilan)
@@ -647,8 +657,101 @@ async function handleLeaderApproval(query, bot) {
         }
         
         
+        // Operatorlar guruhiga yuborish (agar operator vazifasiga ega foydalanuvchilar bo'lsa)
+        try {
+            // Operator vazifasiga ega foydalanuvchilarni topish (debt_user_tasks jadvalidan)
+            // Agar brand_id null bo'lsa, barcha brendlar bo'yicha ishlaydi
+            // Agar brand_id bo'lsa, faqat shu brend bo'yicha ishlaydi
+            const operatorTasks = await db('debt_user_tasks')
+                .join('users', 'debt_user_tasks.user_id', 'users.id')
+                .where(function() {
+                    this.where('debt_user_tasks.task_type', 'approve_operator')
+                        .orWhere('debt_user_tasks.task_type', 'debt:approve_operator');
+                })
+                .where('users.status', 'active')
+                .where(function() {
+                    // Agar brand_id null bo'lsa, barcha brendlar bo'yicha ishlaydi
+                    // Agar brand_id bo'lsa, faqat shu brend bo'yicha ishlaydi
+                    this.whereNull('debt_user_tasks.brand_id')
+                        .orWhere('debt_user_tasks.brand_id', request.brand_id);
+                })
+                .select('users.id', 'users.telegram_chat_id', 'users.fullname', 'users.username', 'debt_user_tasks.brand_id');
+            
+            // debt_user_brands va debt_operators jadvallaridan ham operatorlarni topish
+            const [operatorsFromBrands, operatorsFromTable] = await Promise.all([
+                db('debt_user_brands')
+                    .join('debt_user_tasks', 'debt_user_brands.user_id', '=', 'debt_user_tasks.user_id')
+                    .where(function() {
+                        this.where('debt_user_tasks.task_type', 'approve_operator')
+                            .orWhere('debt_user_tasks.task_type', 'debt:approve_operator');
+                    })
+                    .join('users', 'debt_user_brands.user_id', 'users.id')
+                    .where('debt_user_brands.brand_id', request.brand_id)
+                    .where('users.status', 'active')
+                    .select('users.id', 'users.telegram_chat_id', 'users.fullname', 'users.username')
+                    .distinct(),
+                db('debt_operators')
+                    .join('users', 'debt_operators.user_id', 'users.id')
+                    .where('debt_operators.brand_id', request.brand_id)
+                    .where('debt_operators.is_active', true)
+                    .where('users.status', 'active')
+                    .select('users.id', 'users.telegram_chat_id', 'users.fullname', 'users.username')
+                    .distinct()
+            ]);
+            
+            // Barcha operatorlarni birlashtirish (dublikatlarni olib tashlash)
+            const allOperators = new Map();
+            [...operatorTasks, ...operatorsFromBrands, ...operatorsFromTable].forEach(op => {
+                if (op.id && !allOperators.has(op.id)) {
+                    allOperators.set(op.id, op);
+                }
+            });
+            
+            const uniqueOperators = Array.from(allOperators.values());
+            
+            if (uniqueOperators.length > 0) {
+                log.info(`[LEADER] [APPROVAL] 8.1. ✅ Operatorlar topildi: ${uniqueOperators.length} ta, requestId=${requestId}, brandId=${request.brand_id}`);
+                
+                // Operatorlar guruhiga yuborish (faqat birinchi operatorni yuborish kifoya, chunki barcha operatorlar bir xil guruhda)
+                const { showRequestToOperator } = require('./operator.js');
+                const firstOperator = uniqueOperators[0];
+                
+                if (firstOperator) {
+                    try {
+                        // Pending so'rovlar sonini olish
+                        const pendingRequests = await db('debt_requests')
+                            .where('status', 'APPROVED_BY_LEADER')
+                            .where('brand_id', request.brand_id)
+                            .where('id', '!=', requestId)
+                            .where('locked', false)
+                            .count('* as count')
+                            .first();
+                        
+                        const pendingCount = pendingRequests ? parseInt(pendingRequests.count) : 0;
+                        
+                        // current_approver_id va current_approver_type ni yangilash
+                        await db('debt_requests')
+                            .where('id', requestId)
+                            .update({
+                                current_approver_id: firstOperator.id,
+                                current_approver_type: 'operator'
+                            });
+                        
+                        await showRequestToOperator(request, firstOperator.id, firstOperator, pendingCount, false);
+                        log.info(`[LEADER] [APPROVAL] 8.2. ✅ Operatorlar guruhiga so'rov yuborildi: operatorId=${firstOperator.id}, requestId=${requestId}, operatorsCount=${uniqueOperators.length}`);
+                    } catch (operatorError) {
+                        log.error(`[LEADER] [APPROVAL] 8.2. ❌ Operatorlar guruhiga so'rov yuborishda xatolik: operatorId=${firstOperator.id}, error=${operatorError.message}`);
+                    }
+                }
+            } else {
+                log.info(`[LEADER] [APPROVAL] 8.1. ⚠️ Operatorlar topilmadi: requestId=${requestId}, brandId=${request.brand_id}`);
+            }
+        } catch (operatorError) {
+            log.error(`[LEADER] [APPROVAL] 8. ❌ Operatorlar guruhiga yuborishda xatolik: requestId=${requestId}, error=${operatorError.message}`);
+        }
+        
         // Xabarni yangilash (preview uchun - menejerga)
-        log.debug(`[LEADER] [APPROVAL] 9. Xabarni yangilash (menejerga)...`);
+        // Xabarni yangilash (menejerga)
         await updateRequestMessage(requestId, 'APPROVED_BY_LEADER', {
             username: user.username,
             fullname: user.fullname,
@@ -658,7 +761,7 @@ async function handleLeaderApproval(query, bot) {
         log.info(`[LEADER] [APPROVAL] 9.1. ✅ Xabar yangilandi`);
         
         // Eslatmalarni to'xtatish
-        log.debug(`[LEADER] [APPROVAL] 10. Eslatmalarni to'xtatish...`);
+        // Eslatmalarni to'xtatish
         cancelReminders(requestId);
         log.info(`[LEADER] [APPROVAL] 10.1. ✅ Eslatmalar to'xtatildi`);
         

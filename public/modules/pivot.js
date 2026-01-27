@@ -6,6 +6,36 @@ import { DOM } from './dom.js';
 import { safeFetch } from './api.js';
 import { showToast, debounce, hasPermission, showConfirmDialog } from './utils.js';
 
+// Pivot cheklovini cache qilish
+let pivotMaxSizeCache = null;
+let pivotMaxSizeCacheTime = null;
+const PIVOT_CONFIG_CACHE_TIME = 5 * 60 * 1000; // 5 daqiqa
+
+/**
+ * Backend'dan pivot cheklovini olish (cache bilan)
+ */
+async function getPivotMaxSize() {
+    // Cache tekshirish
+    if (pivotMaxSizeCache && pivotMaxSizeCacheTime && (Date.now() - pivotMaxSizeCacheTime) < PIVOT_CONFIG_CACHE_TIME) {
+        return pivotMaxSizeCache;
+    }
+    
+    try {
+        const configRes = await safeFetch('/api/pivot/config');
+        if (configRes && configRes.ok) {
+            const config = await configRes.json();
+            pivotMaxSizeCache = config.maxSize || (1024 * 1024); // Default: 1 MB
+            pivotMaxSizeCacheTime = Date.now();
+            return pivotMaxSizeCache;
+        }
+    } catch (error) {
+        console.warn('[PIVOT] Cheklovni olishda xatolik, default 1 MB ishlatilmoqda:', error);
+    }
+    
+    // Default qiymat
+    return 1024 * 1024; // 1 MB
+}
+
 // ================== Pivot UI lokalizatsiya (RU) ==================
 
 const PIVOT_RU_TRANSLATIONS = {
@@ -811,6 +841,15 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
         
         const data = await res.json();
         
+        // Backend'dan kelgan ma'lumotlarda "Показатель" maydoni mavjudligini tekshirish
+        if (data && data.length > 0) {
+            const firstItem = data[0];
+            const hasPokazatel = firstItem.hasOwnProperty('Показатель') || firstItem.hasOwnProperty('Показатель');
+            const pokazatelValue = firstItem['Показатель'] || firstItem['Показатель'] || null;
+            console.log(`[PIVOT] 📥 Backend'dan kelgan ma'lumotlar: jami=${data.length}, "Показатель" maydoni=${hasPokazatel}, birinchi yozuvda="${pokazatelValue}"`);
+            console.log(`[PIVOT] 📥 Birinchi yozuv maydonlari:`, Object.keys(firstItem));
+        }
+        
         // Agar ma'lumotlar bo'lmasa, barcha maydonlar bilan minimal namuna ma'lumot yaratish
         let dataToProcess = data;
         const isEmpty = !data || data.length === 0;
@@ -833,7 +872,7 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
             }];
         }
         
-        // Ma'lumotlarni qayta ishlash
+        // Ma'lumotlarni qayta ishlash va optimallashtirish
         const processedData = dataToProcess.map(item => {
             const dateStr = item["Дата"];
             let dayNumber = null;
@@ -845,39 +884,193 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 }
             }
             
-            return {
+            // Optimallashtirish: faqat kerakli maydonlarni qoldiramiz
+            // Backend'da "Тип оплаты" olib tashlangan, faqat "Показатель" qoldi
+            const processed = {
                 "ID": item["ID"],
                 "Дата": dateStr,
                 "День": dayNumber,
                 "Бренд": item["Бренд"],
                 "Филиал": item["Филиал"],
                 "Сотрудник": item["Сотрудник"],
-                "Показатель": item["Показатель"],
-                "Тип оплаты": item["Тип оплаты"],
+                "Показатель": item["Показатель"] || item["Тип оплаты"] || null, // Backend'dan kelgan "Показатель" maydoni
                 "Сумма": item["Сумма"],
-                "Сумма_число": typeof item["Сумма"] === 'number' ? item["Сумма"] : parseFloat(item["Сумма"]) || 0,
-                "Комментарий": item["Комментарий"] || ""
+                "Сумма_число": typeof item["Сумма"] === 'number' ? item["Сумма"] : parseFloat(item["Сумма"]) || 0
             };
+            
+            // Faqat bo'sh bo'lmagan comment'larni qo'shamiz
+            if (item["Комментарий"] && item["Комментарий"].trim()) {
+                processed["Комментарий"] = item["Комментарий"];
+            }
+            
+            return processed;
         });
         
-        // Ma'lumotlar hajmini tekshirish (WebDataRocks 1MB cheklovi)
-        const dataSize = new Blob([JSON.stringify(processedData)]).size;
-        const maxSize = 1024 * 1024; // 1MB = 1,048,576 bytes
-        const dataSizeMB = (dataSize / (1024 * 1024)).toFixed(2);
+        // Ma'lumotlar hajmini tekshirish (WebDataRocks cheklovi)
+        // Cheklovni backend'dan olish (cache qilingan)
+        const maxSize = await getPivotMaxSize();
+        let dataSize = new Blob([JSON.stringify(processedData)]).size;
+        const maxSizeMB = (maxSize / (1024 * 1024)).toFixed(2);
+        let dataSizeMB = (dataSize / (1024 * 1024)).toFixed(2);
         
-        console.log(`[PIVOT] 📊 Ma'lumotlar hajmi: ${dataSizeMB} MB (${processedData.length} ta yozuv)`);
+        // "Показатель" maydoni mavjudligini tekshirish
+        const pokazatelCount = processedData.filter(item => item["Показатель"] && String(item["Показатель"]).trim()).length;
+        const uniquePokazatel = [...new Set(processedData.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
+        console.log(`[PIVOT] 📊 Ma'lumotlar hajmi (optimallashtirilgandan keyin): ${dataSizeMB} MB (${processedData.length} ta yozuv)`);
+        console.log(`[PIVOT] 📊 "Показатель" maydoni: mavjud=${pokazatelCount}/${processedData.length}, unique=${uniquePokazatel.length} (${uniquePokazatel.slice(0, 10).join(', ')})`);
         
+        // Agar hali ham juda katta bo'lsa, sampling qilish
+        let finalData = processedData;
         if (dataSize > maxSize) {
-            const errorMessage = `Ma'lumotlar hajmi juda katta (${dataSizeMB} MB). WebDataRocks maksimal 1 MB ma'lumotlarni qabul qiladi. Iltimos, sana oralig'ini qisqartiring yoki filial/brend bo'yicha filtrlash qo'llang.`;
-            console.error('[PIVOT] ❌ Ma\'lumotlar hajmi cheklovdan oshib ketdi:', {
-                dataSize: dataSize,
-                maxSize: maxSize,
-                dataSizeMB: dataSizeMB,
-                recordCount: processedData.length
+            // Ma'lumotlarni sampling qilish - maqsadli hajm 80% cheklov
+            const targetSize = maxSize * 0.8;
+            // Sampling rate: hozirgi hajm / maqsadli hajm
+            // Masalan: 2.46 MB / 0.8 MB = 3.075, ya'ni har 3-tasini olish
+            const samplingRate = Math.ceil(dataSize / targetSize);
+            
+            // "Показатель" maydonining unique qiymatlarini saqlab qolish uchun aqlli sampling
+            // Har bir unique "Показатель" qiymatidan kamida bir nechta yozuvni saqlab qolamiz
+            const uniquePokazatel = [...new Set(processedData.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
+            const pokazatelGroups = {};
+            
+            // Har bir "Показатель" qiymatiga tegishli yozuvlarni guruhlash
+            processedData.forEach((item, index) => {
+                const pokazatel = item["Показатель"] || 'null';
+                if (!pokazatelGroups[pokazatel]) {
+                    pokazatelGroups[pokazatel] = [];
+                }
+                pokazatelGroups[pokazatel].push({ item, index });
             });
-            showToast(errorMessage, true);
-            hidePivotLoader();
-            throw new Error(errorMessage);
+            
+            // Har bir guruhdan sampling qilish - har bir "Показатель" qiymatidan kamida bir nechta yozuvni saqlab qolish
+            const sampledData = [];
+            const minRecordsPerPokazatel = Math.max(1, Math.floor(processedData.length / uniquePokazatel.length / samplingRate));
+            
+            Object.keys(pokazatelGroups).forEach(pokazatel => {
+                const group = pokazatelGroups[pokazatel];
+                // Har bir guruhdan sampling qilish
+                // Har bir "Показатель" qiymatidan kamida minRecordsPerPokazatel ta yozuvni saqlab qolamiz
+                const groupSamplingRate = Math.max(1, Math.ceil(group.length / Math.max(minRecordsPerPokazatel, Math.floor(group.length / samplingRate))));
+                
+                group.forEach((entry, groupIndex) => {
+                    if (groupIndex % groupSamplingRate === 0 || group.length <= minRecordsPerPokazatel) {
+                        // Agar guruh juda kichik bo'lsa, barcha yozuvlarni saqlab qolamiz
+                        sampledData.push(entry);
+                    }
+                });
+            });
+            
+            // Index bo'yicha tartiblash
+            sampledData.sort((a, b) => a.index - b.index);
+            finalData = sampledData.map(entry => entry.item);
+            
+            // Qayta hisoblash
+            dataSize = new Blob([JSON.stringify(finalData)]).size;
+            dataSizeMB = (dataSize / (1024 * 1024)).toFixed(2);
+            
+            // "Показатель" maydoni mavjudligini tekshirish (sampling qilingandan keyin)
+            const pokazatelCountAfter = finalData.filter(item => item["Показатель"] && String(item["Показатель"]).trim()).length;
+            const uniquePokazatelAfter = [...new Set(finalData.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
+            
+            console.warn(`[PIVOT] ⚠️ Ma'lumotlar sampling qilindi: ${processedData.length} -> ${finalData.length} ta yozuv (sampling rate: ${samplingRate}), hajm: ${dataSizeMB} MB`);
+            console.log(`[PIVOT] 📊 Sampling qilingandan keyin "Показатель": mavjud=${pokazatelCountAfter}/${finalData.length}, unique=${uniquePokazatelAfter.length}/${uniquePokazatel.length} (${uniquePokazatelAfter.slice(0, 10).join(', ')})`);
+            
+            // Agar hali ham juda katta bo'lsa, xatolik qaytarish
+            if (dataSize > maxSize) {
+                const errorMessage = `Ma'lumotlar hajmi juda katta (${dataSizeMB} MB). WebDataRocks maksimal ${maxSizeMB} MB ma'lumotlarni qabul qiladi. Iltimos, sana oralig'ini qisqartiring yoki filial/brend bo'yicha filtrlash qo'llang.`;
+                console.error('[PIVOT] ❌ Ma\'lumotlar hajmi cheklovdan oshib ketdi:', {
+                    dataSize: dataSize,
+                    maxSize: maxSize,
+                    dataSizeMB: dataSizeMB,
+                    recordCount: finalData.length,
+                    originalRecordCount: processedData.length,
+                    samplingApplied: true
+                });
+                showToast(errorMessage, true);
+                hidePivotLoader();
+                throw new Error(errorMessage);
+            } else {
+                // Sampling qilinganligi haqida xabar berish
+                const percentage = ((finalData.length / processedData.length) * 100).toFixed(1);
+                showToast(`Ma'lumotlar hajmi katta bo'lgani uchun ${processedData.length} ta yozuvdan ${finalData.length} tasi (${percentage}%) ko'rsatilmoqda. To'liq ma'lumotlar uchun sana oralig'ini qisqartiring.`, 'warning');
+            }
+        }
+        
+        // Final ma'lumotlarni WebDataRocks'ga yuklash
+        let dataToLoad = finalData;
+        
+        // WebDataRocks'ga yuklashdan oldin ma'lumotlar hajmini yakuniy tekshirish
+        // WebDataRocks'ning ichki cheklovi 1 MB, shuning uchun qo'shimcha tekshirish
+        let finalDataSize = new Blob([JSON.stringify(dataToLoad)]).size;
+        const webDataRocksMaxSize = 1024 * 1024; // 1 MB - WebDataRocks'ning ichki cheklovi
+        let finalDataSizeMB = (finalDataSize / (1024 * 1024)).toFixed(2);
+        
+        // Agar hali ham 1 MB dan oshib ketgan bo'lsa, qo'shimcha sampling qilish
+        if (finalDataSize > webDataRocksMaxSize) {
+            console.warn(`[PIVOT] ⚠️ Ma'lumotlar hali ham juda katta (${finalDataSizeMB} MB), qo'shimcha sampling qilinmoqda...`);
+            
+            // Qo'shimcha sampling - maqsadli hajm 0.9 MB (90% WebDataRocks cheklovi)
+            const additionalTargetSize = webDataRocksMaxSize * 0.9;
+            const additionalSamplingRate = Math.ceil(finalDataSize / additionalTargetSize);
+            
+            // "Показатель" maydonini saqlab qolish uchun aqlli sampling
+            const uniquePokazatelFinal = [...new Set(dataToLoad.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
+            const pokazatelGroupsFinal = {};
+            
+            dataToLoad.forEach((item, index) => {
+                const pokazatel = item["Показатель"] || 'null';
+                if (!pokazatelGroupsFinal[pokazatel]) {
+                    pokazatelGroupsFinal[pokazatel] = [];
+                }
+                pokazatelGroupsFinal[pokazatel].push({ item, index });
+            });
+            
+            const additionalSampledData = [];
+            const minRecordsPerPokazatelFinal = Math.max(1, Math.floor(dataToLoad.length / uniquePokazatelFinal.length / additionalSamplingRate));
+            
+            Object.keys(pokazatelGroupsFinal).forEach(pokazatel => {
+                const group = pokazatelGroupsFinal[pokazatel];
+                const groupSamplingRate = Math.max(1, Math.ceil(group.length / Math.max(minRecordsPerPokazatelFinal, Math.floor(group.length / additionalSamplingRate))));
+                
+                group.forEach((entry, groupIndex) => {
+                    if (groupIndex % groupSamplingRate === 0 || group.length <= minRecordsPerPokazatelFinal) {
+                        additionalSampledData.push(entry);
+                    }
+                });
+            });
+            
+            additionalSampledData.sort((a, b) => a.index - b.index);
+            dataToLoad = additionalSampledData.map(entry => entry.item);
+            
+            // Qayta hisoblash
+            finalDataSize = new Blob([JSON.stringify(dataToLoad)]).size;
+            finalDataSizeMB = (finalDataSize / (1024 * 1024)).toFixed(2);
+            
+            console.warn(`[PIVOT] ⚠️ Qo'shimcha sampling qilindi: ${finalData.length} -> ${dataToLoad.length} ta yozuv, hajm: ${finalDataSizeMB} MB`);
+            
+            // Agar hali ham juda katta bo'lsa, xatolik
+            if (finalDataSize > webDataRocksMaxSize) {
+                const errorMessage = `Ma'lumotlar hajmi juda katta (${finalDataSizeMB} MB). WebDataRocks maksimal 1 MB ma'lumotlarni qabul qiladi. Iltimos, sana oralig'ini qisqartiring yoki filial/brend bo'yicha filtrlash qo'llang.`;
+                console.error('[PIVOT] ❌ Ma\'lumotlar hajmi WebDataRocks cheklovidan oshib ketdi:', {
+                    dataSize: finalDataSize,
+                    maxSize: webDataRocksMaxSize,
+                    dataSizeMB: finalDataSizeMB,
+                    recordCount: dataToLoad.length
+                });
+                showToast(errorMessage, true);
+                hidePivotLoader();
+                throw new Error(errorMessage);
+            }
+        }
+        
+        // "Показатель" maydoni mavjudligini yakuniy tekshirish
+        const pokazatelInFinal = dataToLoad.filter(item => item["Показатель"] && String(item["Показатель"]).trim()).length;
+        const uniquePokazatelFinal = [...new Set(dataToLoad.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
+        console.log(`[PIVOT] ✅ WebDataRocks'ga yuklashdan oldin: jami=${dataToLoad.length}, hajm=${finalDataSizeMB} MB, "Показатель" mavjud=${pokazatelInFinal}, unique=${uniquePokazatelFinal.length} (${uniquePokazatelFinal.slice(0, 10).join(', ')})`);
+        
+        // Agar "Показатель" maydoni yo'q bo'lsa, xatolik
+        if (pokazatelInFinal === 0 && dataToLoad.length > 0) {
+            console.error('[PIVOT] ❌ "Показатель" maydoni topilmadi! Ma\'lumotlar:', dataToLoad.slice(0, 3));
         }
         
         // Agar preserveReportConfig true bo'lsa, hozirgi report konfiguratsiyasini saqlaymiz
@@ -922,7 +1115,7 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
             // Faqat dataSource.data ni yangilaymiz
             currentReport.dataSource = {
                 ...currentReport.dataSource,
-                data: processedData
+                data: dataToLoad
             };
             
             // Valyuta formatini yangilash
@@ -1047,7 +1240,7 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
         
         const pivotReport = {
             dataSource: { 
-                data: processedData 
+                data: dataToLoad 
             },
             slice: finalSlice,
             options: {

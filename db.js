@@ -44,8 +44,57 @@ function getDbConfig() {
     // Railway.com'da va DATABASE_URL mavjud bo'lsa (reference yoki oddiy connection string), PostgreSQL config qaytarish
     // Railway runtime'da reference'lar avtomatik resolve qilinadi
     if (isRailway && databaseUrl) {
+        // Avval PGHOST, PGDATABASE, PGUSER, PGPASSWORD ni tekshirish
+        // Agar ular mavjud bo'lsa, ularni DATABASE_URL dan ustun qilish
+        // (chunki DATABASE_URL ba'zida noto'g'ri parolga ega bo'lishi mumkin)
+        const pgHost = process.env.PGHOST;
+        const pgPort = process.env.PGPORT || '5432';
+        const pgDatabase = process.env.PGDATABASE;
+        const pgUser = process.env.PGUSER;
+        const pgPassword = process.env.PGPASSWORD;
+        
+        if (pgHost && pgDatabase && pgUser && pgPassword) {
+            // PGHOST, PGDATABASE, PGUSER, PGPASSWORD mavjud bo'lsa, ularni ishlatish
+            log.debug(`[DB] Using Railway.com's auto-generated PostgreSQL variables (PGHOST, PGDATABASE, etc.)`);
+            log.debug(`[DB] Connection created from PGHOST=${pgHost}, PGDATABASE=${pgDatabase}, PGUSER=${pgUser}`);
+            
+            return {
+                client: 'pg',
+                connection: {
+                    host: pgHost,
+                    port: parseInt(pgPort) || 5432,
+                    database: pgDatabase,
+                    user: pgUser,
+                    password: pgPassword,
+                    // Railway ichki tarmog'ida ko'pincha SSL majburiy emas.
+                    // SSL handshake muammolarini oldini olish uchun bu yerda SSL'ni majburlamaymiz.
+                },
+                migrations: {
+                    directory: path.resolve(__dirname, 'migrations')
+                },
+                pool: {
+                    min: 1,
+                    max: 3,
+                    acquireTimeoutMillis: 10000,
+                    idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash, SSL handshake kamayishi
+                    createTimeoutMillis: 60000,
+                    destroyTimeoutMillis: 5000,
+                    reapIntervalMillis: 5000, // 5s - kamroq tekshirish, kamroq overhead
+                    createRetryIntervalMillis: 1000, // 1s - retry orasida biroz kutish
+                    propagateCreateError: false
+                },
+                acquireConnectionTimeout: 10000,
+                asyncStackTraces: false,
+                debug: false
+            };
+        }
+        
+        // Agar PGHOST, PGDATABASE, PGUSER, PGPASSWORD bo'lmasa, DATABASE_URL ni ishlatish
         // Reference bo'lsa ham, Railway runtime'da resolve qilinadi
         // Knex.js reference'ni connection string sifatida qabul qiladi va Railway runtime'da resolve qiladi
+        
+        // Connection string'ni tozalash - yangi qatorlarni olib tashlash
+        databaseUrl = databaseUrl.replace(/\s+/g, '').trim();
         
         // Eslatma: Railway Postgres'da SSL'ni majburan yoqish ba'zi holatlarda
         // handshake muammolari keltirib chiqarishi mumkin. Shuning uchun connection string'ga
@@ -527,6 +576,31 @@ const initializeDB = async () => {
         
         // Connection pool to'lib qolmasligi uchun delay
         await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // "menejer" roliga default "debt:create" permission qo'shish
+        const menejerRoleExists = await db('roles').where('role_name', 'menejer').first();
+        if (menejerRoleExists) {
+            const debtCreatePermission = await db('permissions').where('permission_key', 'debt:create').first();
+            if (debtCreatePermission) {
+                const existingMenejerDebtCreate = await db('role_permissions')
+                    .where({ role_name: 'menejer', permission_key: 'debt:create' })
+                    .first();
+                
+                if (!existingMenejerDebtCreate) {
+                    try {
+                        await db('role_permissions').insert({
+                            role_name: 'menejer',
+                            permission_key: 'debt:create'
+                        });
+                        log.info(`[DB] [SEEDS] ✅ "menejer" roliga "debt:create" permission qo'shildi`);
+                    } catch (error) {
+                        log.debug(`[DB] [SEEDS] "menejer" roliga "debt:create" permission qo'shishda xatolik (e'tiborsiz): ${error.message}`);
+                    }
+                } else {
+                    log.debug(`[DB] [SEEDS] "menejer" roliga "debt:create" permission allaqachon mavjud`);
+                }
+            }
+        }
         
         // Superadmin uchun shartlar null (cheksiz dostup)
         await db('roles')

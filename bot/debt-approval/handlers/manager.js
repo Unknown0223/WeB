@@ -128,10 +128,54 @@ async function handleNewRequest(msg, bot, requestType = 'NORMAL') {
             return;
         }
         
-        // Permission tekshirish
-        const hasCreatePermission = await userHelper.hasPermission(user.id, 'debt:create');
+        // Permission tekshirish - activeRole bo'yicha
+        // Avval activeRole ni aniqlash
+        const userRolesFromTasks = await userHelper.getUserRolesFromTasks(user.id);
+        // Avval state'dan tanlangan rolni olish, agar bo'lmasa, userRolesFromTasks dan birinchi rolni olish
+        const selectedRole = userHelper.getSelectedRole(user.id);
+        const activeRole = selectedRole || (userRolesFromTasks.length > 0 ? userRolesFromTasks[0] : null) || user.role;
+        
+        log.debug(`[NEW_REQUEST] activeRole aniqlash: userId=${userId}, user.role=${user.role}, selectedRole=${selectedRole || 'null'}, userRolesFromTasks=[${userRolesFromTasks.join(',')}], activeRole=${activeRole}`);
+        
+        // activeRole bo'yicha permission'larni tekshirish
+        let hasCreatePermission = false;
+        if (activeRole && activeRole !== user.role) {
+            // activeRole bo'yicha permission'larni to'g'ridan-to'g'ri database'dan olish
+            const roleNameMap = {
+                'cashier': 'kassir',
+                'manager': 'menejer',
+                'operator': 'operator',
+                'leader': 'rahbar',
+                'supervisor': 'nazoratchi'
+            };
+            let roleName = roleNameMap[activeRole] || activeRole;
+            
+            const rolePermissions = await db('role_permissions as rp')
+                .join('permissions as p', 'rp.permission_key', 'p.permission_key')
+                .where('rp.role_name', roleName)
+                .where('p.permission_key', 'debt:create')
+                .first();
+            
+            hasCreatePermission = !!rolePermissions;
+            
+            // User-specific additional permissions ham tekshirish
+            const hasUserPermissionsTable = await db.schema.hasTable('user_permissions');
+            if (!hasCreatePermission && hasUserPermissionsTable) {
+                const userPermission = await db('user_permissions as up')
+                    .join('permissions as p', 'up.permission_key', 'p.permission_key')
+                    .where('up.user_id', user.id)
+                    .where('up.type', 'additional')
+                    .where('p.permission_key', 'debt:create')
+                    .first();
+                hasCreatePermission = !!userPermission;
+            }
+        } else {
+            // Oddiy usul: user.role bo'yicha
+            hasCreatePermission = await userHelper.hasPermission(user.id, 'debt:create');
+        }
+        
         if (!hasCreatePermission) {
-            log.warn(`[NEW_REQUEST] Foydalanuvchida debt:create permission yo'q. UserId: ${userId}, Role: ${user.role}`);
+            log.warn(`[NEW_REQUEST] Foydalanuvchida debt:create permission yo'q. UserId: ${userId}, Role: ${user.role}, ActiveRole: ${activeRole || 'null'}`);
             await bot.sendMessage(chatId, '❌ Sizda yangi so\'rov yaratish huquqi yo\'q.\n\n' +
                 'Bu funksiyadan foydalanish uchun "Qarzdorlik Tasdiqlash" bo\'limida "Yangi qarzdorlik so\'rovi yaratish" huquqiga ega bo\'lishingiz kerak.\n\n' +
                 'Iltimos, admin panel orqali huquqlarni tekshiring.');
@@ -1747,8 +1791,6 @@ async function handleSendRequest(query, bot) {
                 
                 // SET so'rov uchun rahbarlar guruhiga yuborish
                 if (requestType === 'SET') {
-                    log.info(`[SEND_REQUEST] 🔍 SET so'rov uchun rahbarlar guruhini topish boshlanmoqda. RequestId: ${requestId}, RequestUID: ${requestUID}`);
-                    
                     log.debug(`[SEND_REQUEST] SET.1. Rahbarlar guruhini qidirish...`);
                     const leadersGroup = await db('debt_groups')
                         .where('group_type', 'leaders')
@@ -1773,12 +1815,13 @@ async function handleSendRequest(query, bot) {
                             .first();
                         
                         if (fullRequest) {
+                            log.info(`[MANAGER] [SEND_REQUEST] 📤 SET so'rov yuborilmoqda: requestId=${requestId}, requestUID=${requestUID}, brand=${fullRequest.brand_name}, branch=${fullRequest.filial_name}, svr=${fullRequest.svr_name}, managerId=${user.id}, managerName=${user.fullname}`);
                             log.info(`[SEND_REQUEST] SET.2.1. ✅ So'rov ma'lumotlari topildi: RequestUID=${fullRequest.request_uid}, Brand=${fullRequest.brand_name}, Branch=${fullRequest.filial_name}, SVR=${fullRequest.svr_name}`);
                             
                             log.info(`[SEND_REQUEST] SET.3. Rahbarlar guruhiga xabar yuborilmoqda: groupId=${leadersGroup.telegram_group_id}, requestId=${requestId}`);
                             const { showSetRequestToLeaders } = require('./leader.js');
                             await showSetRequestToLeaders(fullRequest, leadersGroup.telegram_group_id);
-                            log.info(`[SEND_REQUEST] SET.4. ✅ SET so'rov rahbarlar guruhiga muvaffaqiyatli yuborildi: GroupId=${leadersGroup.telegram_group_id}, RequestId=${requestId}, RequestUID=${requestUID}`);
+                            log.info(`[MANAGER] [SEND_REQUEST] ✅ SET so'rov rahbarlar guruhiga yuborildi: requestId=${requestId}, requestUID=${requestUID}, groupId=${leadersGroup.telegram_group_id}, chatType=group`);
                         } else {
                             log.error(`[SEND_REQUEST] SET.2.1. ❌ SET so'rov topilmadi: RequestId=${requestId}`);
                         }

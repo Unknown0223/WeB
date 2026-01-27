@@ -72,6 +72,19 @@ async function sendToFinalGroup(requestId) {
             log.info(`[FINAL_GROUP] Tasdiqlash ${index + 1}: approverId=${approval.approver_id}, fullname=${approval.fullname}, type=${approval.approval_type}, status=${approval.status}, createdAt=${approval.created_at}`);
         });
         
+        // ✅ Kassir yoki operator tomonidan teskari jarayon qilinganligini tekshirish
+        const reversedApproval = await db('debt_request_approvals')
+            .where('request_id', request.id)
+            .where('status', 'reversed')
+            .orderBy('created_at', 'desc')
+            .first();
+        
+        const isReversed = !!reversedApproval;
+        const reversedByCashier = reversedApproval && reversedApproval.approval_type === 'cashier';
+        const reversedByOperator = reversedApproval && reversedApproval.approval_type === 'operator';
+        
+        log.info(`[FINAL_GROUP] Teskari jarayon tekshiruvi: isReversed=${isReversed}, reversedByCashier=${reversedByCashier}, reversedByOperator=${reversedByOperator}, requestId=${requestId}`);
+        
         // Excel ma'lumotlarini olish va parse qilish
         let excel_data = null;
         let excel_headers = null;
@@ -117,13 +130,15 @@ async function sendToFinalGroup(requestId) {
         const month_name = getPreviousMonthName();
         
         // Telegraph sahifa yaratish (agar Excel ma'lumotlari bo'lsa)
+        // ✅ MUHIM: Mavjud URL ni qayta ishlatmaymiz, chunki u kassir uchun yaratilgan bo'lishi mumkin (agent bo'yicha)
+        // Final guruh uchun har doim yangi URL yaratamiz (klient bo'yicha)
         let telegraphUrl = null;
         if (excel_data && excel_data.length > 0) {
             try {
                 log.info(`[FINAL_GROUP] Telegraph sahifa yaratish boshlanmoqda: requestId=${requestId}, requestUID=${request.request_uid}`);
                 const { createDebtDataPage } = require('../../../utils/telegraph.js');
                 telegraphUrl = await createDebtDataPage({
-                    request_id: requestId, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                    request_id: null, // ✅ MUHIM: Yangi URL yaratish uchun (mavjud URL ni qayta ishlatmaymiz)
                     request_uid: request.request_uid,
                     brand_name: request.brand_name,
                     filial_name: request.filial_name,
@@ -133,7 +148,8 @@ async function sendToFinalGroup(requestId) {
                     excel_data: excel_data,
                     excel_headers: excel_headers,
                     excel_columns: excel_columns,
-                    total_amount: total_amount
+                    total_amount: total_amount,
+                    isForCashier: false // ✅ MUHIM: Final guruh uchun klient bo'yicha format
                 });
                 if (telegraphUrl) {
                     log.info(`[FINAL_GROUP] ✅ Telegraph sahifa muvaffaqiyatli yaratildi: requestId=${requestId}, URL=${telegraphUrl}`);
@@ -146,14 +162,30 @@ async function sendToFinalGroup(requestId) {
         }
         
         // Request object'ga telegraphUrl va excel ma'lumotlarini qo'shish
+        // ✅ MUHIM: Agar kassir o'zgartirish qilmagan bo'lsa (normal jarayon), final guruh uchun excel_data null bo'lishi kerak
+        // Faqat Telegraph link ko'rsatiladi (klientlar bo'yicha)
         request.telegraph_url = telegraphUrl;
-        request.excel_data = excel_data;
-        request.excel_headers = excel_headers;
-        request.excel_columns = excel_columns;
+        // Agar teskari jarayon bo'lsa, excel_data saqlanadi (barcha ma'lumotlar bilan)
+        // Agar normal jarayon bo'lsa, excel_data null (faqat Telegraph link)
+        if (isReversed) {
+            // Teskari jarayon: barcha ma'lumotlar bilan
+            request.excel_data = excel_data;
+            request.excel_headers = excel_headers;
+            request.excel_columns = excel_columns;
+            // Status'ni 'reversed' ga o'zgartirish (formatRequestMessageWithApprovals uchun)
+            request.status = 'reversed';
+        } else {
+            // Normal jarayon: faqat Telegraph link (excel_data null)
+            request.excel_data = null;
+            request.excel_headers = null;
+            request.excel_columns = null;
+            log.info(`[FINAL_GROUP] Normal jarayon: excel_data null qilindi, faqat Telegraph link ko'rsatiladi: requestId=${requestId}`);
+        }
         
         // formatRequestMessageWithApprovals ishlatish - original xabar + tasdiqlashlar
         // ✅ MUHIM: Final guruh uchun 'final' roli bilan chaqirish (vaqt hisoblash uchun va link ko'rsatish uchun)
-        const message = await formatRequestMessageWithApprovals(request, db, 'final');
+        // Teskari jarayon bo'lsa, debtData null (chunki barcha ma'lumotlar request object'da)
+        const message = await formatRequestMessageWithApprovals(request, db, 'final', isReversed ? null : null);
         
         // Xabarni yuborish
         const bot = getBot();
@@ -175,7 +207,7 @@ async function sendToFinalGroup(requestId) {
                 updated_at: db.fn.now()
             });
         
-        log.info(`Message sent to final group: requestId=${requestId}, messageId=${sentMessage.message_id}, status=FINAL_APPROVED`);
+        log.info(`[FINAL_GROUP] ✅ Final guruhga xabar yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, groupId=${finalGroup.telegram_group_id}, messageId=${sentMessage.message_id}, status=FINAL_APPROVED, telegraphUrl=${telegraphUrl || 'yo\'q'}, format=client-based, isReversed=${isReversed}`);
         
         // Arxivlash - FINAL_APPROVED bo'lganda Excel ma'lumotlarini arxivlash
         try {

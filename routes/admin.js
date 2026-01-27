@@ -1293,7 +1293,8 @@ router.post('/import-full-db', async (req, res) => {
                     'users', 'reports', 'brands', 'audit_logs', 'pivot_templates',
                     'exchange_rates', 'report_history', 'pending_registrations',
                     'user_permissions', 'role_permissions', 'user_locations',
-                    'user_brands', 'role_locations', 'role_brands', 'brand_locations'
+                    'user_brands', 'role_locations', 'role_brands', 'brand_locations',
+                    'comparisons' // Solishtirish jadvali
                 ];
                 
                 for (const tableName of tablesWithSequences) {

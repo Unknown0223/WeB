@@ -43,18 +43,49 @@ router.get('/:role', isAuthenticated, hasPermission('roles:manage'), async (req,
     try {
         const { role } = req.params;
         
-        const buttons = await db('bot_menu_buttons')
-            .leftJoin('bot_role_button_settings', function() {
-                this.on('bot_menu_buttons.id', '=', 'bot_role_button_settings.button_id')
-                    .andOn('bot_role_button_settings.role_name', '=', db.raw('?', [role]));
-            })
-            .orderBy('bot_menu_buttons.category', 'asc')
-            .orderBy(db.raw('COALESCE(bot_role_button_settings.order_index, bot_menu_buttons.order_index)'), 'asc')
-            .select(
-                'bot_menu_buttons.*',
-                db.raw('COALESCE(bot_role_button_settings.is_visible, true) as is_visible'),
-                db.raw('COALESCE(bot_role_button_settings.order_index, bot_menu_buttons.order_index) as final_order_index')
-            );
+        log.debug(`[GET] Rol uchun knopkalar so'raldi: role=${role}`);
+        
+        // Barcha knopkalarni olish
+        const allButtons = await db('bot_menu_buttons')
+            .orderBy('category', 'asc')
+            .orderBy('order_index', 'asc')
+            .select('*');
+        
+        // Bu rol uchun sozlamalarni olish
+        const settings = await db('bot_role_button_settings')
+            .where('role_name', role)
+            .select('button_id', 'is_visible', 'order_index');
+        
+        log.debug(`[GET] Topildi: allButtons=${allButtons.length}, settings=${settings.length}`);
+        
+        // Settings'ni map qilish
+        const settingsMap = {};
+        settings.forEach(s => {
+            settingsMap[s.button_id] = {
+                is_visible: s.is_visible,
+                order_index: s.order_index
+            };
+        });
+        
+        // Barcha knopkalarni qo'shish, lekin is_visible ni to'g'ri belgilash
+        const buttons = allButtons.map(btn => {
+            const setting = settingsMap[btn.id];
+            // SQLite'da boolean qiymatlar 1/0 sifatida qaytadi
+            const isVisible = setting 
+                ? (setting.is_visible === true || setting.is_visible === 1 || Boolean(setting.is_visible))
+                : true; // Agar sozlama bo'lmasa, default true
+            return {
+                ...btn,
+                is_visible: isVisible,
+                final_order_index: setting ? setting.order_index : btn.order_index
+            };
+        });
+        
+        // SQLite'da boolean qiymatlar 1/0 sifatida qaytadi, shuning uchun tekshirishni yaxshilash
+        const visibleCount = buttons.filter(b => b.is_visible === true || b.is_visible === 1 || Boolean(b.is_visible)).length;
+        const hiddenCount = buttons.length - visibleCount;
+        
+        log.debug(`[GET] Natija: role=${role}, total=${buttons.length}, visible=${visibleCount}, hidden=${hiddenCount}`);
         
         res.json({ buttons, role });
     } catch (error) {
@@ -69,6 +100,8 @@ router.post('/:role', isAuthenticated, hasPermission('roles:manage'), async (req
         const { role } = req.params;
         const { buttons, button_id, is_visible } = req.body;
         
+        log.debug(`[POST] Saqlash so'rovi: role=${role}, buttons=${Array.isArray(buttons) ? buttons.length : 'N/A'}, button_id=${button_id}, is_visible=${is_visible}`);
+        
         // Agar bitta knopka yangilansa (button_id va is_visible mavjud)
         if (button_id !== undefined && is_visible !== undefined) {
             // Mavjud sozlamani tekshirish
@@ -80,6 +113,7 @@ router.post('/:role', isAuthenticated, hasPermission('roles:manage'), async (req
                 await db('bot_role_button_settings')
                     .where({ role_name: role, button_id })
                     .update({ is_visible, updated_at: db.fn.now() });
+                log.debug(`[POST] Knopka yangilandi: role=${role}, button_id=${button_id}, is_visible=${is_visible}`);
             } else {
                 // Button ma'lumotlarini olish
                 const button = await db('bot_menu_buttons').where('id', button_id).first();
@@ -91,6 +125,7 @@ router.post('/:role', isAuthenticated, hasPermission('roles:manage'), async (req
                         order_index: button.order_index || 0,
                         updated_at: db.fn.now()
                     });
+                    log.debug(`[POST] Yangi knopka qo'shildi: role=${role}, button_id=${button_id}, is_visible=${is_visible}`);
                 }
             }
             
@@ -100,31 +135,45 @@ router.post('/:role', isAuthenticated, hasPermission('roles:manage'), async (req
         
         // Agar buttons array yuborilsa (ko'p knopkalar bir vaqtda)
         if (!Array.isArray(buttons)) {
+            log.warn(`[POST] Noto'g'ri format: buttons array emas`);
             return res.status(400).json({ error: 'buttons array bo\'lishi kerak yoki button_id va is_visible berilishi kerak' });
         }
+        
+        log.debug(`[POST] Transaction boshlandi: role=${role}, buttons=${buttons.length}`);
+        
+        // Visible va hidden knopkalarni sanash
+        const visibleCount = buttons.filter(b => b.is_visible).length;
+        const hiddenCount = buttons.filter(b => !b.is_visible).length;
+        log.debug(`[POST] Knopkalar: visible=${visibleCount}, hidden=${hiddenCount}`);
         
         // Transaction ichida barcha o'zgarishlarni saqlash
         await db.transaction(async (trx) => {
             // Avval barcha eski sozlamalarni o'chirish
-            await trx('bot_role_button_settings')
+            const deleted = await trx('bot_role_button_settings')
                 .where('role_name', role)
                 .delete();
             
-            // Yangi sozlamalarni qo'shish
+            log.debug(`[POST] Eski sozlamalar o'chirildi: role=${role}, deleted=${deleted}`);
+            
+            // Yangi sozlamalarni qo'shish (ham visible, ham hidden)
+            let inserted = 0;
             for (const btn of buttons) {
                 if (btn.button_id && btn.is_visible !== undefined) {
                     await trx('bot_role_button_settings').insert({
                         role_name: role,
                         button_id: btn.button_id,
-                        is_visible: btn.is_visible,
+                        is_visible: btn.is_visible, // false ham saqlanadi!
                         order_index: btn.order_index || 0,
                         updated_at: db.fn.now()
                     });
+                    inserted++;
                 }
             }
+            
+            log.debug(`[POST] Yangi sozlamalar qo'shildi: role=${role}, inserted=${inserted}`);
         });
         
-        log.info(`Rol uchun knopkalar sozlandi: role=${role}, buttons=${buttons.length}`);
+        log.info(`Rol uchun knopkalar sozlandi: role=${role}, buttons=${buttons.length}, visible=${visibleCount}, hidden=${hiddenCount}`);
         res.json({ success: true, message: 'Knopkalar muvaffaqiyatli saqlandi' });
     } catch (error) {
         log.error('Rol knopkalarini saqlashda xatolik:', error);

@@ -466,7 +466,7 @@ router.post('/login', async (req, res) => {
                         db('user_permissions').where({ user_id: user.id, type: 'restricted' }).pluck('permission_key'),
                         db('sessions')
                             .select('sid', 'sess')
-                            .whereRaw(`sess LIKE ?`, [`%"id":${user.id}%`])
+                            .whereRaw(`sess::text LIKE ?`, [`%"id":${user.id}%`])
                             .limit(100)
                     ];
                     

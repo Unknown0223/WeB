@@ -4,7 +4,7 @@
 import { state } from './state.js';
 import { DOM } from './dom.js';
 import { safeFetch, fetchUsers, fetchPendingUsers, fetchPasswordChangeRequests } from './api.js';
-import { showToast, parseUserAgent, showConfirmDialog, hasPermission, createLogger, getUserFriendlyErrorMessage } from './utils.js';
+import { showToast, parseUserAgent, showConfirmDialog, showReasonInputModal, hasPermission, createLogger, getUserFriendlyErrorMessage } from './utils.js';
 import { getModal, openModal, closeModal } from './modal.js';
 
 // Logger yaratish
@@ -7187,8 +7187,14 @@ window.rejectPasswordChangeRequest = async function(requestId) {
         return;
     }
     
-    // Sabab kiritish uchun prompt
-    const reason = prompt('Sababni kiriting (ixtiyoriy):') || 'Sabab ko\'rsatilmagan';
+    // Sabab kiritish uchun chiroyli modal oyna
+    const reason = await showReasonInputModal({
+        title: 'Parol tiklash so\'rovini rad etish',
+        message: 'manus.up.railway.app saytida ma\'lumotlarni kiritish',
+        placeholder: 'Sababni kiriting (ixtiyoriy)',
+        confirmText: 'Davom ettirish',
+        cancelText: 'Bekor qilish'
+    }) || 'Sabab ko\'rsatilmagan';
     
     try {
         const res = await safeFetch(`/api/users/password-change-requests/${requestId}/reject`, {
