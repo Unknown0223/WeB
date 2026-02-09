@@ -1,13 +1,44 @@
+const fs = require('fs');
+const path = require('path');
+
+// Loglar saqlanadigan papka
+const logDir = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir);
+}
+
+const logFile = path.join(logDir, 'combined.log');
+
+// Log faylini tozalash (oddiy rotatsiya)
+const rotateLogs = () => {
+    try {
+        if (fs.existsSync(logFile)) {
+            const stats = fs.statSync(logFile);
+            const fileSizeInMegabytes = stats.size / (1024 * 1024);
+            if (fileSizeInMegabytes > 10) { // 10 MB dan oshsa tozalash
+                fs.writeFileSync(logFile, '');
+                console.log('--- Log fayli tozalandi ---');
+            }
+        }
+    } catch (err) {
+        console.error('Log rotatsiyasida xatolik:', err);
+    }
+};
+
+// Har 1 soatda rotatsiyani tekshirish
+setInterval(rotateLogs, 60 * 60 * 1000);
+
+const writeToFile = (text) => {
+    try {
+        fs.appendFileSync(logFile, text + '\n');
+    } catch (err) {
+        // console.errorga yubormaymiz, chunki u ham writeToFile chaqirishi mumkin (infinite loop)
+    }
+};
+
 /**
  * Logger Utility
  * Production uchun shartli logging tizimi
- * 
- * LOG_LEVEL environment variable orqali boshqariladi:
- * - 'debug' - Barcha loglar (development uchun)
- * - 'info' - info, warn, error
- * - 'warn' - warn, error
- * - 'error' - faqat error
- * - 'silent' - hech narsa
  */
 
 const LOG_LEVELS = {
@@ -24,17 +55,17 @@ const getLogLevel = () => {
     if (envLevel && LOG_LEVELS[envLevel] !== undefined) {
         return envLevel;
     }
-    
+
     // NODE_ENV ga qarab avtomatik log level
-    const isProduction = process.env.NODE_ENV === 'production' || 
-                        process.env.RAILWAY_ENVIRONMENT === 'production' ||
-                        process.env.RENDER === 'true' ||
-                        process.env.HEROKU_APP_NAME;
-    
+    const isProduction = process.env.NODE_ENV === 'production' ||
+        process.env.RAILWAY_ENVIRONMENT === 'production' ||
+        process.env.RENDER === 'true' ||
+        process.env.HEROKU_APP_NAME;
+
     if (isProduction) {
         return 'warn'; // Production'da faqat warn va error
     }
-    
+
     return 'info'; // Development'da info, warn, error
 };
 
@@ -58,63 +89,57 @@ const formatPrefix = (level, module) => {
  */
 const createLogger = (moduleName = '') => {
     return {
-        /**
-         * Debug level - faqat development'da ko'rinadi
-         */
         debug: (...args) => {
+            const prefix = formatPrefix('debug', moduleName);
             if (currentLevel() <= LOG_LEVELS.debug) {
-                console.log(formatPrefix('debug', moduleName), ...args);
+                console.log(prefix, ...args);
             }
+            writeToFile(`${prefix} ${args.join(' ')}`);
         },
 
-        /**
-         * Info level - oddiy ma'lumotlar
-         */
         info: (...args) => {
+            const prefix = formatPrefix('info', moduleName);
             if (currentLevel() <= LOG_LEVELS.info) {
-                console.log(formatPrefix('info', moduleName), ...args);
+                console.log(prefix, ...args);
             }
+            writeToFile(`${prefix} ${args.join(' ')}`);
         },
 
-        /**
-         * Success - muvaffaqiyatli operatsiyalar (info level)
-         */
         success: (...args) => {
+            const prefix = formatPrefix('info', moduleName);
             if (currentLevel() <= LOG_LEVELS.info) {
-                console.log(`✅ ${formatPrefix('info', moduleName)}`, ...args);
+                console.log(`✅ ${prefix}`, ...args);
             }
+            writeToFile(`✅ ${prefix} ${args.join(' ')}`);
         },
 
-        /**
-         * Warn level - ogohlantirishlar
-         */
         warn: (...args) => {
+            const prefix = formatPrefix('warn', moduleName);
             if (currentLevel() <= LOG_LEVELS.warn) {
-                console.warn(`⚠️ ${formatPrefix('warn', moduleName)}`, ...args);
+                console.warn(`⚠️ ${prefix}`, ...args);
             }
+            writeToFile(`⚠️ ${prefix} ${args.join(' ')}`);
         },
 
-        /**
-         * Error level - xatolar (har doim ko'rinadi, faqat silent'da yo'q)
-         */
         error: (...args) => {
+            const prefix = formatPrefix('error', moduleName);
             if (currentLevel() <= LOG_LEVELS.error) {
-                console.error(`❌ ${formatPrefix('error', moduleName)}`, ...args);
+                console.error(`❌ ${prefix}`, ...args);
             }
+            writeToFile(`❌ ${prefix} ${args.join(' ')}`);
         },
 
-        /**
-         * Log - debug alias
-         */
         log: (...args) => {
+            const prefix = formatPrefix('debug', moduleName);
             if (currentLevel() <= LOG_LEVELS.debug) {
-                console.log(formatPrefix('debug', moduleName), ...args);
+                console.log(prefix, ...args);
             }
+            writeToFile(`${prefix} ${args.join(' ')}`);
         }
     };
 };
 
-// Default logger (modul nomi yo'q)
+// Default logger
 const logger = createLogger();
 
 // Export
@@ -122,12 +147,13 @@ module.exports = {
     createLogger,
     logger,
     LOG_LEVELS,
-    // Tez ishlatish uchun
     debug: logger.debug,
     info: logger.info,
     success: logger.success,
     warn: logger.warn,
     error: logger.error,
-    log: logger.log
+    log: logger.log,
+    logFile // UI uchun kerak bo'lishi mumkin
 };
+
 

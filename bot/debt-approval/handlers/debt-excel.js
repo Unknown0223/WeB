@@ -87,7 +87,7 @@ async function handleExcelFile(msg, bot) {
     const userId = msg.from.id;
     
     try {
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl qabul qilish boshlanmoqda: userId=${userId}, chatId=${chatId}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl qabul qilish boshlanmoqda: userId=${userId}, chatId=${chatId}`);
         
         const state = stateManager.getUserState(userId);
         log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] State ma'lumotlari: hasState=${!!state}, context=${state?.context}, state=${state?.state}, requestId=${state?.data?.request_id}`);
@@ -287,7 +287,7 @@ async function handleExcelFile(msg, bot) {
         const fileName = msg.document.file_name || 'debt_file.xlsx';
         const fileSize = msg.document.file_size || 0;
         
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl topildi: fileName=${fileName}, fileId=${fileId}, fileSize=${fileSize} bytes, userId=${userId}, requestId=${state.data?.request_id}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl topildi: fileName=${fileName}, fileId=${fileId}, fileSize=${fileSize} bytes, userId=${userId}, requestId=${state.data?.request_id}`);
         
         // Fayl hajmini tekshirish
         const maxFileSize = await getMaxFileSize();
@@ -326,7 +326,7 @@ async function handleExcelFile(msg, bot) {
         });
         
         // Excel faylni o'qish - parseExcelFile funksiyasini ishlatish (to'g'ri format)
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel faylni o'qish boshlanmoqda: filePath=${filePath}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel faylni o'qish boshlanmoqda: filePath=${filePath}`);
         
         // Request ma'lumotlarini olish (validatsiya uchun)
         const requestData = await getRequestDataForValidation(state, userId);
@@ -334,7 +334,7 @@ async function handleExcelFile(msg, bot) {
         // parseExcelFile funksiyasini ishlatish (to'g'ri formatda o'qadi)
         const parseResult = await parseExcelFile(filePath, requestData);
         
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl o'qildi: totalRows=${parseResult.data.length}, filteredRows=${parseResult.filteredData.length}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Excel fayl o'qildi: totalRows=${parseResult.data.length}, filteredRows=${parseResult.filteredData.length}`);
         
         // Excel faylni o'chirish (ma'lumotlar o'qildi, endi fayl kerak emas)
         try {
@@ -362,8 +362,8 @@ async function handleExcelFile(msg, bot) {
             return headers.map(header => row[header] !== undefined ? row[header] : null);
         });
         
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Headers va qatorlar ajratildi: headersCount=${headers.length}, rowsCount=${parseResult.data.length}, filteredRows=${filteredData.length}`);
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Ustunlar aniqlandi: detectedColumns=${JSON.stringify(detectedColumns)}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Headers va qatorlar ajratildi: headersCount=${headers.length}, rowsCount=${parseResult.data.length}, filteredRows=${filteredData.length}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Ustunlar aniqlandi: detectedColumns=${JSON.stringify(detectedColumns)}`);
         
         // SET so'rov uchun tekshirish: agar filtrlangan ma'lumotlar bo'sh bo'lsa yoki summa 0 bo'lsa, NORMAL ga o'zgartirish
         let requestType = state.data.type || 'NORMAL';
@@ -395,7 +395,7 @@ async function handleExcelFile(msg, bot) {
         
         // State'ni yangilash (bir nechta marta fayl yuborilganda, eski ma'lumotlar yangilanadi)
         // excel_file_path o'rniga null (fayl saqlanmaydi)
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] State yangilanmoqda: userId=${userId}, requestId=${state.data?.request_id}, type=${requestType}${typeChanged ? ' (o\'zgartirildi)' : ''}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] State yangilanmoqda: userId=${userId}, requestId=${state.data?.request_id}, type=${requestType}${typeChanged ? ' (o\'zgartirildi)' : ''}`);
         stateManager.updateUserState(userId, state.state, {
             ...state.data,
             type: requestType, // Type'ni yangilash (agar o'zgartirilgan bo'lsa)
@@ -411,12 +411,13 @@ async function handleExcelFile(msg, bot) {
         
         // Agar barcha kerakli ustunlar topilgan bo'lsa
         if (detectedColumns.id !== null && detectedColumns.name !== null && detectedColumns.summa !== null) {
-            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Barcha kerakli ustunlar topildi (type=${requestType}, state=${state.state}, requestId=${state.data?.request_id})`);
+            log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Barcha kerakli ustunlar topildi (type=${requestType}, state=${state.state}, requestId=${state.data?.request_id})`);
             
             // ✅ MUHIM: Agar UPLOAD_DEBT_EXCEL state'da va request_id mavjud bo'lsa (qarzi bor holati),
             // preview ko'rsatish kerak (Telegraph link bilan)
             if (state.state === STATES.UPLOAD_DEBT_EXCEL && state.data?.request_id) {
                 log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Qarzi bor holati: preview ko'rsatilmoqda: requestId=${state.data.request_id}, userId=${userId}`);
+                log.info(`[QARZI_BOR] [DEBT_EXCEL] Excel qabul qilindi (qarzi bor). requestId=${state.data.request_id}, userId=${userId}, qatorlar=${filteredData.length}. Keyingi: Preview ko'rsatiladi, keyin Tasdiqlash/Bekor.`);
                 
                 // So'rovni olish (solishtirish uchun) - TO'LIQ ma'lumotlar bilan
                 const request = await db('debt_requests')
@@ -491,6 +492,7 @@ async function handleExcelFile(msg, bot) {
                 await showDebtPreviewWithComparison(userId, chatId, bot, stateManager.getUserState(userId), request, comparisonResult);
                 
                 log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] ✅ Preview ko'rsatildi: requestId=${state.data.request_id}, userId=${userId}`);
+                log.info(`[QARZI_BOR] [DEBT_EXCEL] Preview ko'rsatildi (Telegraph link bilan). requestId=${state.data.request_id}. Foydalanuvchi "Tasdiqlash" yoki "Bekor" bosadi.`);
                 return true;
             }
             
@@ -504,25 +506,25 @@ async function handleExcelFile(msg, bot) {
             
             // SET so'rov uchun (state.state === 'set_extra_info' va type hali ham SET) showPreview ko'rsatish, aks holda showExcelPreview yoki NORMAL preview
             if (state.state === 'set_extra_info' && requestType === 'SET') {
-                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] SET so'rov uchun showPreview ko'rsatish: userId=${userId}`);
+                log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] SET so'rov uchun showPreview ko'rsatish: userId=${userId}`);
                 const { showPreview } = require('./manager.js');
                 await showPreview(chatId, userId, null, bot);
             } else if (requestType === 'NORMAL') {
                 // NORMAL so'rov uchun preview ko'rsatish
-                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] NORMAL so'rov uchun showPreview ko'rsatish: userId=${userId}`);
+                log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] NORMAL so'rov uchun showPreview ko'rsatish: userId=${userId}`);
                 const { showPreview } = require('./manager.js');
                 await showPreview(chatId, userId, null, bot);
             } else {
-                log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Preview ko'rsatish boshlanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
+                log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Preview ko'rsatish boshlanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
                 await showExcelPreview(userId, chatId, bot, stateManager.getUserState(userId));
             }
         } else {
             // Manual ustun tanlash
-            log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Manual ustun tanlash boshlanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
+            log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] Manual ustun tanlash boshlanmoqda: userId=${userId}, requestId=${state.data?.request_id}`);
             await showColumnSelection(userId, chatId, bot, headers, detectedColumns);
         }
         
-        log.info(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] ✅ Excel fayl muvaffaqiyatli qabul qilindi va qayta ishlandi: userId=${userId}, requestId=${state.data?.request_id}, fileName=${fileName}`);
+        log.debug(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] ✅ Excel fayl muvaffaqiyatli qabul qilindi va qayta ishlandi: userId=${userId}, requestId=${state.data?.request_id}, fileName=${fileName}`);
         return true;
     } catch (error) {
         log.error(`[DEBT_EXCEL] [HANDLE_EXCEL_FILE] ❌ Excel faylni qayta ishlashda xatolik: userId=${userId}, requestId=${state?.data?.request_id}, error=${error.message}`, error);
@@ -1182,12 +1184,15 @@ async function handleConfirmExcel(query, bot) {
         // Foydalanuvchi roliga qarab to'g'ri funksiyani chaqirish
         // Avval current_approver_type ni tekshirish (so'rovga tayinlangan rolni aniqlash)
         let isOperator = false;
+        let isSupervisor = false;
         if (request && request.current_approver_type === 'operator' && request.current_approver_id === user.id) {
-            // So'rovga operator sifatida tayinlangan
             isOperator = true;
             log.info(`[DEBT_EXCEL] [CONFIRM] So'rovga operator sifatida tayinlangan: requestId=${actualRequestId}, userId=${user.id}`);
+        } else if (request && request.current_approver_type === 'supervisor' && request.current_approver_id === user.id) {
+            isSupervisor = true;
+            isOperator = true; // Supervisor teskari jarayonda operator bilan bir xil (sendDebtResponse)
+            log.info(`[DEBT_EXCEL] [CONFIRM] So'rovga supervisor sifatida tayinlangan: requestId=${actualRequestId}, userId=${user.id}`);
         } else if (request && request.current_approver_type === 'cashier' && request.current_approver_id === user.id) {
-            // So'rovga kassir sifatida tayinlangan
             isOperator = false;
             log.info(`[DEBT_EXCEL] [CONFIRM] So'rovga kassir sifatida tayinlangan: requestId=${actualRequestId}, userId=${user.id}`);
         } else {
@@ -1216,6 +1221,7 @@ async function handleConfirmExcel(query, bot) {
         if (isIdentical && request && request.type === 'SET') {
             // Bir xil bo'lsa, Excel ma'lumotlarini yangilab, tasdiqlash jarayonini davom ettirish
             log.info(`[DEBT_EXCEL] [CONFIRM] Ma'lumotlar bir xil, Excel ma'lumotlarini yangilab, tasdiqlash jarayonini davom ettirish: requestId=${actualRequestId}`);
+            log.info(`[QARZI_BOR] [DEBT_EXCEL] Tasdiqlash bosildi: ma'lumotlar BIR XIL (SET). Tasdiqlash jarayoni (handleOperatorApproval/handleCashierApproval) chaqirildi. requestId=${actualRequestId}, rol=${isOperator ? 'Operator' : 'Kassir'}.`);
             
             // Excel ma'lumotlarini yangilash
             if (debtData.excel_data) {
@@ -1258,17 +1264,18 @@ async function handleConfirmExcel(query, bot) {
         }
         
         // Agar farq bo'lsa yoki NORMAL so'rov bo'lsa, sendDebtResponse chaqirish
-        if (isOperator) {
-            // Operator uchun sendDebtResponse
+        const roleLabel = isSupervisor ? 'Supervisor' : (isOperator ? 'Operator' : 'Kassir');
+        log.info(`[QARZI_BOR] [DEBT_EXCEL] Tasdiqlash bosildi: farq bor yoki NORMAL so'rov. sendDebtResponse chaqiriladi. requestId=${actualRequestId}, rol=${roleLabel}. Xabarlar Menejer/Rahbarlar/Final ga ketadi.`);
+        if (isOperator || isSupervisor) {
+            // Operator va Supervisor uchun bir xil teskari jarayon (operator.sendDebtResponse)
             const operatorHandlers = require('./operator.js');
             await operatorHandlers.sendDebtResponse(actualRequestId, userId, chatId, debtData);
         } else if (userHelper.hasRole(user, ['kassir', 'cashier']) || (request && request.current_approver_type === 'cashier')) {
-            // Kassir uchun sendDebtResponse
             const cashierHandlers = require('./cashier.js');
             await cashierHandlers.sendDebtResponse(actualRequestId, userId, chatId, debtData);
         } else {
             log.warn(`Unknown role for debt response: userId=${userId}, role=${user.role}, current_approver_type=${request?.current_approver_type}`);
-            await bot.sendMessage(chatId, '❌ Bu funksiya faqat kassir va operatorlar uchun.');
+            await bot.sendMessage(chatId, '❌ Bu funksiya faqat kassir, operator va nazoratchilar uchun.');
             return;
         }
         

@@ -2,7 +2,7 @@
 // Xabarlarni tozalash utility
 
 const { createLogger } = require('../../../utils/logger.js');
-const { getMessagesToCleanup, markAsStatusMessage } = require('./messageTracker.js');
+const { getMessagesToCleanup, markAsStatusMessage, untrackMessage } = require('./messageTracker.js');
 
 const log = createLogger('MSG_CLEANUP');
 
@@ -38,7 +38,7 @@ async function cleanupUnnecessaryMessages(bot, chatId, keepMessageIds = [], opti
             return { deleted: 0, errors: 0 };
         }
         
-        log.info(`Starting cleanup: chatId=${chatId}, messagesToDelete=${messagesToDelete.length}, keepMessages=${keepMessageIds.length}`);
+        log.debug(`Starting cleanup: chatId=${chatId}, messagesToDelete=${messagesToDelete.length}, keepMessages=${keepMessageIds.length}`);
         
         // Bir safarda maksimal xabar sonini cheklash
         const messagesToDeleteNow = messagesToDelete.slice(0, maxMessages);
@@ -51,6 +51,7 @@ async function cleanupUnnecessaryMessages(bot, chatId, keepMessageIds = [], opti
             try {
                 await bot.deleteMessage(chatId, messageId);
                 deletedCount++;
+                untrackMessage(chatId, messageId);
                 
                 // Delay (rate limit'ni oldini olish uchun)
                 if (delayBetween > 0 && deletedCount < messagesToDeleteNow.length) {
@@ -61,11 +62,14 @@ async function cleanupUnnecessaryMessages(bot, chatId, keepMessageIds = [], opti
             } catch (deleteError) {
                 errorCount++;
                 
-                // Agar xabar allaqachon o'chirilgan yoki topilmagan bo'lsa, e'tiborsiz qoldirish
+                // Agar xabar allaqachon o'chirilgan yoki topilmagan bo'lsa, tracker'dan olib tashlash va e'tiborsiz qoldirish
                 const isExpectedError = deleteError.message?.includes('message to delete not found') ||
                                        deleteError.message?.includes('message not found') ||
                                        deleteError.message?.includes('bad request');
                 
+                if (isExpectedError) {
+                    untrackMessage(chatId, messageId);
+                }
                 if (!silent && !isExpectedError) {
                     log.warn(`Error deleting message: chatId=${chatId}, messageId=${messageId}, error=${deleteError.message}`);
                 } else {
@@ -74,7 +78,7 @@ async function cleanupUnnecessaryMessages(bot, chatId, keepMessageIds = [], opti
             }
         }
         
-        log.info(`Cleanup completed: chatId=${chatId}, deleted=${deletedCount}, errors=${errorCount}, total=${messagesToDeleteNow.length}`);
+        log.debug(`Cleanup completed: chatId=${chatId}, deleted=${deletedCount}, errors=${errorCount}, total=${messagesToDeleteNow.length}`);
         
         return { deleted: deletedCount, errors: errorCount };
     } catch (error) {

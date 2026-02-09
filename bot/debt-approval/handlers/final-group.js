@@ -149,7 +149,8 @@ async function sendToFinalGroup(requestId) {
                     excel_headers: excel_headers,
                     excel_columns: excel_columns,
                     total_amount: total_amount,
-                    isForCashier: false // ✅ MUHIM: Final guruh uchun klient bo'yicha format
+                    isForCashier: false, // Final guruh: klient bo'yicha
+                    logContext: 'final'
                 });
                 if (telegraphUrl) {
                     log.info(`[FINAL_GROUP] ✅ Telegraph sahifa muvaffaqiyatli yaratildi: requestId=${requestId}, URL=${telegraphUrl}`);
@@ -198,16 +199,20 @@ async function sendToFinalGroup(requestId) {
             parse_mode: 'HTML'
         });
         
-        // Statusni FINAL_APPROVED ga o'zgartirish va final_message_id'ni saqlash
-        await db('debt_requests')
-            .where('id', requestId)
-            .update({
-                status: 'FINAL_APPROVED',
-                final_message_id: sentMessage.message_id,
-                updated_at: db.fn.now()
-            });
+        // Statusni FINAL_APPROVED ga o'zgartirish, final_message_id va telegraph_url'ni saqlash
+        // telegraph_url menejer previewda link qolishi uchun saqlanadi (to'liq tasdiqlangan bo'lsa ham)
+        const updatePayload = {
+            status: 'FINAL_APPROVED',
+            final_message_id: sentMessage.message_id,
+            updated_at: db.fn.now()
+        };
+        if (telegraphUrl) {
+            updatePayload.telegraph_url = telegraphUrl;
+        }
+        await db('debt_requests').where('id', requestId).update(updatePayload);
         
         log.info(`[FINAL_GROUP] ✅ Final guruhga xabar yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, groupId=${finalGroup.telegram_group_id}, messageId=${sentMessage.message_id}, status=FINAL_APPROVED, telegraphUrl=${telegraphUrl || 'yo\'q'}, format=client-based, isReversed=${isReversed}`);
+        log.info(`[LINK_HABAR] final: kimga=final_guruh, requestId=${requestId}, request_uid=${request.request_uid}, telegraph_link=${telegraphUrl ? 'mavjud' : 'yo\'q'}, ma_lumotlar=faqat_telegraph_link+tasdiqlashlar, groupId=${finalGroup.telegram_group_id}`);
         
         // Arxivlash - FINAL_APPROVED bo'lganda Excel ma'lumotlarini arxivlash
         try {

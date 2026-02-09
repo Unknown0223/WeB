@@ -171,7 +171,7 @@ function detectColumns(headers) {
         }
     });
     
-    log.info(`[DETECT] Ustunlar aniqlandi:`, detected);
+    log.debug(`[DETECT] Ustunlar aniqlandi:`, detected);
     return detected;
 }
 
@@ -227,7 +227,7 @@ function validateAndFilterRows(data, columns, requestData, headers = []) {
                 } else {
                     svrMatchCount++;
                     if (svrMatchCount === 1) {
-                        log.info(`[VALIDATE] ✅ Birinchi SVR mos kelgan: Excel="${rowSvr}" = DB="${requestSvr}"`);
+                        log.debug(`[VALIDATE] ✅ Birinchi SVR mos kelgan: Excel="${rowSvr}" = DB="${requestSvr}"`);
                     }
                     // Keraksiz loglarni olib tashlash
                 }
@@ -276,17 +276,17 @@ function validateAndFilterRows(data, columns, requestData, headers = []) {
         brandMismatches: Array.from(brandMismatches)
     };
     
-    log.info(`[VALIDATE] Filtrlash natijasi: ${filtered.length}/${data.length} qator mos keldi`);
+    log.debug(`[VALIDATE] Filtrlash natijasi: ${filtered.length}/${data.length} qator mos keldi`);
     if (columns.svr !== null && requestData.svr_name) {
-        log.info(`[VALIDATE] SVR mosligi: ${svrMatchCount} ta, mos kelmaganlar: ${stats.svrMismatches.length} ta`);
-        log.info(`[VALIDATE] DB SVR nomi: "${requestData.svr_name}"`);
+        log.debug(`[VALIDATE] SVR mosligi: ${svrMatchCount} ta, mos kelmaganlar: ${stats.svrMismatches.length} ta`);
+        log.debug(`[VALIDATE] DB SVR nomi: "${requestData.svr_name}"`);
         if (stats.svrMismatches.length > 0 && stats.svrMismatches.length <= 10) {
-            log.info(`[VALIDATE] Excel'dagi SVR nomlari (misol): ${stats.svrMismatches.slice(0, 5).map(s => `"${s}"`).join(', ')}`);
+            log.debug(`[VALIDATE] Excel'dagi SVR nomlari (misol): ${stats.svrMismatches.slice(0, 5).map(s => `"${s}"`).join(', ')}`);
         }
     }
     if (columns.brand !== null && requestData.brand_name) {
-        log.info(`[VALIDATE] Brend mosligi: ${brandMatchCount} ta, mos kelmaganlar: ${stats.brandMismatches.length} ta`);
-        log.info(`[VALIDATE] DB Brend nomi: "${requestData.brand_name}"`);
+        log.debug(`[VALIDATE] Brend mosligi: ${brandMatchCount} ta, mos kelmaganlar: ${stats.brandMismatches.length} ta`);
+        log.debug(`[VALIDATE] DB Brend nomi: "${requestData.brand_name}"`);
     }
     
     return { filtered, stats };
@@ -364,7 +364,7 @@ function formatExcelData(rows, columns, headers = [], maxRows = 10) {
     
     formatted += `\nTOTAL: ${Math.abs(total).toLocaleString('ru-RU')}`;
     
-    log.info(`[EXCEL_PARSER] Formatlandi: ${rows.length} ta qator (${rowsToShow.length} ta ko'rsatildi), jami: ${Math.abs(total).toLocaleString('ru-RU')}`);
+    log.debug(`[EXCEL_PARSER] Formatlandi: ${rows.length} ta qator (${rowsToShow.length} ta ko'rsatildi), jami: ${Math.abs(total).toLocaleString('ru-RU')}`);
     return formatted;
 }
 

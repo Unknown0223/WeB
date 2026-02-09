@@ -9,8 +9,8 @@ import { applyPermissions, navigateTo, handleNavigation } from './modules/naviga
 import { setupDashboard } from './modules/dashboard.js';
 import { setupKpiPage, setupKpiEventListeners } from './modules/kpi.js';
 import { loadBrands, setupBrandsEventListeners } from './modules/brands.js';
-import { 
-    renderPendingUsers, 
+import {
+    renderPendingUsers,
     toggleLocationVisibilityForUserForm,
     toggleLocationVisibilityForApprovalForm,
     openUserModalForAdd,
@@ -27,10 +27,11 @@ import {
 import { setupPivot, savePivotTemplate, handleTemplateActions, handleTemplateModalActions } from './modules/pivot.js';
 import { setupComparison } from './modules/comparison.js';
 import { renderRoles, handleRoleSelection, saveRolePermissions, handleBackupDb, handleRestoreDb, handleClearSessions, initExportImport, setupAddNewRole, loadCategories } from './modules/roles.js';
-import { 
+import {
     renderTableSettings,
     renderGeneralSettings,
     renderTelegramSettings,
+    renderFeedbackBotSettings,
     renderKpiSettings,
     openColumnModal,
     closeColumnModal,
@@ -44,6 +45,7 @@ import {
     saveTableSettings,
     handleTableSettingsActions,
     saveTelegramSettings,
+    saveFeedbackBotSettings,
     saveGeneralSettings,
     saveKpiSettings,
     createRoleFromSettings,
@@ -60,7 +62,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!localStorage.getItem('LOG_LEVEL')) {
         localStorage.setItem('LOG_LEVEL', 'warn'); // Faqat warn va error loglar
     }
-    
+
     await init();
 });
 
@@ -72,7 +74,7 @@ async function init() {
         if (loader && !loader.classList.contains('active')) {
             showPageLoader('Tizim yuklanmoqda...');
         }
-        
+
         // AVVAL sessionStorage'dan branding cache'ni yuklash (tezroq)
         try {
             const cachedBranding = sessionStorage.getItem('branding_settings_cache');
@@ -84,14 +86,14 @@ async function init() {
                     const loaderText = branding.loader.text || 'Tizim yuklanmoqda...';
                     const showProgress = branding.loader.showProgress || false;
                     const blurBackground = branding.loader.blurBackground !== undefined ? branding.loader.blurBackground : true;
-                    
+
                     updateLoaderType(loaderType);
                     const loaderTextEl = document.getElementById('loader-text');
                     if (loaderTextEl) loaderTextEl.textContent = loaderText;
-                    
+
                     const loaderProgress = document.getElementById('loader-progress');
                     if (loaderProgress) loaderProgress.style.display = showProgress ? 'block' : 'none';
-                    
+
                     const pageLoader = document.getElementById('page-loader');
                     if (pageLoader) {
                         if (blurBackground) {
@@ -105,34 +107,34 @@ async function init() {
         } catch (e) {
             // Cache xatolikni e'tiborsiz qoldirish
         }
-        
+
         // Joriy foydalanuvchini olish
         state.currentUser = await fetchCurrentUser();
         if (!state.currentUser) {
             hidePageLoader();
             return;
         }
-        
+
         applyPermissions();
-        
+
         // Tema yuklash
         await loadAdminTheme();
-        
+
         // Admin user info yangilash
         updateAdminUserInfo();
-        
+
         // Settings'ni AVVAL yuklash (branding uchun)
-        const settingsPromise = hasPermission(state.currentUser, 'settings:view') 
-            ? fetchSettings() 
+        const settingsPromise = hasPermission(state.currentUser, 'settings:view')
+            ? fetchSettings()
             : Promise.resolve(null);
-        
+
         // Parallel ma'lumotlarni yuklash (settings bilan birga)
         const dataSources = [
             { key: 'users', fetch: fetchUsers, permission: 'users:view' },
             { key: 'rolesData', fetch: fetchRoles, permission: 'roles:manage' },
             { key: 'pendingUsers', fetch: fetchPendingUsers, permission: 'users:edit' }
         ];
-        
+
         const [settingsData, ...otherResults] = await Promise.all([
             settingsPromise,
             ...dataSources.map(async ds => {
@@ -146,13 +148,13 @@ async function init() {
         // Settings'ni birinchi bo'lib qo'llash (branding uchun)
         if (settingsData) {
             state.settings = { ...state.settings, ...settingsData };
-            
+
             // Branding sozlamalarini darhol qo'llash
             if (state.settings.branding_settings) {
                 applyBranding(state.settings.branding_settings);
             }
         }
-        
+
         // Qolgan ma'lumotlarni qayta ishlash
         otherResults.forEach((data, index) => {
             const { key } = dataSources[index];
@@ -165,37 +167,37 @@ async function init() {
                 }
             }
         });
-        
+
         // Agar branding hali qo'llanmagan bo'lsa, default qo'llash
         if (!state.settings.branding_settings) {
             const loaderText = 'Tizim yuklanmoqda...';
             const loaderType = 'spinner';
-            
+
             const loaderTextElement = document.getElementById('loader-text');
             if (loaderTextElement) {
                 loaderTextElement.textContent = loaderText;
             }
             updateLoaderType(loaderType);
         }
-        
+
         // Komponentlarni render qilish
         await renderAllComponents();
-        
+
         // Event listener'larni o'rnatish
         setupEventListeners();
-        
-    // Feather ikonkalarini yangilash (agar kutubxona mavjud bo'lsa)
-    if (window.feather) {
-        feather.replace();
-    }
-        
+
+        // Feather ikonkalarini yangilash (agar kutubxona mavjud bo'lsa)
+        if (window.feather) {
+            feather.replace();
+        }
+
         // Real-time funksiyalarni ishga tushirish
         initRealTime();
-        
+
         // Dastlabki sahifaga o'tish (loader yashirilishini navigation ichida qilamiz)
         const initialPage = window.location.hash.substring(1) || 'dashboard';
         navigateTo(initialPage, true); // true = hideLoader after navigation
-        
+
     } catch (error) {
         hidePageLoader();
         showToast("Sahifani yuklashda jiddiy xatolik yuz berdi.", true);
@@ -210,59 +212,60 @@ async function renderAllComponents() {
             setupKpiPage();
         }
     }
-    
+
     if (hasPermission(state.currentUser, 'users:view')) {
         initModernUsersPage(); // MODERN USERS
         if (hasPermission(state.currentUser, 'audit:view')) {
             setupAuditLogFilters();
         }
     }
-    
+
     if (hasPermission(state.currentUser, 'users:edit')) {
         initModernRequestsPage(); // MODERN REQUESTS
     }
-    
+
     if (hasPermission(state.currentUser, 'settings:view')) {
         renderTableSettings();
         renderGeneralSettings();
         renderTelegramSettings();
+        renderFeedbackBotSettings();
         renderKpiSettings();
         loadBrands();
         setupBrandsEventListeners();
     }
-    
+
     if (hasPermission(state.currentUser, 'reports:view_all')) {
         setupPivot();
     }
-    
+
     if (hasPermission(state.currentUser, 'comparison:view')) {
         await setupComparison();
     }
-    
+
     if (hasPermission(state.currentUser, 'roles:manage')) {
         renderRoles();
         initializeUserPermissions();
         setupAddNewRole();
     }
-    
+
     if (hasPermission(state.currentUser, 'settings:edit_general')) {
         setupBrandingControls();
     }
-    
+
     // Xavfsizlik va Sessiyalar bo'limi
     if (hasPermission(state.currentUser, 'roles:manage')) {
         initEnhancedSecurity();
     }
-    
+
     // Debt-approval bo'limi - barcha tegishli permission'ga ega foydalanuvchilar uchun
     const hasDebtPermission = hasPermission(state.currentUser, 'roles:manage') ||
-                              hasPermission(state.currentUser, 'debt:create') ||
-                              hasPermission(state.currentUser, 'debt:view_own') ||
-                              hasPermission(state.currentUser, 'debt:view_statistics') ||
-                              hasPermission(state.currentUser, 'debt:approve_cashier') ||
-                              hasPermission(state.currentUser, 'debt:approve_operator') ||
-                              hasPermission(state.currentUser, 'debt:approve_leader');
-    
+        hasPermission(state.currentUser, 'debt:create') ||
+        hasPermission(state.currentUser, 'debt:view_own') ||
+        hasPermission(state.currentUser, 'debt:view_statistics') ||
+        hasPermission(state.currentUser, 'debt:approve_cashier') ||
+        hasPermission(state.currentUser, 'debt:approve_operator') ||
+        hasPermission(state.currentUser, 'debt:approve_leader');
+
     if (hasDebtPermission) {
         (async () => {
             try {
@@ -279,12 +282,12 @@ function setupEventListeners() {
     const addSafeListener = (element, event, handler) => {
         if (element) element.addEventListener(event, handler);
     };
-    
+
     // Mobile menu toggle
     const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
     const sidebar = document.querySelector('.sidebar');
     const sidebarOverlay = document.getElementById('sidebar-overlay');
-    
+
     function toggleMobileMenu() {
         if (sidebar && sidebarOverlay) {
             sidebar.classList.toggle('open');
@@ -297,7 +300,7 @@ function setupEventListeners() {
             }
         }
     }
-    
+
     function closeMobileMenu() {
         if (sidebar && sidebarOverlay) {
             sidebar.classList.remove('open');
@@ -305,14 +308,14 @@ function setupEventListeners() {
             document.body.style.overflow = '';
         }
     }
-    
+
     addSafeListener(mobileMenuToggle, 'click', (e) => {
         e.stopPropagation();
         toggleMobileMenu();
     });
-    
+
     addSafeListener(sidebarOverlay, 'click', closeMobileMenu);
-    
+
     // Sidebar nav link bosilganda mobil menyuni yopish
     addSafeListener(DOM.sidebarNav, 'click', (e) => {
         const link = e.target.closest('.nav-link');
@@ -320,7 +323,7 @@ function setupEventListeners() {
             closeMobileMenu();
         }
     });
-    
+
     // Window resize - katta ekranda sidebar ochiq bo'lishi kerak
     window.addEventListener('resize', () => {
         if (window.innerWidth > 992) {
@@ -332,7 +335,7 @@ function setupEventListeners() {
     window.addEventListener('hashchange', () => navigateTo(window.location.hash.substring(1)));
     addSafeListener(DOM.sidebarNav, 'click', handleNavigation);
     addSafeListener(DOM.logoutBtn, 'click', logout);
-    
+
     // Admin tema toggle
     const adminThemeToggleBtn = document.getElementById('admin-theme-toggle-btn');
     if (adminThemeToggleBtn) {
@@ -341,7 +344,7 @@ function setupEventListeners() {
             await toggleAdminTheme();
         });
     }
-    
+
     // Users bo'limi
     if (hasPermission(state.currentUser, 'users:view')) {
         addSafeListener(DOM.openAddUserModalBtn, 'click', openUserModalForAdd);
@@ -350,7 +353,7 @@ function setupEventListeners() {
         addSafeListener(DOM.userRoleSelect, 'change', toggleLocationVisibilityForUserForm);
         addSafeListener(DOM.credentialsForm, 'submit', handleCredentialsFormSubmit);
         addSafeListener(DOM.copyTelegramLinkBtn, 'click', copyTelegramLink);
-        
+
         addSafeListener(DOM.userTabs, 'click', (e) => {
             const button = e.target.closest('button');
             if (button && !button.classList.contains('active')) {
@@ -361,14 +364,14 @@ function setupEventListeners() {
             }
         });
     }
-    
+
     // Pending users
     if (hasPermission(state.currentUser, 'users:edit')) {
         addSafeListener(DOM.pendingUsersList, 'click', handlePendingUserActions);
         addSafeListener(DOM.approvalForm, 'submit', submitUserApproval);
         addSafeListener(DOM.approvalRoleSelect, 'change', toggleLocationVisibilityForApprovalForm);
     }
-    
+
     // Rollar
     if (hasPermission(state.currentUser, 'roles:manage')) {
         addSafeListener(DOM.rolesList, 'click', handleRoleSelection);
@@ -377,37 +380,38 @@ function setupEventListeners() {
         addSafeListener(DOM.restoreDbBtn, 'click', handleRestoreDb);
         addSafeListener(DOM.clearSessionsBtn, 'click', handleClearSessions);
     }
-    
+
     // Sozlamalar
     if (hasPermission(state.currentUser, 'settings:view')) {
         addSafeListener(DOM.saveTableSettingsBtn, 'click', saveTableSettings);
         addSafeListener(DOM.settingsPage, 'click', handleTableSettingsActions);
         addSafeListener(DOM.saveTelegramBtn, 'click', saveTelegramSettings);
+        addSafeListener(DOM.saveFeedbackBotBtn, 'click', saveFeedbackBotSettings);
         addSafeListener(DOM.saveGeneralSettingsBtn, 'click', saveGeneralSettings);
         addSafeListener(DOM.saveKpiSettingsBtn, 'click', saveKpiSettings);
         addSafeListener(DOM.createRoleSettingsBtn, 'click', createRoleFromSettings);
-        document.querySelectorAll('.accordion-header').forEach(header => 
+        document.querySelectorAll('.accordion-header').forEach(header =>
             addSafeListener(header, 'click', toggleAccordion)
         );
-        
+
         // Ustun modal
         addSafeListener(document.getElementById('add-column-btn'), 'click', () => openColumnModal());
         addSafeListener(document.getElementById('save-column-btn'), 'click', saveColumn);
         addSafeListener(document.getElementById('cancel-column-btn'), 'click', closeColumnModal);
         addSafeListener(document.getElementById('close-column-modal'), 'click', closeColumnModal);
-        
+
         // Qator modal
         addSafeListener(document.getElementById('add-row-btn'), 'click', () => openRowModal());
         addSafeListener(document.getElementById('save-row-btn'), 'click', saveRow);
         addSafeListener(document.getElementById('cancel-row-btn'), 'click', closeRowModal);
         addSafeListener(document.getElementById('close-row-modal'), 'click', closeRowModal);
-        
+
         // Filial modal
         addSafeListener(document.getElementById('add-location-btn'), 'click', () => openLocationModal());
         addSafeListener(document.getElementById('save-location-btn'), 'click', saveLocation);
         addSafeListener(document.getElementById('cancel-location-btn'), 'click', closeLocationModal);
         addSafeListener(document.getElementById('close-location-modal'), 'click', closeLocationModal);
-        
+
         // Edit tugmalari (event delegation)
         addSafeListener(DOM.settingsPage, 'click', (e) => {
             const editBtn = e.target.closest('.edit-setting-btn');
@@ -424,12 +428,12 @@ function setupEventListeners() {
             }
         });
     }
-    
+
     // Brending
     if (hasPermission(state.currentUser, 'settings:edit_general')) {
         addSafeListener(DOM.saveBrandingSettingsBtn, 'click', saveBrandingSettings);
     }
-    
+
     // Pivot
     if (hasPermission(state.currentUser, 'reports:view_all')) {
         addSafeListener(DOM.confirmSaveTemplateBtn, 'click', savePivotTemplate);
@@ -437,7 +441,7 @@ function setupEventListeners() {
         addSafeListener(DOM.templatesListContainer, 'click', handleTemplateModalActions);
         // Templates panel doimo ochiq turadi
     }
-    
+
     // Export/Import to'liq database
     if (hasPermission(state.currentUser, 'roles:manage')) {
         initExportImport();
@@ -461,7 +465,7 @@ function setupEventListeners() {
             const targetModal = document.getElementById(btn.dataset.target);
             if (targetModal) {
                 targetModal.classList.add('hidden');
-                
+
                 // Bulk approval navbatini bekor qilish (approval-modal uchun)
                 if (btn.dataset.target === 'approval-modal' && window.bulkApprovalQueue) {
                     console.log('⚠️ [BULK APPROVE] Modal close button bosildi, navbat tozalanmoqda');
@@ -485,19 +489,19 @@ function setupEventListeners() {
     document.addEventListener('click', (e) => {
         // Faqat admin panel sahifasida ishlaydi
         if (!document.body.classList.contains('admin-layout')) return;
-        
+
         // Barcha ochiq modal oynalarni tekshirish
         const openModals = document.querySelectorAll('.modal:not(.hidden)');
-        
+
         if (openModals.length === 0) return;
-        
+
         const clickedElement = e.target;
-        
+
         // Agar bosilgan joy har qanday modal-content yoki modal-dialog ichida bo'lsa, yopilmaydi
         if (clickedElement.closest('.modal-content') || clickedElement.closest('.modal-dialog')) {
             return;
         }
-        
+
         // Barcha ochiq modal oynalarni tekshirish
         openModals.forEach(modal => {
             // Agar bosilgan joy modal oynaning o'zi bo'lsa (background), yopiladi
@@ -588,7 +592,7 @@ function updateAdminThemeUI(theme) {
 async function toggleAdminTheme() {
     const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
     const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    
+
     try {
         const res = await fetch('/api/users/me/theme', {
             method: 'PUT',
@@ -597,7 +601,7 @@ async function toggleAdminTheme() {
             },
             body: JSON.stringify({ theme: newTheme })
         });
-        
+
         if (res.ok) {
             applyAdminTheme(newTheme);
             updateAdminThemeUI(newTheme);
@@ -613,15 +617,15 @@ function updateAdminUserInfo() {
     const usernameEl = document.getElementById('admin-username');
     const roleEl = document.getElementById('admin-user-role');
     const avatarEl = document.getElementById('admin-user-avatar');
-    
+
     if (usernameEl && state.currentUser) {
         usernameEl.textContent = state.currentUser.username || 'Foydalanuvchi';
     }
-    
+
     if (roleEl && state.currentUser) {
         roleEl.textContent = state.currentUser.role || '';
     }
-    
+
     // Avatar yuklash
     if (avatarEl) {
         loadAdminAvatar();
@@ -632,7 +636,7 @@ async function loadAdminAvatar() {
     try {
         const res = await fetch('/api/users/me/avatar');
         const avatarEl = document.getElementById('admin-user-avatar');
-        
+
         if (res.ok && avatarEl) {
             const data = await res.json();
             if (data.avatar_url) {
@@ -648,7 +652,7 @@ async function loadAdminAvatar() {
 }
 
 // Global feather replace funksiyasi
-window.replaceFeatherIcons = function(root = document) {
+window.replaceFeatherIcons = function (root = document) {
     if (typeof window.feather !== 'undefined') {
         try {
             feather.replace({ root: root });

@@ -3,6 +3,7 @@ const axios = require('axios');
 const { db } = require('../db');
 const { isAuthenticated, hasPermission } = require('../middleware/auth');
 const { initializeBot, stopBot } = require('../utils/bot');
+const { initializeFeedbackBot } = require('../utils/feedbackBot');
 const { createLogger } = require('../utils/logger.js');
 const { getSettings, clearSettingsCache, getSetting } = require('../utils/settingsCache.js');
 const log = createLogger('SETTINGS');
@@ -44,7 +45,7 @@ async function setWebhook(botToken) {
     const telegramApiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
 
     try {
-        const response = await axios.post(telegramApiUrl, { 
+        const response = await axios.post(telegramApiUrl, {
             url: webhookUrl,
             allowed_updates: ['message', 'callback_query', 'my_chat_member']
         });
@@ -81,15 +82,15 @@ router.get('/', isAuthenticated, async (req, res) => {
 // POST /api/settings - Sozlamalarni saqlash
 router.post('/', isAuthenticated, async (req, res, next) => {
     const { key } = req.body;
-    
+
     // Key mavjudligini tekshirish
     if (!key) {
         return res.status(400).json({ message: "Sozlama kaliti (key) yuborilishi shart." });
     }
-    
+
     // Key ni string'ga o'tkazish va trim qilish
     const keyStr = String(key).trim();
-    
+
     const userPermissions = req.session.user?.permissions || [];
 
     let requiredPermission;
@@ -102,6 +103,8 @@ router.post('/', isAuthenticated, async (req, res, next) => {
         case 'telegram_admin_chat_id':
         case 'telegram_bot_username':
         case 'telegram_enabled':
+        case 'feedback_bot_token':
+        case 'feedback_bot_enabled':
             requiredPermission = 'settings:edit_telegram';
             break;
         case 'pagination_limit':
@@ -121,32 +124,32 @@ router.post('/', isAuthenticated, async (req, res, next) => {
     }
 }, async (req, res) => {
     const { key, value } = req.body;
-    
+
     // Key va value mavjudligini tekshirish
     if (!key) {
         return res.status(400).json({ message: "Sozlama kaliti (key) yuborilishi shart." });
     }
-    
+
     if (value === undefined) {
         return res.status(400).json({ message: `"${key}" sozlamasi uchun qiymat (value) yuborilishi shart.` });
     }
-    
+
     try {
         // Bo'sh string ham qabul qilinadi (tozalash uchun)
         const valueToSave = (typeof value === 'object' && value !== null) ? JSON.stringify(value) : String(value);
-        
+
         await db('settings')
             .insert({ key: key, value: valueToSave })
             .onConflict('key')
             .merge();
-        
+
         // Cache'ni tozalash
         clearSettingsCache();
-        
+
         // Telegram sozlamalarini boshqarish
         if (key === 'telegram_enabled') {
             const isEnabled = value === 'true' || value === true;
-            
+
             if (isEnabled) {
                 // Telegram aktiv qilinganda - botni ishga tushirish
                 const botToken = await getSetting('telegram_bot_token', null);
@@ -168,8 +171,26 @@ router.post('/', isAuthenticated, async (req, res, next) => {
                 // Agar telegram aktiv bo'lsa, webhook o'rnatish
                 await setWebhook(value);
             }
+        } else if (key === 'feedback_bot_enabled') {
+            const isEnabled = value === 'true' || value === true;
+            if (isEnabled) {
+                const botToken = await getSetting('feedback_bot_token', null);
+                if (botToken) {
+                    await initializeFeedbackBot(botToken);
+                    log.info('Feedback bot aktiv qilindi');
+                }
+            } else {
+                const { stopFeedbackBot } = require('../utils/feedbackBot');
+                if (stopFeedbackBot) await stopFeedbackBot();
+                log.info('Feedback bot neaktiv qilindi');
+            }
+        } else if (key === 'feedback_bot_token') {
+            const feedbackEnabled = await getSetting('feedback_bot_enabled', 'false');
+            if (feedbackEnabled === 'true' || feedbackEnabled === true) {
+                await initializeFeedbackBot(value);
+            }
         }
-        
+
         // WebSocket orqali realtime yuborish
         if (global.broadcastWebSocket) {
             global.broadcastWebSocket('settings_updated', {
@@ -179,7 +200,7 @@ router.post('/', isAuthenticated, async (req, res, next) => {
                 updated_by_username: req.session.user.username
             });
         }
-        
+
         res.json({ message: `"${key}" sozlamasi muvaffaqiyatli saqlandi.` });
     } catch (error) {
         log.error("/api/settings POST xatoligi:", error.message);

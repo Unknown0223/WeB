@@ -19,7 +19,7 @@ async function getPivotMaxSize() {
     if (pivotMaxSizeCache && pivotMaxSizeCacheTime && (Date.now() - pivotMaxSizeCacheTime) < PIVOT_CONFIG_CACHE_TIME) {
         return pivotMaxSizeCache;
     }
-    
+
     try {
         const configRes = await safeFetch('/api/pivot/config');
         if (configRes && configRes.ok) {
@@ -31,7 +31,7 @@ async function getPivotMaxSize() {
     } catch (error) {
         console.warn('[PIVOT] Cheklovni olishda xatolik, default 1 MB ishlatilmoqda:', error);
     }
-    
+
     // Default qiymat
     return 1024 * 1024; // 1 MB
 }
@@ -117,7 +117,7 @@ const PIVOT_RU_TRANSLATIONS = {
     "Product": "Произведение",
     "Min": "Минимум",
     "Max": "Максимум",
-    
+
     // Fields oynasidagi "Sum of" prefiksini olib tashlash
     "Sum of Сумма": "Сумма",
     "Sum of Сумма (число)": "Сумма (число)",
@@ -174,14 +174,14 @@ function applyPivotRuTranslations(root = document.body) {
             if (!original) continue;
             const trimmed = original.trim();
             if (!trimmed) continue;
-            
+
             // Avval to'liq matnni tekshiramiz
             let translated = PIVOT_RU_TRANSLATIONS[trimmed];
             if (translated && original.trim() === trimmed) {
                 node.nodeValue = original.replace(trimmed, translated);
                 continue;
             }
-            
+
             // Barcha aggregation prefikslarini olib tashlash (Sum of, Count of, Average of, va hokazo)
             // Avval "Сумма" bilan maxsus holatlarni tekshiramiz
             // Har qanday aggregation funksiyasi bilan "Сумма" bo'lib qolishi kerak
@@ -193,7 +193,7 @@ function applyPivotRuTranslations(root = document.body) {
                 }
                 continue;
             }
-            
+
             // Ruscha aggregation funksiyalari bilan ham ishlash
             if (trimmed.match(/\b(Сумма|Количество|Уникальное количество|Среднее|Медиана|Произведение|Минимум|Максимум)\s+of\s+Сумма/i)) {
                 if (trimmed.includes('(число)') || trimmed.includes('(чис')) {
@@ -203,7 +203,7 @@ function applyPivotRuTranslations(root = document.body) {
                 }
                 continue;
             }
-            
+
             // Barcha aggregation prefikslarini umumiy holatda olib tashlash
             // Masalan: "Sum of Бренд" -> "Бренд", "Count of Филиал" -> "Филиал"
             // Ruscha va inglizcha aggregation funksiyalari bilan ham ishlash
@@ -212,7 +212,7 @@ function applyPivotRuTranslations(root = document.body) {
                 node.nodeValue = original.replace(aggregationPattern, '');
                 continue;
             }
-            
+
             // Boshqa tarjimalarni tekshiramiz
             translated = PIVOT_RU_TRANSLATIONS[trimmed];
             if (translated && original.trim() === trimmed) {
@@ -276,10 +276,10 @@ function hidePivotLoader() {
  */
 function customizePivotToolbar(toolbar) {
     let tabs = toolbar.getTabs();
-    
+
     // Убираем кнопку "Connect" (подключение к источникам данных)
     tabs = tabs.filter(tab => tab.id !== 'wdr-tab-connect');
-    
+
     // Настраиваем кнопку "Save" - открывать модальное окно для сохранения шаблона
     tabs = tabs.map(tab => {
         if (tab.id === 'wdr-tab-save') {
@@ -292,7 +292,7 @@ function customizePivotToolbar(toolbar) {
             };
             tab.title = 'Сохранить шаблон';
         }
-        
+
         // Настраиваем кнопку "Open" - показать список сохранённых шаблонов
         if (tab.id === 'wdr-tab-open') {
             tab.handler = () => {
@@ -307,13 +307,13 @@ function customizePivotToolbar(toolbar) {
             tab.menu = [];
             delete tab.menu;
         }
-        
+
         return tab;
     });
 
     // Создаём две отдельные кнопки для сворачивания и разворачивания
     // Показываем только одну в зависимости от состояния через CSS
-    
+
     const expandAllTab = {
         id: 'custom-expand-all',
         title: 'Развернуть все данные',
@@ -324,11 +324,11 @@ function customizePivotToolbar(toolbar) {
         handler: () => {
             if (state.pivotGrid && typeof state.pivotGrid.expandAllData === 'function') {
                 state.pivotGrid.expandAllData();
-                
+
                 setTimeout(() => {
                     const expandBtn = document.querySelector('[id="custom-expand-all"]');
                     const collapseBtn = document.querySelector('[id="custom-collapse-all"]');
-                    
+
                     if (expandBtn && collapseBtn) {
                         expandBtn.style.setProperty('display', 'none', 'important');
                         collapseBtn.style.setProperty('display', 'inline-block', 'important');
@@ -337,7 +337,7 @@ function customizePivotToolbar(toolbar) {
             }
         }
     };
-    
+
     const collapseAllTab = {
         id: 'custom-collapse-all',
         title: 'Свернуть все данные',
@@ -348,11 +348,11 @@ function customizePivotToolbar(toolbar) {
         handler: () => {
             if (state.pivotGrid && typeof state.pivotGrid.collapseAllData === 'function') {
                 state.pivotGrid.collapseAllData();
-                
+
                 setTimeout(() => {
                     const expandBtn = document.querySelector('[id="custom-expand-all"]');
                     const collapseBtn = document.querySelector('[id="custom-collapse-all"]');
-                    
+
                     if (expandBtn && collapseBtn) {
                         collapseBtn.style.setProperty('display', 'none', 'important');
                         expandBtn.style.setProperty('display', 'inline-block', 'important');
@@ -365,18 +365,18 @@ function customizePivotToolbar(toolbar) {
     // Обе кнопки добавляем, но используем абсолютное позиционирование для наложения
     tabs.unshift(collapseAllTab);
     tabs.unshift(expandAllTab);
-    
+
     // Начальное состояние: данные свёрнуты, показываем кнопку "Развернуть"
     setTimeout(() => {
         const expandBtn = document.querySelector('[id="custom-expand-all"]');
         const collapseBtn = document.querySelector('[id="custom-collapse-all"]');
-        
+
         if (expandBtn && collapseBtn) {
             collapseBtn.style.cssText = 'display: none !important;';
             expandBtn.style.cssText = 'display: inline-block !important;';
         }
     }, 200);
-    
+
     toolbar.getTabs = () => tabs;
 }
 
@@ -385,12 +385,12 @@ function customizePivotToolbar(toolbar) {
  * Flatpickr'ga tezkor variantlar menyusini qo'shadi
  */
 function createQuickSelectPlugin() {
-    return function(fp) {
+    return function (fp) {
         return {
             onReady() {
                 const wrapper = fp.calendarContainer;
                 if (!wrapper) return;
-                
+
                 // Tezkor variantlar menyusini yaratish
                 const quickSelectMenu = document.createElement('div');
                 quickSelectMenu.className = 'flatpickr-quick-select';
@@ -403,10 +403,10 @@ function createQuickSelectPlugin() {
                     <div class="quick-select-item" data-action="thisMonth">Bu oy</div>
                     <div class="quick-select-item" data-action="lastMonth">O'tgan oy</div>
                 `;
-                
+
                 // Kalendar container'ga qo'shish
                 wrapper.insertBefore(quickSelectMenu, wrapper.firstChild);
-                
+
                 // Har bir variantga event listener qo'shish
                 quickSelectMenu.querySelectorAll('.quick-select-item').forEach(item => {
                     item.addEventListener('click', (e) => {
@@ -428,8 +428,8 @@ function createQuickSelectPlugin() {
 async function handleQuickSelect(action, fp) {
     const today = new Date();
     let startDate, endDate;
-    
-    switch(action) {
+
+    switch (action) {
         case 'today':
             startDate = new Date(today);
             endDate = new Date(today);
@@ -465,15 +465,15 @@ async function handleQuickSelect(action, fp) {
             endDate = new Date(today.getFullYear(), today.getMonth(), 0);
             break;
     }
-    
+
     // Sanalarni o'rnatish
     fp.setDate([startDate, endDate], false);
-    
+
     // Ma'lumotlarni avtomatik yuklash
     const startDateStr = flatpickr.formatDate(startDate, 'Y-m-d');
     const endDateStr = flatpickr.formatDate(endDate, 'Y-m-d');
     const currency = DOM.pivotCurrencySelect?.value || 'UZS';
-    
+
     await updatePivotData(startDateStr, endDateStr, currency);
     await loadExchangeRates(startDateStr, endDateStr);
 }
@@ -487,28 +487,28 @@ export function setupPivot() {
     if (!hasPermission(state.currentUser, 'reports:view_all') || !DOM.pivotContainer) {
         return;
     }
-    
+
     // Faqat admin uchun public shablon yaratish imkonini ko'rsatamiz
     if (state.currentUser && state.currentUser.role === 'admin' && DOM.publicTemplateOption) {
         DOM.publicTemplateOption.style.display = 'block';
     }
-    
+
     // Oxirgi kirish vaqtini tekshirish va default sana o'rnatish
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Vaqtni 00:00:00 ga o'rnatish
-    
+
     const lastVisitKey = 'pivot_last_visit';
     const lastVisitStr = localStorage.getItem(lastVisitKey);
     let defaultStartDate, defaultEndDate;
-    
+
     if (lastVisitStr) {
         const lastVisit = new Date(lastVisitStr);
         lastVisit.setHours(0, 0, 0, 0);
-        
+
         // Kecha va bugun orasidagi farqni hisoblash
         const diffTime = today - lastVisit;
         const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-        
+
         if (diffDays === 0) {
             // Bugun kirgan - bugungi sana
             defaultStartDate = new Date(today);
@@ -533,10 +533,10 @@ export function setupPivot() {
         defaultEndDate = new Date(today);
         console.log('[PIVOT] 📅 Birinchi marta kirilgan - bugungi sana default');
     }
-    
+
     // Oxirgi kirish vaqtini yangilash
     localStorage.setItem(lastVisitKey, today.toISOString());
-    
+
     // Shablonlar ro'yxatini yuklash
     renderTemplatesAsTags();
 
@@ -549,17 +549,17 @@ export function setupPivot() {
         defaultDate: [defaultStartDate, defaultEndDate],
         plugins: [createQuickSelectPlugin()] // Tezkor variantlar plugin'i
     });
-    
+
     setPivotDatePicker(fpInstance);
-    
+
     // Default sana bilan avtomatik yuklanish
     fpInstance.setDate([defaultStartDate, defaultEndDate], false);
-    
+
     // Avtomatik ma'lumotlar yuklash (sahifa yuklanganda yoki bo'limga o'tilganda)
     const startDateStr = flatpickr.formatDate(defaultStartDate, 'Y-m-d');
     const endDateStr = flatpickr.formatDate(defaultEndDate, 'Y-m-d');
     const defaultCurrency = DOM.pivotCurrencySelect?.value || 'UZS';
-    
+
     // Dastlabki holatda barcha maydonlar bilan minimal ma'lumot yaratish
     // Bu Fields panelida barcha maydonlarni ko'rsatish uchun kerak
     const todayStr = flatpickr.formatDate(defaultEndDate, 'Y-m-d');
@@ -579,7 +579,7 @@ export function setupPivot() {
 
     // Global flag - Fields panelini bir marta yopish uchun
     let fieldsPanelClosed = false;
-    
+
     // Инициализация WebDataRocks с русской локализацией
     state.pivotGrid = new WebDataRocks({
         container: "#pivot-container",
@@ -591,7 +591,7 @@ export function setupPivot() {
             dateFormat: "dd.MM.yyyy"
         },
         report: {
-            dataSource: { 
+            dataSource: {
                 data: initialEmptyData  // Bo'sh emas, minimal ma'lumotlar bilan
             },
             slice: {
@@ -601,11 +601,11 @@ export function setupPivot() {
                 measures: [],
                 reportFilters: []
             },
-            options: { 
-                grid: { 
-                    title: "Сводная таблица отчетов", 
-                    showHeaders: true, 
-                    showTotals: "on", 
+            options: {
+                grid: {
+                    title: "Сводная таблица отчетов",
+                    showHeaders: true,
+                    showTotals: "on",
                     showGrandTotals: "on",
                     type: "compact"
                 },
@@ -613,10 +613,10 @@ export function setupPivot() {
                 datePattern: "dd.MM.yyyy"
             },
             formats: [{
-                name: "currency", 
-                thousandsSeparator: " ", 
-                decimalPlaces: 0, 
-                currencySymbol: " сум", 
+                name: "currency",
+                thousandsSeparator: " ",
+                decimalPlaces: 0,
+                currencySymbol: " сум",
                 currencySymbolAlign: "right",
                 nullValue: "0"
             }, {
@@ -631,15 +631,15 @@ export function setupPivot() {
                 nullValue: "-"
             }]
         },
-        reportcomplete: function() {
+        reportcomplete: function () {
             hidePivotLoader();
-            
+
             // DOM asosida ruscha tarjimani qo'llash
             initPivotDomLocalization();
-            
+
             // Fields panelini yopish - faqat agar configuratorActive true bo'lsa
             // Lekin biz allaqachon configuratorActive: false qildik, shuning uchun bu yerda qo'shimcha kod kerak emas
-            
+
             // "Total Sum of Сумма" ni "Сумма" ga o'zgartirish va "День" maydonini oddiy raqam sifatida ko'rsatish
             setTimeout(() => {
                 const pivotContainer = document.getElementById('pivot-container');
@@ -660,21 +660,21 @@ export function setupPivot() {
                             } else if (text.includes('Total Sum of')) {
                                 node.nodeValue = text.replace(/Total Sum of/g, '');
                             }
-                            
+
                             // "Sum of Сумма" ni "Сумма" ga o'zgartirish (Fields oynasida)
                             if (text.includes('Sum of Сумма')) {
                                 node.nodeValue = text.replace(/Sum of Сумма/g, 'Сумма');
                             } else if (text.includes('Sum of') && text.includes('Сумма')) {
                                 node.nodeValue = text.replace(/Sum of/g, '');
                             }
-                            
+
                             // "День" maydoni uchun - valyuta belgisi bo'lmagan oddiy raqam
                             const parent = node.parentElement;
                             const grandParent = parent?.parentElement;
-                            const isDayColumn = grandParent?.textContent?.includes('День') || 
-                                               parent?.textContent?.includes('День') ||
-                                               parent?.getAttribute('data-field') === 'День';
-                            
+                            const isDayColumn = grandParent?.textContent?.includes('День') ||
+                                parent?.textContent?.includes('День') ||
+                                parent?.getAttribute('data-field') === 'День';
+
                             if (isDayColumn && text.trim() && /^\d+[\s,]*сум/.test(text.trim())) {
                                 // Agar "День" ustunida valyuta belgisi bo'lsa, uni olib tashlash
                                 const numValue = parseInt(text.trim().replace(/[\s,]*сум.*/g, '').replace(/\s/g, ''), 10);
@@ -701,47 +701,47 @@ export function setupPivot() {
         // Default shablonni yuklash (agar mavjud bo'lsa)
         const defaultTemplateKey = 'pivot_default_template_id';
         const defaultTemplateId = localStorage.getItem(defaultTemplateKey);
-        
+
         if (defaultTemplateId && state.pivotTemplates && state.pivotTemplates.length > 0) {
             // Shablonlar ro'yxatini kutish
             await new Promise(resolve => setTimeout(resolve, 500));
-            
+
             const defaultTemplate = state.pivotTemplates.find(t => t.id === parseInt(defaultTemplateId));
-            
+
             if (defaultTemplate && state.pivotGrid) {
                 try {
                     console.log('[PIVOT] 📋 Default shablon yuklanmoqda:', defaultTemplate.name);
-                    
+
                     const res = await safeFetch(`/api/pivot/templates/${defaultTemplateId}`);
-                    
+
                     if (res && res.ok) {
                         const report = await res.json();
-                        
+
                         // Shablon yuklanganda Fields panelini yopib-qochirish
                         if (report.options) {
                             report.options.configuratorActive = false;
                         } else {
                             report.options = { configuratorActive: false };
                         }
-                        
+
                         // Shablon ichida ma'lumotlar bo'lmasligi kerak
                         if (report.dataSource && report.dataSource.data) {
                             report.dataSource = { data: [] };
                         }
-                        
+
                         // Shablon konfiguratsiyasini saqlash
                         const templateConfig = {
                             slice: report.slice,
                             options: report.options,
                             formats: report.formats
                         };
-                        
+
                         state.pivotGrid.setReport(report);
-                        
+
                         // Tanlangan sana bilan ma'lumotlarni yuklash
                         await updatePivotData(startDateStr, endDateStr, defaultCurrency, true, templateConfig);
                         await loadExchangeRates(startDateStr, endDateStr);
-                        
+
                         console.log('[PIVOT] ✅ Default shablon yuklandi:', defaultTemplate.name);
                         return;
                     }
@@ -750,7 +750,7 @@ export function setupPivot() {
                 }
             }
         }
-        
+
         // Agar default shablon bo'lmasa yoki yuklanmagan bo'lsa, oddiy yuklash
         await updatePivotData(startDateStr, endDateStr, defaultCurrency);
         await loadExchangeRates(startDateStr, endDateStr);
@@ -762,12 +762,12 @@ export function setupPivot() {
         applyFiltersBtn.addEventListener('click', async () => {
             const selectedDates = pivotDatePickerFP?.selectedDates || [];
             const selectedCurrency = DOM.pivotCurrencySelect?.value || 'UZS';
-            
+
             if (selectedDates.length === 0) {
                 showToast("Iltimos, sana oralig'ini tanlang!", true);
                 return;
             }
-            
+
             if (selectedDates.length === 1) {
                 // Bitta sana tanlansa, boshlanish va tugash sanasi bir xil
                 const singleDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
@@ -788,7 +788,7 @@ export function setupPivot() {
     if (refreshRatesBtn) {
         refreshRatesBtn.addEventListener('click', async () => {
             if (pivotDatePickerFP && pivotDatePickerFP.selectedDates.length >= 1) {
-                const startDate = pivotDatePickerFP.selectedDates.length === 1 
+                const startDate = pivotDatePickerFP.selectedDates.length === 1
                     ? flatpickr.formatDate(pivotDatePickerFP.selectedDates[0], 'Y-m-d')
                     : flatpickr.formatDate(pivotDatePickerFP.selectedDates[0], 'Y-m-d');
                 const endDate = pivotDatePickerFP.selectedDates.length === 2
@@ -811,22 +811,22 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
         console.error('[PIVOT] ❌ state.pivotGrid topilmadi!');
         return;
     }
-    
+
     showPivotLoader();
-    
+
     try {
         const params = new URLSearchParams({ startDate, endDate, currency });
         const url = `/api/pivot/data?${params.toString()}`;
-        
+
         const res = await safeFetch(url);
-        
+
         if (!res || !res.ok) {
             console.error('[PIVOT] ❌ API so\'rovi muvaffaqiyatsiz:', {
                 ok: res?.ok,
                 status: res?.status,
                 statusText: res?.statusText
             });
-            
+
             // 413 Payload Too Large - ma'lumotlar hajmi juda katta
             if (res?.status === 413) {
                 const errorData = await res.json().catch(() => ({}));
@@ -835,25 +835,24 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 hidePivotLoader();
                 throw new Error(errorMessage);
             }
-            
+
             throw new Error('Не удалось загрузить данные для сводной таблицы');
         }
-        
+
         const data = await res.json();
-        
+
         // Backend'dan kelgan ma'lumotlarda "Показатель" maydoni mavjudligini tekshirish
         if (data && data.length > 0) {
             const firstItem = data[0];
-            const hasPokazatel = firstItem.hasOwnProperty('Показатель') || firstItem.hasOwnProperty('Показатель');
-            const pokazatelValue = firstItem['Показатель'] || firstItem['Показатель'] || null;
+            const hasPokazatel = firstItem.hasOwnProperty('Показатель');
+            const pokazatelValue = firstItem['Показатель'] || null;
             console.log(`[PIVOT] 📥 Backend'dan kelgan ma'lumotlar: jami=${data.length}, "Показатель" maydoni=${hasPokazatel}, birinchi yozuvda="${pokazatelValue}"`);
-            console.log(`[PIVOT] 📥 Birinchi yozuv maydonlari:`, Object.keys(firstItem));
         }
-        
+
         // Agar ma'lumotlar bo'lmasa, barcha maydonlar bilan minimal namuna ma'lumot yaratish
         let dataToProcess = data;
         const isEmpty = !data || data.length === 0;
-        
+
         if (isEmpty) {
             const today = new Date();
             const todayStr = flatpickr.formatDate(today, 'Y-m-d');
@@ -861,29 +860,28 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 "ID": null,
                 "Дата": todayStr,
                 "День": today.getDate(),
-                "Бренд": null,
-                "Филиал": null,
-                "Сотрудник": null,
-                "Показатель": null,
-                "Тип оплаты": null,
+                "Бренд": "Bo'sh",
+                "Филиал": "Bo'sh",
+                "Сотрудник": "Tizim",
+                "Показатель": "Ma'lumot yo'q",
                 "Сумма": 0,
                 "Сумма_число": 0,
-                "Комментарий": ""
+                "Комментарий": "Tanlangan davr uchun ma'lumotlar topilmadi"
             }];
         }
-        
+
         // Ma'lumotlarni qayta ishlash va optimallashtirish
         const processedData = dataToProcess.map(item => {
             const dateStr = item["Дата"];
             let dayNumber = null;
-            
+
             if (dateStr && typeof dateStr === 'string') {
                 const dateParts = dateStr.split('-');
                 if (dateParts.length === 3) {
                     dayNumber = parseInt(dateParts[2], 10);
                 }
             }
-            
+
             // Optimallashtirish: faqat kerakli maydonlarni qoldiramiz
             // Backend'da "Тип оплаты" olib tashlangan, faqat "Показатель" qoldi
             const processed = {
@@ -897,28 +895,28 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 "Сумма": item["Сумма"],
                 "Сумма_число": typeof item["Сумма"] === 'number' ? item["Сумма"] : parseFloat(item["Сумма"]) || 0
             };
-            
+
             // Faqat bo'sh bo'lmagan comment'larni qo'shamiz
             if (item["Комментарий"] && item["Комментарий"].trim()) {
                 processed["Комментарий"] = item["Комментарий"];
             }
-            
+
             return processed;
         });
-        
+
         // Ma'lumotlar hajmini tekshirish (WebDataRocks cheklovi)
         // Cheklovni backend'dan olish (cache qilingan)
         const maxSize = await getPivotMaxSize();
         let dataSize = new Blob([JSON.stringify(processedData)]).size;
         const maxSizeMB = (maxSize / (1024 * 1024)).toFixed(2);
         let dataSizeMB = (dataSize / (1024 * 1024)).toFixed(2);
-        
+
         // "Показатель" maydoni mavjudligini tekshirish
         const pokazatelCount = processedData.filter(item => item["Показатель"] && String(item["Показатель"]).trim()).length;
         const uniquePokazatel = [...new Set(processedData.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
         console.log(`[PIVOT] 📊 Ma'lumotlar hajmi (optimallashtirilgandan keyin): ${dataSizeMB} MB (${processedData.length} ta yozuv)`);
         console.log(`[PIVOT] 📊 "Показатель" maydoni: mavjud=${pokazatelCount}/${processedData.length}, unique=${uniquePokazatel.length} (${uniquePokazatel.slice(0, 10).join(', ')})`);
-        
+
         // Agar hali ham juda katta bo'lsa, sampling qilish
         let finalData = processedData;
         if (dataSize > maxSize) {
@@ -927,12 +925,12 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
             // Sampling rate: hozirgi hajm / maqsadli hajm
             // Masalan: 2.46 MB / 0.8 MB = 3.075, ya'ni har 3-tasini olish
             const samplingRate = Math.ceil(dataSize / targetSize);
-            
+
             // "Показатель" maydonining unique qiymatlarini saqlab qolish uchun aqlli sampling
             // Har bir unique "Показатель" qiymatidan kamida bir nechta yozuvni saqlab qolamiz
             const uniquePokazatel = [...new Set(processedData.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
             const pokazatelGroups = {};
-            
+
             // Har bir "Показатель" qiymatiga tegishli yozuvlarni guruhlash
             processedData.forEach((item, index) => {
                 const pokazatel = item["Показатель"] || 'null';
@@ -941,17 +939,17 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 }
                 pokazatelGroups[pokazatel].push({ item, index });
             });
-            
+
             // Har bir guruhdan sampling qilish - har bir "Показатель" qiymatidan kamida bir nechta yozuvni saqlab qolish
             const sampledData = [];
             const minRecordsPerPokazatel = Math.max(1, Math.floor(processedData.length / uniquePokazatel.length / samplingRate));
-            
+
             Object.keys(pokazatelGroups).forEach(pokazatel => {
                 const group = pokazatelGroups[pokazatel];
                 // Har bir guruhdan sampling qilish
                 // Har bir "Показатель" qiymatidan kamida minRecordsPerPokazatel ta yozuvni saqlab qolamiz
                 const groupSamplingRate = Math.max(1, Math.ceil(group.length / Math.max(minRecordsPerPokazatel, Math.floor(group.length / samplingRate))));
-                
+
                 group.forEach((entry, groupIndex) => {
                     if (groupIndex % groupSamplingRate === 0 || group.length <= minRecordsPerPokazatel) {
                         // Agar guruh juda kichik bo'lsa, barcha yozuvlarni saqlab qolamiz
@@ -959,22 +957,22 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                     }
                 });
             });
-            
+
             // Index bo'yicha tartiblash
             sampledData.sort((a, b) => a.index - b.index);
             finalData = sampledData.map(entry => entry.item);
-            
+
             // Qayta hisoblash
             dataSize = new Blob([JSON.stringify(finalData)]).size;
             dataSizeMB = (dataSize / (1024 * 1024)).toFixed(2);
-            
+
             // "Показатель" maydoni mavjudligini tekshirish (sampling qilingandan keyin)
             const pokazatelCountAfter = finalData.filter(item => item["Показатель"] && String(item["Показатель"]).trim()).length;
             const uniquePokazatelAfter = [...new Set(finalData.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
-            
+
             console.warn(`[PIVOT] ⚠️ Ma'lumotlar sampling qilindi: ${processedData.length} -> ${finalData.length} ta yozuv (sampling rate: ${samplingRate}), hajm: ${dataSizeMB} MB`);
             console.log(`[PIVOT] 📊 Sampling qilingandan keyin "Показатель": mavjud=${pokazatelCountAfter}/${finalData.length}, unique=${uniquePokazatelAfter.length}/${uniquePokazatel.length} (${uniquePokazatelAfter.slice(0, 10).join(', ')})`);
-            
+
             // Agar hali ham juda katta bo'lsa, xatolik qaytarish
             if (dataSize > maxSize) {
                 const errorMessage = `Ma'lumotlar hajmi juda katta (${dataSizeMB} MB). WebDataRocks maksimal ${maxSizeMB} MB ma'lumotlarni qabul qiladi. Iltimos, sana oralig'ini qisqartiring yoki filial/brend bo'yicha filtrlash qo'llang.`;
@@ -995,28 +993,28 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 showToast(`Ma'lumotlar hajmi katta bo'lgani uchun ${processedData.length} ta yozuvdan ${finalData.length} tasi (${percentage}%) ko'rsatilmoqda. To'liq ma'lumotlar uchun sana oralig'ini qisqartiring.`, 'warning');
             }
         }
-        
+
         // Final ma'lumotlarni WebDataRocks'ga yuklash
         let dataToLoad = finalData;
-        
+
         // WebDataRocks'ga yuklashdan oldin ma'lumotlar hajmini yakuniy tekshirish
         // WebDataRocks'ning ichki cheklovi 1 MB, shuning uchun qo'shimcha tekshirish
         let finalDataSize = new Blob([JSON.stringify(dataToLoad)]).size;
         const webDataRocksMaxSize = 1024 * 1024; // 1 MB - WebDataRocks'ning ichki cheklovi
         let finalDataSizeMB = (finalDataSize / (1024 * 1024)).toFixed(2);
-        
+
         // Agar hali ham 1 MB dan oshib ketgan bo'lsa, qo'shimcha sampling qilish
         if (finalDataSize > webDataRocksMaxSize) {
             console.warn(`[PIVOT] ⚠️ Ma'lumotlar hali ham juda katta (${finalDataSizeMB} MB), qo'shimcha sampling qilinmoqda...`);
-            
+
             // Qo'shimcha sampling - maqsadli hajm 0.9 MB (90% WebDataRocks cheklovi)
             const additionalTargetSize = webDataRocksMaxSize * 0.9;
             const additionalSamplingRate = Math.ceil(finalDataSize / additionalTargetSize);
-            
+
             // "Показатель" maydonini saqlab qolish uchun aqlli sampling
             const uniquePokazatelFinal = [...new Set(dataToLoad.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
             const pokazatelGroupsFinal = {};
-            
+
             dataToLoad.forEach((item, index) => {
                 const pokazatel = item["Показатель"] || 'null';
                 if (!pokazatelGroupsFinal[pokazatel]) {
@@ -1024,30 +1022,30 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 }
                 pokazatelGroupsFinal[pokazatel].push({ item, index });
             });
-            
+
             const additionalSampledData = [];
             const minRecordsPerPokazatelFinal = Math.max(1, Math.floor(dataToLoad.length / uniquePokazatelFinal.length / additionalSamplingRate));
-            
+
             Object.keys(pokazatelGroupsFinal).forEach(pokazatel => {
                 const group = pokazatelGroupsFinal[pokazatel];
                 const groupSamplingRate = Math.max(1, Math.ceil(group.length / Math.max(minRecordsPerPokazatelFinal, Math.floor(group.length / additionalSamplingRate))));
-                
+
                 group.forEach((entry, groupIndex) => {
                     if (groupIndex % groupSamplingRate === 0 || group.length <= minRecordsPerPokazatelFinal) {
                         additionalSampledData.push(entry);
                     }
                 });
             });
-            
+
             additionalSampledData.sort((a, b) => a.index - b.index);
             dataToLoad = additionalSampledData.map(entry => entry.item);
-            
+
             // Qayta hisoblash
             finalDataSize = new Blob([JSON.stringify(dataToLoad)]).size;
             finalDataSizeMB = (finalDataSize / (1024 * 1024)).toFixed(2);
-            
+
             console.warn(`[PIVOT] ⚠️ Qo'shimcha sampling qilindi: ${finalData.length} -> ${dataToLoad.length} ta yozuv, hajm: ${finalDataSizeMB} MB`);
-            
+
             // Agar hali ham juda katta bo'lsa, xatolik
             if (finalDataSize > webDataRocksMaxSize) {
                 const errorMessage = `Ma'lumotlar hajmi juda katta (${finalDataSizeMB} MB). WebDataRocks maksimal 1 MB ma'lumotlarni qabul qiladi. Iltimos, sana oralig'ini qisqartiring yoki filial/brend bo'yicha filtrlash qo'llang.`;
@@ -1062,24 +1060,24 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 throw new Error(errorMessage);
             }
         }
-        
+
         // "Показатель" maydoni mavjudligini yakuniy tekshirish
         const pokazatelInFinal = dataToLoad.filter(item => item["Показатель"] && String(item["Показатель"]).trim()).length;
         const uniquePokazatelFinal = [...new Set(dataToLoad.map(item => item["Показатель"]).filter(p => p && String(p).trim()))];
         console.log(`[PIVOT] ✅ WebDataRocks'ga yuklashdan oldin: jami=${dataToLoad.length}, hajm=${finalDataSizeMB} MB, "Показатель" mavjud=${pokazatelInFinal}, unique=${uniquePokazatelFinal.length} (${uniquePokazatelFinal.slice(0, 10).join(', ')})`);
-        
-        // Agar "Показатель" maydoni yo'q bo'lsa, xatolik
-        if (pokazatelInFinal === 0 && dataToLoad.length > 0) {
+
+        // Agar "Показатель" maydoni yo'q bo'lsa va bu dummy record bo'lmasa, xatolik
+        if (pokazatelInFinal === 0 && dataToLoad.length > 0 && !isEmpty) {
             console.error('[PIVOT] ❌ "Показатель" maydoni topilmadi! Ma\'lumotlar:', dataToLoad.slice(0, 3));
         }
-        
+
         // Agar preserveReportConfig true bo'lsa, hozirgi report konfiguratsiyasini saqlaymiz
         if (preserveReportConfig) {
             // Agar templateConfig uzatilgan bo'lsa, uni ishlatamiz
             // Aks holda getReport() dan olamiz
             let currentReport;
             if (templateConfig) {
-                
+
                 // Template konfiguratsiyasidan to'liq report yaratamiz
                 currentReport = {
                     slice: templateConfig.slice ? JSON.parse(JSON.stringify(templateConfig.slice)) : null,
@@ -1091,33 +1089,33 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 // Agar templateConfig yo'q bo'lsa, getReport() dan olamiz
                 currentReport = state.pivotGrid.getReport();
             }
-            
+
             if (!currentReport) {
                 console.error('[PIVOT] ❌ Hozirgi report topilmadi!');
                 throw new Error('Hozirgi report konfiguratsiyasi topilmadi');
             }
-            
+
             // Agar slice yo'q bo'lsa va templateConfig mavjud bo'lsa, uni ishlatamiz
             if (!currentReport.slice && templateConfig?.slice) {
                 currentReport.slice = JSON.parse(JSON.stringify(templateConfig.slice));
             }
-            
+
             // Agar formats yo'q bo'lsa va templateConfig mavjud bo'lsa, uni ishlatamiz
             if (!currentReport.formats && templateConfig?.formats) {
                 currentReport.formats = JSON.parse(JSON.stringify(templateConfig.formats));
             }
-            
+
             // Agar options yo'q bo'lsa va templateConfig mavjud bo'lsa, uni ishlatamiz
             if (!currentReport.options && templateConfig?.options) {
                 currentReport.options = JSON.parse(JSON.stringify(templateConfig.options));
             }
-            
+
             // Faqat dataSource.data ni yangilaymiz
             currentReport.dataSource = {
                 ...currentReport.dataSource,
                 data: dataToLoad
             };
-            
+
             // Valyuta formatini yangilash
             const currencySymbols = {
                 'UZS': 'so\'m',
@@ -1128,7 +1126,7 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
             };
             const currencySymbol = currencySymbols[currency] || 'so\'m';
             const currencyFormat = currency === 'UZS' ? ' сум' : ` ${currencySymbol}`;
-            
+
             // Formats ni yangilash (valyuta belgisi)
             if (currentReport.formats && Array.isArray(currentReport.formats)) {
                 const currencyFormatObj = currentReport.formats.find(f => f.name === 'currency');
@@ -1137,7 +1135,7 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                     currencyFormatObj.currencySymbolAlign = currency === 'UZS' ? "right" : "left";
                 }
             }
-            
+
             // Options title ni yangilash
             if (currentReport.options) {
                 if (!currentReport.options.grid) {
@@ -1145,12 +1143,12 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 }
                 currentReport.options.grid.title = `Сводная таблица (${currency})`;
             }
-            
+
             // ConfiguratorActive ni yopiq qilish
             if (currentReport.options) {
                 currentReport.options.configuratorActive = false;
             }
-            
+
             console.log('[PIVOT] �� setReport() chaqirilmoqda (konfiguratsiya saqlanadi)...');
             console.log('[PIVOT] 📊 Final report konfiguratsiyasi:', {
                 hasSlice: !!currentReport.slice,
@@ -1161,18 +1159,18 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 hasFormats: !!currentReport.formats,
                 dataLength: currentReport.dataSource?.data?.length || 0
             });
-            
+
             state.pivotGrid.setReport(currentReport);
             console.log('[PIVOT] ✅ setReport() muvaffaqiyatli chaqirildi (konfiguratsiya saqlanadi)');
-            
+
             setTimeout(() => {
                 hidePivotLoader();
                 console.log('[PIVOT] ✅ updatePivotData() muvaffaqiyatli yakunlandi (konfiguratsiya saqlanadi)');
             }, 500);
-            
+
             return;
         }
-        
+
         // Eski logika (preserveReportConfig false yoki undefined bo'lganda)
         // Valyuta belgisi va formatini aniqlash
         const currencySymbols = {
@@ -1184,14 +1182,14 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
         };
         const currencySymbol = currencySymbols[currency] || 'so\'m';
         const currencyFormat = currency === 'UZS' ? ' сум' : ` ${currencySymbol}`;
-        
+
         // Report konfiguratsiyasi
         const hasRealData = data && data.length > 0;
-        
+
         // Hozirgi report konfiguratsiyasini saqlash (shablon yuklanganda yoki foydalanuvchi o'zgartirganda)
         const currentReport = state.pivotGrid.getReport();
         const currentSlice = currentReport?.slice;
-        
+
         // Agar hozirgi slice mavjud bo'lsa va ma'lumotlar bo'lsa, uni ishlatamiz
         // Aks holda default slice yoki bo'sh slice ishlatamiz
         const defaultSlice = hasRealData ? {
@@ -1204,7 +1202,7 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 { uniqueName: "Тип оплаты" }
             ],
             measures: [
-                { 
+                {
                     uniqueName: "Сумма",
                     aggregation: "sum",
                     format: "currency",
@@ -1228,19 +1226,19 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
             measures: [],
             reportFilters: []
         };
-        
+
         // Hozirgi slice mavjud bo'lsa va to'g'ri strukturada bo'lsa, uni ishlatamiz
-        const finalSlice = (currentSlice && 
-                           (currentSlice.rows?.length > 0 || 
-                            currentSlice.columns?.length > 0 || 
-                            currentSlice.measures?.length > 0 || 
-                            currentSlice.reportFilters?.length > 0)) 
-                           ? currentSlice 
-                           : defaultSlice;
-        
+        const finalSlice = (currentSlice &&
+            (currentSlice.rows?.length > 0 ||
+                currentSlice.columns?.length > 0 ||
+                currentSlice.measures?.length > 0 ||
+                currentSlice.reportFilters?.length > 0))
+            ? currentSlice
+            : defaultSlice;
+
         const pivotReport = {
-            dataSource: { 
-                data: dataToLoad 
+            dataSource: {
+                data: dataToLoad
             },
             slice: finalSlice,
             options: {
@@ -1277,14 +1275,14 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
                 }
             ]
         };
-        
+
         // Обновляем отчет полностью
         state.pivotGrid.setReport(pivotReport);
-        
+
         setTimeout(() => {
             hidePivotLoader();
         }, 500);
-        
+
     } catch (error) {
         console.error('[PIVOT] ❌ updatePivotData() xatolik:', error);
         console.error('[PIVOT] ❌ Xatolik tafsilotlari:', {
@@ -1296,7 +1294,7 @@ export async function updatePivotData(startDate, endDate, currency = 'UZS', pres
         });
         showToast(error.message, true);
         hidePivotLoader();
-        
+
         // ... existing error handling code ...
     }
 }
@@ -1309,10 +1307,10 @@ export async function renderTemplatesAsTags() {
         console.error('[PIVOT] ❌ DOM.templatesTagList topilmadi!');
         return;
     }
-    
+
     try {
         const res = await safeFetch('/api/pivot/templates');
-        
+
         if (!res || !res.ok) {
             const errorText = await res.text().catch(() => 'Noma\'lum xatolik');
             console.error('[PIVOT] ❌ API so\'rovi muvaffaqiyatsiz:', {
@@ -1322,10 +1320,10 @@ export async function renderTemplatesAsTags() {
             });
             throw new Error('Не удалось загрузить шаблоны');
         }
-        
+
         const templates = await res.json();
         state.pivotTemplates = templates;
-        
+
         if (state.pivotTemplates.length === 0) {
             DOM.templatesTagList.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; color: var(--text-secondary);">
@@ -1337,14 +1335,14 @@ export async function renderTemplatesAsTags() {
             if (typeof feather !== 'undefined') feather.replace();
             return;
         }
-        
+
         // Генерируем HTML для каждого шаблона
         const html = state.pivotTemplates.map(template => {
             const canModify = state.currentUser.role === 'admin' || state.currentUser.id === template.created_by;
             const isPublic = template.is_public;
             const publicClass = isPublic ? 'template-tag-public' : '';
             const publicBadge = isPublic ? `<span class="public-badge" title="Публичный шаблон"><i class="fas fa-globe"></i></span>` : '';
-            
+
             const actionsHtml = canModify ? `
                 <div class="tag-actions">
                     <button class="btn-icon edit-template-btn" 
@@ -1368,7 +1366,7 @@ export async function renderTemplatesAsTags() {
                     </button>
                 </div>
             ` : '';
-            
+
             return `
                 <div class="template-tag ${publicClass}" data-id="${template.id}" title="Загрузить этот шаблон">
                     ${publicBadge}
@@ -1376,15 +1374,15 @@ export async function renderTemplatesAsTags() {
                     ${actionsHtml}
                 </div>`;
         }).join('');
-        
+
         DOM.templatesTagList.innerHTML = html;
-        
+
         // Обновляем иконки Feather - endi kerak emas, chunki to'g'ridan-to'g'ri SVG ishlatamiz
         // Lekin boshqa joylarda feather iconlar bo'lishi mumkin, shuning uchun qoldiramiz
         if (typeof feather !== 'undefined') {
             feather.replace();
         }
-        
+
     } catch (error) {
         console.error('[PIVOT] ❌ renderTemplatesAsTags() xatolik:', error);
         console.error('[PIVOT] ❌ Xatolik tafsilotlari:', {
@@ -1400,20 +1398,20 @@ export async function renderTemplatesAsTags() {
  */
 export async function savePivotTemplate() {
     const name = DOM.templateNameInput.value.trim();
-    
+
     if (!name) {
         showToast("Пожалуйста, введите название шаблона!", true);
         return;
     }
-    
+
     if (!state.pivotGrid) {
         showToast("Сводная таблица не найдена!", true);
         return;
     }
-    
+
     // Получаем текущий отчет (конфигурацию)
     const fullReport = state.pivotGrid.getReport();
-    
+
     // Faqat konfiguratsiyani saqlash - ma'lumotlar va sana saqlanmaydi
     // Shablon faqat Fields panelidagi tartibni saqlaydi
     const templateReport = {
@@ -1436,43 +1434,43 @@ export async function savePivotTemplate() {
         },
         formats: fullReport.formats || []
     };
-    
+
     // Admin uchun public flag
     const isPublic = DOM.templateIsPublicCheckbox && DOM.templateIsPublicCheckbox.checked;
-    
+
     try {
         const res = await safeFetch('/api/pivot/templates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, report: templateReport, isPublic })
         });
-        
+
         if (!res || !res.ok) {
             const errorData = await res.json();
             throw new Error(errorData.message || 'Ошибка сохранения шаблона');
         }
-        
+
         const savedTemplate = await res.json();
-        
+
         showToast("Шаблон успешно сохранен!");
         DOM.saveTemplateModal.classList.add('hidden');
         DOM.templateNameInput.value = '';
         if (DOM.templateIsPublicCheckbox) {
             DOM.templateIsPublicCheckbox.checked = false;
         }
-        
+
         // Обновляем список шаблонов
         await renderTemplatesAsTags();
-        
+
         // Agar bu birinchi shablon bo'lsa yoki default shablon bo'lmasa, uni default shablon sifatida saqlash
         const defaultTemplateKey = 'pivot_default_template_id';
         const currentDefaultTemplateId = localStorage.getItem(defaultTemplateKey);
-        
+
         if (!currentDefaultTemplateId || state.pivotTemplates.length === 1) {
             localStorage.setItem(defaultTemplateKey, savedTemplate.templateId.toString());
             console.log('[PIVOT] ✅ Default shablon o\'rnatildi:', savedTemplate.templateId);
         }
-        
+
     } catch (error) {
         showToast(error.message, true);
     }
@@ -1485,16 +1483,16 @@ export async function renderTemplatesList() {
     if (!DOM.templatesListContainer) {
         return;
     }
-    
+
     try {
         const res = await safeFetch('/api/pivot/templates');
-        
+
         if (!res || !res.ok) {
             throw new Error('Не удалось загрузить шаблоны');
         }
-        
+
         state.pivotTemplates = await res.json();
-        
+
         if (state.pivotTemplates.length === 0) {
             DOM.templatesListContainer.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 30px; text-align: center; color: var(--text-secondary);">
@@ -1507,14 +1505,14 @@ export async function renderTemplatesList() {
             `;
             return;
         }
-        
+
         // Генерируем HTML для каждого шаблона в виде списка
         DOM.templatesListContainer.innerHTML = state.pivotTemplates.map(template => {
             const canDelete = state.currentUser.role === 'admin' || state.currentUser.id === template.created_by;
             const isPublic = template.is_public;
             const publicClass = isPublic ? 'template-list-item-public' : '';
             const publicBadge = isPublic ? `<span class="public-badge-small" title="Публичный шаблон"><i class="fas fa-globe"></i> Публичный</span>` : '';
-            
+
             const deleteButtonHtml = canDelete ? `
                 <button class="btn-icon delete-template-modal-btn" 
                         data-id="${template.id}" 
@@ -1522,7 +1520,7 @@ export async function renderTemplatesList() {
                     <i class="fas fa-trash-alt"></i>
                 </button>
             ` : '';
-            
+
             return `
                 <div class="template-list-item ${publicClass}" data-id="${template.id}">
                     <div class="template-info">
@@ -1535,7 +1533,7 @@ export async function renderTemplatesList() {
                     ${deleteButtonHtml}
                 </div>`;
         }).join('');
-        
+
     } catch (error) {
         showToast(error.message, true);
     }
@@ -1547,18 +1545,18 @@ export async function renderTemplatesList() {
  */
 export async function handleTemplateModalActions(e) {
     const listItem = e.target.closest('.template-list-item');
-    
+
     if (!listItem) {
         return;
     }
-    
+
     const deleteButton = e.target.closest('.delete-template-modal-btn');
     const templateId = listItem.dataset.id;
 
     if (deleteButton) {
         // Предотвращаем загрузку шаблона при клике на кнопку удаления
         e.stopPropagation();
-        
+
         const confirmed = await showConfirmDialog({
             title: 'Удаление шаблона',
             message: 'Вы действительно хотите удалить этот шаблон?',
@@ -1567,25 +1565,25 @@ export async function handleTemplateModalActions(e) {
             type: 'danger',
             icon: 'trash-2'
         });
-        
+
         if (confirmed) {
             try {
-                const res = await safeFetch(`/api/pivot/templates/${templateId}`, { 
-                    method: 'DELETE' 
+                const res = await safeFetch(`/api/pivot/templates/${templateId}`, {
+                    method: 'DELETE'
                 });
-                
+
                 if (!res || !res.ok) {
                     const errorData = await res.json();
                     console.error('[PIVOT] ❌ Shablonni o\'chirishda xatolik (modal):', errorData);
                     throw new Error(errorData.message || 'Ошибка удаления шаблона');
                 }
-                
+
                 showToast("Шаблон успешно удален.");
-                
+
                 // Обновляем оба списка
                 renderTemplatesList();
                 renderTemplatesAsTags();
-                
+
             } catch (error) {
                 console.error('[PIVOT] ❌ Delete xatolik (modal):', error);
                 showToast(error.message, true);
@@ -1598,44 +1596,44 @@ export async function handleTemplateModalActions(e) {
             showToast('Сводная таблица не инициализирована', true);
             return;
         }
-        
+
         try {
             const res = await safeFetch(`/api/pivot/templates/${templateId}`);
-            
+
             if (!res || !res.ok) {
                 const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
                 console.error('[PIVOT] ❌ API so\'rovi muvaffaqiyatsiz (modal):', errorData);
                 throw new Error(errorData.message || 'Ошибка загрузки шаблона');
             }
-            
+
             const report = await res.json();
-            
+
             // Shablon yuklanganda Fields panelini yopib-qochirish
             if (report.options) {
                 report.options.configuratorActive = false;  // Yopiq
             } else {
                 report.options = { configuratorActive: false };
             }
-            
+
             // Shablon ichida ma'lumotlar bo'lmasligi kerak - har safar kalendardagi sana bilan yuklanadi
             // Agar shablon ichida ma'lumotlar bo'lsa, ularni olib tashlaymiz
             if (report.dataSource && report.dataSource.data) {
                 report.dataSource = { data: [] };  // Bo'sh ma'lumotlar
             }
-            
+
             // Shablon konfiguratsiyasini saqlash
             const templateConfig = {
                 slice: report.slice,
                 options: report.options,
                 formats: report.formats
             };
-            
+
             state.pivotGrid.setReport(report);
-            
+
             // Tanlangan kalendar kuni bilan ma'lumotlarni yuklash
             const selectedDates = pivotDatePickerFP?.selectedDates || [];
             const selectedCurrency = DOM.pivotCurrencySelect?.value || 'UZS';
-            
+
             if (selectedDates.length === 1) {
                 const singleDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
                 await updatePivotData(singleDate, singleDate, selectedCurrency, true, templateConfig);
@@ -1651,19 +1649,19 @@ export async function handleTemplateModalActions(e) {
                 await updatePivotData(defaultStartDate, defaultEndDate, selectedCurrency, true, templateConfig);
                 await loadExchangeRates(defaultStartDate, defaultEndDate);
             }
-            
+
             const templateName = listItem.querySelector('.template-list-name')?.textContent || 'Noma\'lum';
             showToast(`Шаблон "${templateName}" загружен.`);
-            
+
             // Templates panelini yig'ish
             const templatesPanel = document.getElementById('templates-panel');
             if (templatesPanel) {
                 templatesPanel.classList.add('collapsed');
             }
-            
+
             // Закрываем модальное окно
             DOM.loadTemplateModal.classList.add('hidden');
-            
+
         } catch (error) {
             console.error('[PIVOT] ❌ Shablon yuklashda xatolik (modal):', error);
             console.error('[PIVOT] ❌ Xatolik tafsilotlari (modal):', {
@@ -1682,23 +1680,23 @@ export async function handleTemplateModalActions(e) {
  */
 export async function handleTemplateActions(e) {
     const tag = e.target.closest('.template-tag');
-    
+
     if (!tag) {
         return;
     }
-    
+
     const button = e.target.closest('button');
     const templateId = tag.dataset.id;
-    
+
     if (button) {
         // Предотвращаем загрузку шаблона при клике на кнопки действий
         e.stopPropagation();
-        
+
         // Изменение названия шаблона
         if (button.classList.contains('edit-template-btn')) {
             const currentName = button.dataset.name;
             const newName = prompt("Введите новое название для шаблона:", currentName);
-            
+
             if (newName && newName.trim() && newName.trim() !== currentName) {
                 try {
                     const res = await safeFetch(`/api/pivot/templates/${templateId}`, {
@@ -1706,22 +1704,22 @@ export async function handleTemplateActions(e) {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: newName.trim() })
                     });
-                    
+
                     if (!res || !res.ok) {
                         const errorData = await res.json();
                         console.error('[PIVOT] ❌ Shablon nomini yangilashda xatolik:', errorData);
                         throw new Error(errorData.message || 'Ошибка обновления шаблона');
                     }
-                    
+
                     showToast("Название шаблона успешно изменено.");
                     renderTemplatesAsTags();
-                    
+
                 } catch (error) {
                     console.error('[PIVOT] ❌ Edit xatolik:', error);
                     showToast(error.message, true);
                 }
             }
-        } 
+        }
         // Удаление шаблона
         else if (button.classList.contains('delete-template-btn')) {
             const confirmed = await showConfirmDialog({
@@ -1732,22 +1730,22 @@ export async function handleTemplateActions(e) {
                 type: 'danger',
                 icon: 'trash-2'
             });
-            
+
             if (confirmed) {
                 try {
-                    const res = await safeFetch(`/api/pivot/templates/${templateId}`, { 
-                        method: 'DELETE' 
+                    const res = await safeFetch(`/api/pivot/templates/${templateId}`, {
+                        method: 'DELETE'
                     });
-                    
+
                     if (!res || !res.ok) {
                         const errorData = await res.json();
                         console.error('[PIVOT] ❌ Shablonni o\'chirishda xatolik:', errorData);
                         throw new Error(errorData.message || 'Ошибка удаления шаблона');
                     }
-                    
+
                     showToast("Шаблон успешно удален.");
                     renderTemplatesAsTags();
-                    
+
                 } catch (error) {
                     console.error('[PIVOT] ❌ Delete xatolik:', error);
                     showToast(error.message, true);
@@ -1761,25 +1759,25 @@ export async function handleTemplateActions(e) {
             showToast('Сводная таблица не инициализирована', true);
             return;
         }
-        
+
         if (typeof state.pivotGrid.setReport !== 'function') {
             console.error('[PIVOT] ❌ state.pivotGrid.setReport funksiya emas!');
             console.error('[PIVOT] ❌ state.pivotGrid:', state.pivotGrid);
             showToast('Сводная таблица не инициализирована правильно', true);
             return;
         }
-        
+
         try {
             const res = await safeFetch(`/api/pivot/templates/${templateId}`);
-            
+
             if (!res || !res.ok) {
                 const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
                 console.error('[PIVOT] ❌ API so\'rovi muvaffaqiyatsiz:', errorData);
                 throw new Error(errorData.message || 'Ошибка загрузки шаблона');
             }
-            
+
             const report = await res.json();
-            
+
             try {
                 // Shablon yuklanganda Fields panelini yopib-qochirish
                 if (report.options) {
@@ -1787,26 +1785,26 @@ export async function handleTemplateActions(e) {
                 } else {
                     report.options = { configuratorActive: false };
                 }
-                
+
                 // Shablon ichida ma'lumotlar bo'lmasligi kerak - har safar kalendardagi sana bilan yuklanadi
                 // Agar shablon ichida ma'lumotlar bo'lsa, ularni olib tashlaymiz
                 if (report.dataSource && report.dataSource.data) {
                     report.dataSource = { data: [] };  // Bo'sh ma'lumotlar
                 }
-                
+
                 // Shablon konfiguratsiyasini saqlash
                 const templateConfig = {
                     slice: report.slice,
                     options: report.options,
                     formats: report.formats
                 };
-                
+
                 state.pivotGrid.setReport(report);
-                
+
                 // Tanlangan kalendar kuni bilan ma'lumotlarni yuklash
                 const selectedDates = pivotDatePickerFP?.selectedDates || [];
                 const selectedCurrency = DOM.pivotCurrencySelect?.value || 'UZS';
-                
+
                 if (selectedDates.length === 1) {
                     const singleDate = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
                     await updatePivotData(singleDate, singleDate, selectedCurrency, true, templateConfig);
@@ -1831,16 +1829,16 @@ export async function handleTemplateActions(e) {
                 });
                 throw setReportError;
             }
-            
+
             const templateName = tag.querySelector('.tag-name')?.textContent || 'Noma\'lum';
             showToast(`Шаблон "${templateName}" загружен.`);
-            
+
             // Templates panelini yig'ish
             const templatesPanel = document.getElementById('templates-panel');
             if (templatesPanel) {
                 templatesPanel.classList.add('collapsed');
             }
-            
+
         } catch (error) {
             console.error('[PIVOT] ❌ Shablon yuklashda xatolik:', error);
             console.error('[PIVOT] ❌ Xatolik tafsilotlari:', {
@@ -1864,9 +1862,9 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
     const ratesList = document.getElementById('exchange-rates-list');
     const lastUpdated = document.getElementById('rates-last-updated');
     const refreshBtn = document.getElementById('refresh-rates-btn');
-    
+
     if (!ratesContainer || !ratesList) return;
-    
+
     try {
         // Loading holatini ko'rsatish
         if (refreshBtn) {
@@ -1874,7 +1872,7 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
             refreshBtn.innerHTML = '<i class="fas fa-spinner"></i>';
             refreshBtn.classList.add('refreshing');
         }
-        
+
         // Status dot animatsiyasi
         const statusDot = document.querySelector('.status-dot');
         if (statusDot) {
@@ -1883,43 +1881,43 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
                 statusDot.style.animation = 'blink 2s ease-in-out infinite';
             }, 10);
         }
-        
+
         const params = new URLSearchParams({ startDate, endDate });
         if (forceRefresh) {
             params.append('refresh', 'true');
         }
-        
+
         const res = await safeFetch(`/api/pivot/used-currencies?${params.toString()}`);
-        
+
         if (!res || !res.ok) {
             throw new Error('Kurslarni olishda xatolik');
         }
-        
+
         const data = await res.json();
-        
+
         if (!data.currencies || data.currencies.length === 0) {
             ratesContainer.style.display = 'none';
             return;
         }
-        
+
         // Kurslar ro'yxatini ko'rsatish
         ratesList.innerHTML = '';
-        
+
         // Container'ga loading class qo'shish
         if (ratesContainer) {
             ratesContainer.classList.add('loading');
         }
-        
+
         // Animatsiya delay uchun
         data.currencies.forEach((rate, index) => {
             setTimeout(() => {
                 const rateCard = document.createElement('div');
                 rateCard.className = 'exchange-rate-card';
                 rateCard.setAttribute('data-currency', rate.currency);
-                
+
                 // Formatlash - raqamlarni chiroyli ko'rsatish
                 const formattedRate = Math.round(rate.rate).toLocaleString('ru-RU');
-                
+
                 rateCard.innerHTML = `
                     <div class="rate-card-header">
                         <span class="rate-card-symbol">${rate.symbol}</span>
@@ -1929,7 +1927,7 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
                         <strong>1 ${rate.currency}</strong> = ${formattedRate} so'm
                     </div>
                 `;
-                
+
                 // Click event - kursni tanlash va ripple effekti
                 rateCard.addEventListener('click', (e) => {
                     // Ripple effekti
@@ -1943,17 +1941,17 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
                     ripple.style.left = x + 'px';
                     ripple.style.top = y + 'px';
                     rateCard.appendChild(ripple);
-                    
+
                     setTimeout(() => {
                         ripple.remove();
                     }, 600);
-                    
+
                     // Animatsiya effekti
                     rateCard.style.transform = 'scale(0.95)';
                     setTimeout(() => {
                         rateCard.style.transform = '';
                     }, 150);
-                    
+
                     // Kursni clipboard'ga nusxalash
                     const textToCopy = `1 ${rate.currency} = ${formattedRate} so'm`;
                     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1964,10 +1962,10 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
                         });
                     }
                 });
-                
+
                 // Hover effektlari CSS orqali boshqariladi
                 ratesList.appendChild(rateCard);
-                
+
                 // Animatsiya
                 rateCard.style.opacity = '0';
                 rateCard.style.transform = 'translateY(20px)';
@@ -1978,21 +1976,21 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
                 }, 10);
             }, index * 100); // Har bir karta 100ms delay bilan
         });
-        
+
         // Loading class'ni olib tashlash
         setTimeout(() => {
             if (ratesContainer) {
                 ratesContainer.classList.remove('loading');
             }
         }, data.currencies.length * 100 + 200);
-        
+
         // Yangilanish vaqtini ko'rsatish
         if (lastUpdated && data.lastUpdated) {
             const updateTime = new Date(data.lastUpdated);
             const now = new Date();
             const diffMinutes = Math.floor((now - updateTime) / 60000);
             const diffSeconds = Math.floor((now - updateTime) / 1000);
-            
+
             let timeText = '';
             if (diffSeconds < 10) {
                 timeText = 'Hozir yangilandi';
@@ -2004,19 +2002,19 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
                 const hours = Math.floor(diffMinutes / 60);
                 timeText = `${hours} soat oldin`;
             }
-            
+
             lastUpdated.textContent = timeText;
-            
+
             // Real-time yangilanish - har 30 soniyada yangilash
             if (window.ratesUpdateInterval) {
                 clearInterval(window.ratesUpdateInterval);
             }
-            
+
             window.ratesUpdateInterval = setInterval(() => {
                 const newNow = new Date();
                 const newDiffSeconds = Math.floor((newNow - updateTime) / 1000);
                 const newDiffMinutes = Math.floor(newDiffSeconds / 60);
-                
+
                 if (newDiffSeconds < 10) {
                     lastUpdated.textContent = 'Hozir yangilandi';
                 } else if (newDiffSeconds < 60) {
@@ -2029,10 +2027,10 @@ export async function loadExchangeRates(startDate, endDate, forceRefresh = false
                 }
             }, 10000); // Har 10 soniyada yangilash
         }
-        
+
         // Ko'rsatish
         ratesContainer.style.display = 'block';
-        
+
     } catch (error) {
         ratesContainer.style.display = 'none';
     } finally {

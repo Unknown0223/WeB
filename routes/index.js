@@ -23,6 +23,7 @@ router.use('/security', require('./security.js'));
 router.use('/exchange-rates', require('./exchangeRates.js'));
 router.use('/comparison', require('./comparison.js'));
 router.use('/notifications', require('./notifications.js'));
+router.use('/feedback', require('./feedback.js'));
 
 // Debt-approval routes
 router.use('/debt-approval/brands', require('./debt-approval/brands.js'));
@@ -59,24 +60,24 @@ router.get('/user/preferred-currency', isAuthenticated, async (req, res) => {
 // POST /api/user/preferred-currency - Foydalanuvchi valyuta sozlamasini saqlash
 router.post('/user/preferred-currency', isAuthenticated, async (req, res) => {
     const { currency } = req.body;
-    
+
     if (!currency || typeof currency !== 'string') {
         return res.status(400).json({ message: "Valyuta tanlash majburiy." });
     }
-    
+
     const allowedCurrencies = ['UZS', 'USD', 'EUR', 'RUB', 'KZT'];
     if (!allowedCurrencies.includes(currency)) {
         return res.status(400).json({ message: "Noto'g'ri valyuta tanlandi." });
     }
-    
+
     try {
         await db('users')
             .where({ id: req.session.user.id })
             .update({ preferred_currency: currency });
-        
+
         // Session'ni yangilash
         req.session.user.preferred_currency = currency;
-        
+
         res.json({ message: "Valyuta sozlamasi saqlandi.", currency });
     } catch (error) {
         log.error('Currency save error:', error);
@@ -90,7 +91,7 @@ router.get('/audit-logs/stats', isAuthenticated, hasPermission('audit:view'), as
         // Jami audit loglar soni
         const totalResult = await db('audit_logs').count('* as total').first();
         const total = totalResult.total || 0;
-        
+
         // Bugungi audit loglar soni
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -99,7 +100,7 @@ router.get('/audit-logs/stats', isAuthenticated, hasPermission('audit:view'), as
             .count('* as today')
             .first();
         const todayCount = todayResult.today || 0;
-        
+
         res.json({
             total,
             today: todayCount
@@ -138,7 +139,7 @@ router.get('/audit-logs', isAuthenticated, hasPermission('audit:view'), async (r
         const totalResult = await query.clone().count('* as total').first();
         const total = totalResult.total;
         const pages = Math.ceil(total / limit);
-        
+
         const logs = await query
             .select('a.*', 'u.username')
             .orderBy('a.timestamp', 'desc')

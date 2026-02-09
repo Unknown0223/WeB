@@ -6,9 +6,10 @@ const { formatExcelData } = require('./excelParser.js');
 
 /**
  * Oddiy so'rov xabari (Menejer -> Kassir)
+ * [REJA_5] telegraph_url va total_amount berilsa: to'liq ma'lumot + bitta link (menejer/final teskari jarayon uchun)
  */
 function formatNormalRequestMessage(data) {
-    const { brand_name, filial_name, svr_name, request_uid } = data;
+    const { brand_name, filial_name, svr_name, request_uid, telegraph_url = null, total_amount = null } = data;
     const month_name = getPreviousMonthName();
     
     let message = 'Assalomu aleykum\n\n';
@@ -22,6 +23,15 @@ function formatNormalRequestMessage(data) {
     
     if (request_uid) {
         message += `\n\nSo'rov ID: ${request_uid}`;
+    }
+    // [REJA_5] To'liq ma'lumot: umumiy summa
+    if (total_amount != null && total_amount !== undefined) {
+        const totalFormatted = Math.round(Math.abs(Number(total_amount))).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        message += `\nQarzdorlik umumiy summasi: ${totalFormatted} so'm`;
+    }
+    // [REJA_5] Bitta link (teskari jarayon menejer/final uchun)
+    if (telegraph_url) {
+        message += `\n\n🔗 <a href="${telegraph_url}">So'rov ro'yxati (qarzdorlik ma'lumotlari)</a>`;
     }
     
     return message;
@@ -47,6 +57,12 @@ function formatSetRequestMessage(data) {
         approvals = [], // Tasdiqlash ma'lumotlari (rahbarlar guruhida ko'rsatish uchun)
         telegraph_url = null // Telegraph sahifa URL'i (rahbarlar guruhida qo'shish uchun)
     } = data;
+    const log = require('./logger.js').createLogger ? require('./logger.js').createLogger('LINK_HABAR') : { info: () => {}, warn: () => {} };
+    const recipient = is_for_cashier ? 'cashier' : is_for_operator ? 'operator' : is_for_leaders ? 'leader' : 'final_yoki_preview';
+    const linkHolat = telegraph_url ? 'mavjud' : 'yo\'q';
+    const malumotlar = is_for_cashier ? 'agent_royxati+telegraph_link' : (is_for_operator || is_for_leaders) ? 'faqat_telegraph_link' : 'telegraph_link_yoki_total';
+    const xabarIchidaLink = telegraph_url ? 'ha' : 'yoq';
+    log.debug(`[LINK_HABAR] formatSetRequestMessage: kimga=${recipient}, request_uid=${request_uid || 'n/a'}, telegraph_link=${linkHolat}, xabar_ichida_link=${xabarIchidaLink}, ma_lumotlar=${malumotlar}, url=${telegraph_url ? telegraph_url.substring(0, 50) + '...' : 'null'}`);
     const month_name = getPreviousMonthName();
     
     let message = 'Assalomu aleykum\n\n';
@@ -57,30 +73,111 @@ function formatSetRequestMessage(data) {
     
     message += `${filial_name} filial supervayzeri ${svr_name} ${month_name} oyi qarzlarini yopdi.\n`;
     
-    // Hammaga bir xil format: Telegraph link ko'rsatish
-    if (is_for_cashier || is_for_operator || is_for_leaders) {
+    // Agar kassirga yuborilayotgan bo'lsa, boshqa matn
+    if (is_for_cashier) {
         message += `Tekshirib chiqib tugri bulsa tasdiqlab bersangiz.\n`;
         
-        // Hammaga bir xil: Telegraph link ko'rsatish
-        // ✅ MUHIM: telegraph_url ni aniq tekshirish (null, undefined, empty string)
-        const hasValidTelegraphUrl = telegraph_url && typeof telegraph_url === 'string' && telegraph_url.trim() !== '';
-        
-        if (hasValidTelegraphUrl) {
+        // ✅ Kassir uchun: Telegraph link o'rniga xabarda agent ro'yxati
+        if (excel_data && excel_data.length > 0 && excel_columns && excel_columns.agent !== undefined && excel_columns.agent !== null) {
+            // Agent bo'yicha guruhlash va ko'rsatish
+            const agentMap = new Map();
+            const agentHeader = excel_headers && excel_headers[excel_columns.agent] ? excel_headers[excel_columns.agent] : 'Agent';
+            const summaHeader = excel_headers && excel_headers[excel_columns.summa] ? excel_headers[excel_columns.summa] : 'Summa';
+            
+            excel_data.forEach(row => {
+                const agentName = row[agentHeader] !== undefined ? String(row[agentHeader]).trim() : 'Noma\'lum';
+                const summaValue = row[summaHeader] !== undefined 
+                    ? parseFloat(String(row[summaHeader]).replace(/\s/g, '').replace(/,/g, '.')) 
+                    : 0;
+                
+                if (!agentMap.has(agentName)) {
+                    agentMap.set(agentName, 0);
+                }
+                agentMap.set(agentName, agentMap.get(agentName) + (isNaN(summaValue) ? 0 : Math.abs(summaValue)));
+            });
+            
+            // Agent ro'yxatini formatlash
             message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
-            message += `🔗 <a href="${telegraph_url}">📊 Qarzdorlik klientlar:</a>\n`;
+            message += '📋 <b>Agentlar bo\'yicha qarzdorlik:</b>\n\n';
+            const sortedAgents = Array.from(agentMap.entries()).sort((a, b) => b[1] - a[1]);
+            sortedAgents.forEach(([agentName, sum], index) => {
+                // Faqat raqamlar (vergul bo'lmasligi uchun) va bitta qatorda
+                // Math.round() bilan butun sonlarga aylantiramiz va faqat bo'shliqlar bilan formatlaymiz
+                const roundedSum = Math.round(sum);
+                const formattedSum = roundedSum.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                message += `${index + 1}. ${agentName}: ${formattedSum} so'm\n`;
+            });
+            
+            // Tagida SVR nomi va umumiy summa
+            if (svr_name && excel_total !== null && excel_total !== undefined) {
+                message += '\n━━━━━━━━━━━━━━━━━━━━\n';
+                // Faqat raqamlar (vergul bo'lmasligi uchun)
+                const roundedTotal = Math.round(Math.abs(excel_total));
+                const formattedTotal = roundedTotal.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                message += `<b>${svr_name}:</b> <b>${formattedTotal} so'm</b>\n`;
+            }
+            // Kassir uchun agent ro'yxatidan keyin ham Telegraph link (to'liq klientlar ro'yxati)
+            if (telegraph_url) {
+                message += `\n\n🔗 <a href="${telegraph_url}">📊 Qarzdorlik klientlar (to'liq ro'yxat):</a>\n`;
+            }
         } else if (excel_data && excel_data.length > 0 && excel_columns) {
-            // Debug log (faqat muammo bo'lganda)
+            // Agar agent ustuni bo'lmasa, Telegraph link (fallback)
             const log = require('./logger.js');
-            log.warn(`[MESSAGE_TEMPLATES] [FORMAT_SET] ⚠️ Telegraph URL mavjud emas: requestUID=${request_uid}, isForCashier=${is_for_cashier}, isForOperator=${is_for_operator}, isForLeaders=${is_for_leaders}, telegraphUrlType=${typeof telegraph_url}, telegraphUrlValue=${telegraph_url ? telegraph_url.substring(0, 50) + '...' : 'null/undefined'}, excelDataLength=${excel_data?.length || 0}`);
-            message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
-            message += `⚠️ Qarzdorlik klientlar ro'yxati yuklanmoqda...\n`;
-            message += `(Telegraph sahifa yaratilmoqda, biroz kuting)`;
+            if (telegraph_url) {
+                log.debug(`[MESSAGE_TEMPLATES] [FORMAT_SET] ✅ Telegraph URL mavjud: requestUID=${request_uid}, URL=${telegraph_url}`);
+                message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                message += `🔗 <a href="${telegraph_url}">📊 Qarzdorlik klientlar:</a>\n`;
+            } else {
+                log.warn(`[MESSAGE_TEMPLATES] [FORMAT_SET] ⚠️ Telegraph URL mavjud emas: requestUID=${request_uid}, excelData=${!!excel_data}, excelDataLength=${excel_data?.length || 0}, excelColumns=${!!excel_columns}`);
+                message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                message += `⚠️ Qarzdorlik klientlar ro'yxati yuklanmoqda...\n`;
+                message += `(Telegraph sahifa yaratilmoqda, biroz kuting)`;
+            }
+        }
+    } else if (is_for_operator) {
+        message += `Tekshirib chiqib tugri bulsa tasdiqlab bersangiz.\n`;
+        
+        // Operatorga yuborilganda - HAR DOIM Telegraph link ishlatilishi kerak
+        // Agar Excel ma'lumotlari mavjud bo'lsa, Telegraph link yaratilishi kerak
+        if (excel_data && excel_data.length > 0 && excel_columns) {
+            if (telegraph_url) {
+                // Telegraph link mavjud bo'lsa, link ko'rsatish
+                message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                message += `🔗 <a href="${telegraph_url}">📊 Qarzdorlik klientlar:</a>\n`;
+            } else {
+                // Telegraph link mavjud emas bo'lsa, xatolik xabari
+                message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                message += `⚠️ Qarzdorlik klientlar ro'yxati yuklanmoqda...\n`;
+                message += `(Telegraph sahifa yaratilmoqda, biroz kuting)`;
+            }
         } else if (excel_total !== null && excel_total !== undefined) {
+            // Agar Excel ma'lumotlari ko'rsatilmagan bo'lsa (masalan, faqat Telegraph link), TOTAL qo'shish
+            message += `\n\nTOTAL: ${Math.abs(excel_total).toLocaleString('ru-RU')}`;
+        }
+    } else if (is_for_leaders) {
+        // Rahbarlarga yuborilganda
+        message += `Tekshirib chiqib tugri bulsa tasdiqlab bersangiz.\n`;
+        
+        // Rahbarlarga yuborilganda - HAR DOIM Telegraph link ishlatilishi kerak
+        // Agar Excel ma'lumotlari mavjud bo'lsa, Telegraph link yaratilishi kerak
+        if (excel_data && excel_data.length > 0 && excel_columns) {
+            if (telegraph_url) {
+                // Telegraph link mavjud bo'lsa, link ko'rsatish
+                message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                message += `🔗 <a href="${telegraph_url}">📊 Qarzdorlik klientlar:</a>\n`;
+            } else {
+                // Telegraph link mavjud emas bo'lsa, xatolik xabari
+                message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+                message += `⚠️ Qarzdorlik klientlar ro'yxati yuklanmoqda...\n`;
+                message += `(Telegraph sahifa yaratilmoqda, biroz kuting)`;
+            }
+        } else if (excel_total !== null && excel_total !== undefined) {
+            // Agar Excel ma'lumotlari ko'rsatilmagan bo'lsa (masalan, faqat Telegraph link), TOTAL qo'shish
             message += `\n\nTOTAL: ${Math.abs(excel_total).toLocaleString('ru-RU')}`;
         }
         
-        // Rahbarlar uchun tasdiqlashlar ro'yxati
-        if (is_for_leaders && approvals && approvals.length > 0) {
+        // Tasdiqlashlar ro'yxati (agar mavjud bo'lsa)
+        if (approvals && approvals.length > 0) {
             message += `\n\n━━━━━━━━━━━━━━━━━━━━\n\n`;
             message += `✅ Tasdiqlashlar:\n\n`;
             approvals.forEach((approval, index) => {
@@ -170,13 +267,54 @@ function formatDebtResponseMessage(data) {
         message += '\n';
     }
     
-    // Excel ma'lumotlari mavjud bo'lsa - hammaga bir xil: Telegraph link
+    // Excel ma'lumotlari mavjud bo'lsa
     if (excel_data && excel_data.length > 0 && excel_columns) {
-        if (telegraph_url) {
-            message += `🔗 <a href="${telegraph_url}">📊 Qarzdorlik klientlar:</a>\n`;
+        // ✅ Kassir uchun: Telegraph link o'rniga xabarda agent ro'yxati
+        if (is_for_cashier && excel_columns.agent !== undefined && excel_columns.agent !== null) {
+            // Agent bo'yicha guruhlash va ko'rsatish
+            const agentMap = new Map();
+            const agentHeader = excel_headers && excel_headers[excel_columns.agent] ? excel_headers[excel_columns.agent] : 'Agent';
+            const summaHeader = excel_headers && excel_headers[excel_columns.summa] ? excel_headers[excel_columns.summa] : 'Summa';
+            
+            excel_data.forEach(row => {
+                const agentName = row[agentHeader] !== undefined ? String(row[agentHeader]).trim() : 'Noma\'lum';
+                const summaValue = row[summaHeader] !== undefined 
+                    ? parseFloat(String(row[summaHeader]).replace(/\s/g, '').replace(/,/g, '.')) 
+                    : 0;
+                
+                if (!agentMap.has(agentName)) {
+                    agentMap.set(agentName, 0);
+                }
+                agentMap.set(agentName, agentMap.get(agentName) + (isNaN(summaValue) ? 0 : Math.abs(summaValue)));
+            });
+            
+            // Agent ro'yxatini formatlash
+            message += '📋 <b>Agentlar bo\'yicha qarzdorlik:</b>\n\n';
+            const sortedAgents = Array.from(agentMap.entries()).sort((a, b) => b[1] - a[1]);
+            sortedAgents.forEach(([agentName, sum], index) => {
+                // Faqat raqamlar (vergul bo'lmasligi uchun) va bitta qatorda
+                // Math.round() bilan butun sonlarga aylantiramiz va faqat bo'shliqlar bilan formatlaymiz
+                const roundedSum = Math.round(sum);
+                const formattedSum = roundedSum.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                message += `${index + 1}. ${agentName}: ${formattedSum} so'm\n`;
+            });
+            
+            // Tagida SVR nomi va umumiy summa
+            if (svr_name && total_amount !== null && total_amount !== undefined) {
+                message += '\n━━━━━━━━━━━━━━━━━━━━\n';
+                // Faqat raqamlar (vergul bo'lmasligi uchun)
+                const roundedTotal = Math.round(Math.abs(total_amount));
+                const formattedTotal = roundedTotal.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                message += `<b>${svr_name}:</b> <b>${formattedTotal} so'm</b>\n`;
+            }
         } else {
-            message += `⚠️ Qarzdorlik klientlar ro'yxati yuklanmoqda...\n`;
-            message += `(Telegraph sahifa yaratilmoqda, biroz kuting)`;
+            // Operator uchun: Telegraph link (eski logika)
+            if (telegraph_url) {
+                message += `🔗 <a href="${telegraph_url}">📊 Qarzdorlik klientlar:</a>\n`;
+            } else {
+                message += `⚠️ Qarzdorlik klientlar ro'yxati yuklanmoqda...\n`;
+                message += `(Telegraph sahifa yaratilmoqda, biroz kuting)`;
+            }
         }
     } else if (debt_details) {
         // Yozma ma'lumotlar
@@ -291,7 +429,9 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
     // Original xabarni format qilish
     let originalMessage = '';
     
-    if (request.type === 'SET' && request.excel_data) {
+    // Final guruh uchun: excel_data null bo'lsa ham request.telegraph_url bo'lsa SET formatida link ko'rsatish
+    const isSetForFinal = request.type === 'SET' && forRole === 'final' && request.telegraph_url;
+    if (request.type === 'SET' && (request.excel_data || isSetForFinal)) {
         // SET so'rov uchun formatSetRequestMessage
         let excelData = request.excel_data;
         let excelHeaders = request.excel_headers;
@@ -346,7 +486,8 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
                     excel_data: excelData,
                     excel_headers: excelHeaders,
                     excel_columns: excelColumns,
-                    total_amount: request.excel_total
+                    total_amount: request.excel_total,
+                    logContext: `format_${forRole}`
                 });
                 
                 if (!telegraphUrl) {
@@ -364,7 +505,8 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
                             excel_data: excelData,
                             excel_headers: excelHeaders,
                             excel_columns: excelColumns,
-                            total_amount: request.excel_total
+                            total_amount: request.excel_total,
+                            logContext: `format_${forRole}_retry`
                         });
                     } catch (retryError) {
                         const log = require('./logger.js');
@@ -388,7 +530,8 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
                         excel_data: excelData,
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
-                        total_amount: request.excel_total
+                        total_amount: request.excel_total,
+                        logContext: `format_${forRole}_retry2`
                     });
                 } catch (retryError) {
                     const log = require('./logger.js');
@@ -426,7 +569,8 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
                         excel_data: debtData.excel_data,
                         excel_headers: debtData.excel_headers || [],
                         excel_columns: debtData.excel_columns || {},
-                        total_amount: debtData.total_amount
+                        total_amount: debtData.total_amount,
+                        logContext: `format_${forRole}_reversed`
                     });
                 } catch (telegraphError) {
                     const log = require('./logger.js');
@@ -460,12 +604,16 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
                 useTelegraphForFinal = true;
             }
             
-            // Menejer uchun: agent ro'yxatini to'g'ridan-to'g'ri habarda ko'rsatish
+            // Menejer uchun: agent ro'yxati + Telegraph link (teskari jarayonda ham link qolishi kerak)
             // Final guruh uchun: har doim Telegraph link ko'rsatish (agent ro'yxati emas)
             const isForManager = forRole === 'manager';
             const isForFinal = forRole === 'final';
-            // Final guruh uchun: har doim Telegraph link, menejer uchun agent ro'yxati
+            const isForLeader = forRole === 'leader';
             const showAgentList = isForManager; // Final guruh uchun hech qachon agent ro'yxatini ko'rsatmaslik
+            // Menejer, rahbar va final uchun link: teskari jarayonda ham Link 1 (ro'yxat) + Link 2 (farqlar) bo'lishi kerak
+            const reversedTelegraphUrl = (isForManager || isForFinal || isForLeader) ? telegraphUrl : null;
+            const logLinkReversed = require('./logger.js').createLogger ? require('./logger.js').createLogger('LINK_HABAR') : { info: () => {} };
+            logLinkReversed.debug(`[LINK_HABAR] formatRequestMessageWithApprovals (reversed): kimga=${forRole}, requestId=${request.id}, request_uid=${request.request_uid}, telegraph_link=${reversedTelegraphUrl ? 'mavjud' : 'yo\'q'}, xabar_ichida_link=${reversedTelegraphUrl ? 'ha' : 'yoq'}, isForManager=${isForManager}, isForFinal=${isForFinal}`);
             
             originalMessage = formatSetRequestMessage({
                 brand_name: request.brand_name,
@@ -479,42 +627,57 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
                 excel_total: debtTotal || request.excel_total,
                 is_for_cashier: showAgentList, // Faqat menejer uchun agent ro'yxatini ko'rsatish
                 approvals: [],
-                telegraph_url: isForManager ? null : (isForFinal ? telegraphUrl : null) // Final uchun har doim link, menejer uchun null
+                telegraph_url: reversedTelegraphUrl // Final uchun har doim link, menejer uchun null
             });
+            // Link 2: Qaytarilgan farqlar (rejada: ikki alohida link – So'rov ro'yxati + Qaytarilgan farqlar)
+            if (debtData.differences_telegraph_url) {
+                originalMessage += `\n\n🔗 <a href="${debtData.differences_telegraph_url}">Qaytarilgan farqlar</a>\n`;
+            }
         } else {
-            // Oddiy tasdiqlash: Final guruh uchun Telegraph link ko'rsatish
-            // Menejer uchun: agent ro'yxatini to'g'ridan-to'g'ri habarda ko'rsatish
+            // Oddiy tasdiqlash: menejer va final uchun ham agent ro'yxati + klient bo'yicha (Telegraph) link
             const isForManager = forRole === 'manager';
             const isForFinal = forRole === 'final';
-            const showAgentList = isForManager;
+            const isForCashier = forRole === 'cashier';
+            const isForOperator = forRole === 'operator';
+            const isForLeaders = forRole === 'leader';
+            const showAgentList = isForManager; // Faqat menejer uchun agent ro'yxati xabarda
+            // Menejer va final uchun ham link: agent ro'yxati bilan birga klient bo'yicha link (REJECTED va boshqa holatlarda)
+            const needTelegraphLink = isForFinal || isForCashier || isForOperator || isForLeaders || isForManager;
+            const logLink = require('./logger.js').createLogger ? require('./logger.js').createLogger('LINK_HABAR') : { info: () => {} };
+            const finalTelegraphUrl = needTelegraphLink ? telegraphUrl : (isForManager ? null : telegraphUrl);
+            logLink.debug(`[LINK_HABAR] formatRequestMessageWithApprovals: kimga=${forRole}, requestId=${request.id}, request_uid=${request.request_uid}, telegraph_link=${finalTelegraphUrl ? 'mavjud' : 'yo\'q'}, xabar_ichida_link=${finalTelegraphUrl ? 'ha' : 'yoq'}, needTelegraphLink=${needTelegraphLink}, sahifa_formati_uchun_LINK_SAHIFA_qara=${finalTelegraphUrl ? 'ha' : '-'}`);
             
-            // Final guruh uchun: agar kassir o'zgartirish qilmagan bo'lsa, original Excel ma'lumotlaridan Telegraph link ko'rsatish
-            // Menejer uchun: agent ro'yxatini ko'rsatish
-            // ✅ MUHIM: Final guruh uchun excel_data, excel_headers, excel_columns null bo'lishi kerak (faqat Telegraph link)
             originalMessage = formatSetRequestMessage({
                 brand_name: request.brand_name,
                 filial_name: request.filial_name,
                 svr_name: request.svr_name,
                 extra_info: request.extra_info,
                 request_uid: request.request_uid,
-                excel_data: isForFinal ? null : excelData, // Final guruh uchun excel_data null (faqat link, agent ro'yxati emas)
-                excel_headers: isForFinal ? null : excelHeaders, // Final guruh uchun headers ham null
-                excel_columns: isForFinal ? null : excelColumns, // Final guruh uchun columns ham null
+                excel_data: isForFinal ? null : excelData,
+                excel_headers: excelHeaders,
+                excel_columns: excelColumns,
                 excel_total: request.excel_total,
-                is_for_cashier: false, // Hammaga bir xil: Telegraph link (agent ro'yxati emas)
-                is_for_operator: false, // Final guruh uchun operator emas
-                is_for_leaders: false, // Final guruh uchun rahbarlar emas
+                is_for_cashier: isForCashier || showAgentList, // Kassir va menejer: agent ro'yxati + link
+                is_for_operator: isForOperator,
+                is_for_leaders: isForLeaders,
                 approvals: [],
-                telegraph_url: isForFinal ? telegraphUrl : (showAgentList ? null : null) // Final uchun har doim link, menejer uchun link yo'q
+                telegraph_url: finalTelegraphUrl
             });
         }
     } else {
-        // NORMAL so'rov uchun formatNormalRequestMessage
+        // NORMAL so'rov uchun formatNormalRequestMessage [REJA_5] teskari jarayonda to'liq ma'lumot + bitta link
+        const isReversedNormal = (request.status === 'reversed' || request.status === 'REVERSED_BY_CASHIER' || request.status === 'REVERSED_BY_OPERATOR') && (forRole === 'final' || forRole === 'manager');
+        const normalTelegraphUrl = isReversedNormal && debtData && debtData.telegraph_url ? debtData.telegraph_url : null;
+        const normalTotalAmount = isReversedNormal && debtData && (debtData.total_amount != null || debtData.total_difference != null)
+            ? (debtData.total_amount != null ? debtData.total_amount : debtData.total_difference)
+            : null;
         originalMessage = formatNormalRequestMessage({
             brand_name: request.brand_name,
             filial_name: request.filial_name,
             svr_name: request.svr_name,
-            request_uid: request.request_uid
+            request_uid: request.request_uid,
+            telegraph_url: normalTelegraphUrl,
+            total_amount: normalTotalAmount
         });
     }
     
@@ -687,8 +850,8 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
         originalMessage += `🔄 <b>Qaytarilish soni:</b> <code>${reversalCount} marta</code>`;
     }
     
-    // ✅ Teskari jarayon yoki bekor qilish holatini ko'rsatish (faqat menejer uchun)
-    if (forRole === 'manager' && (request.status === 'reversed' || request.status === 'REJECTED')) {
+    // ✅ Teskari jarayon yoki bekor qilish holatini ko'rsatish (menejer va rahbarlar guruhi uchun)
+    if ((forRole === 'manager' || forRole === 'leader') && (request.status === 'reversed' || request.status === 'REJECTED')) {
         // Qaysi roldan qaytganini yoki bekor qilinganini aniqlash
         const reversedApproval = await db('debt_request_approvals')
             .where('request_id', request.id)
@@ -764,7 +927,7 @@ async function formatRequestMessageWithApprovals(request, db, forRole = 'manager
             approvalFlow += `3️⃣ <b>Final guruh</b> - <code>kutilyabdi</code>`;
         }
         
-        // ✅ "Tasdiqlash jarayoni" bo'limini faqat Menejer uchun ko'rsatish
+        // ✅ "Tasdiqlash jarayoni" bo'limini faqat menejer uchun ko'rsatish (rahbarlar guruhida shart emas)
         if (forRole === 'manager') {
             originalMessage += approvalFlow;
         }

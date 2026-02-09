@@ -112,12 +112,13 @@ async function updateFinalGroupMessage(request, approverInfo) {
         const month_name = getPreviousMonthName();
         
         // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
-        let telegraphUrl = null;
-        if (excel_data && excel_data.length > 0) {
+        // Final guruh uchun: klient bo'yicha sahifa, xabarda faqat link
+        let telegraphUrl = request.telegraph_url || null;
+        if (!telegraphUrl && excel_data && excel_data.length > 0) {
             try {
                 const { createDebtDataPage } = require('./telegraph.js');
                 telegraphUrl = await createDebtDataPage({
-                    request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                    request_id: request.id,
                     request_uid: request.request_uid,
                     brand_name: request.brand_name,
                     filial_name: request.filial_name,
@@ -127,22 +128,24 @@ async function updateFinalGroupMessage(request, approverInfo) {
                     excel_data: excel_data,
                     excel_headers: excel_headers,
                     excel_columns: excel_columns,
-                    total_amount: request.excel_total
+                    total_amount: request.excel_total,
+                    isForCashier: false,
+                    logContext: 'final_updater'
                 });
             } catch (telegraphError) {
-                // Telegraph xatolari silent qilinadi (ixtiyoriy xizmat)
                 log.debug(`[MSG_UPDATER] Telegraph xatolik (ixtiyoriy xizmat): requestId=${request.id}`);
             }
         }
         
-        // Request object'ga telegraphUrl va excel ma'lumotlarini qo'shish
+        // Final guruh xabari: faqat Telegraph link + tasdiqlashlar (agent ro'yxati emas)
         request.telegraph_url = telegraphUrl;
-        request.excel_data = excel_data;
-        request.excel_headers = excel_headers;
-        request.excel_columns = excel_columns;
+        request.excel_data = null;
+        request.excel_headers = null;
+        request.excel_columns = null;
         
-        // formatRequestMessageWithApprovals ishlatish - original xabar + barcha tasdiqlashlar (menejer uchun)
-        const message = await formatRequestMessageWithApprovals(request, db, 'manager');
+        // Final guruh uchun 'final' formati – link mavjud, agent ro'yxati yo'q
+        const message = await formatRequestMessageWithApprovals(request, db, 'final');
+        log.debug(`[LINK_HABAR] final_updater: requestId=${request.id}, request_uid=${request.request_uid}, xabar_formati=final, telegraph_link=${request.telegraph_url ? 'mavjud' : 'yoq'}, xabar_ichida_telegra_ph=${message && message.includes('telegra.ph') ? 'ha' : 'yoq'}`);
         
         // Xabarni yangilash
         const bot = getBot();
@@ -191,9 +194,10 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
         // Original so'rov xabarini format qilish
         let originalMessage = '';
         
-        if (request.type === 'SET' && request.excel_data) {
-            // SET so'rov uchun formatSetRequestMessage
-            // Excel ma'lumotlarini parse qilish
+        if (request.type === 'SET') {
+            // SET so'rov uchun formatSetRequestMessage — to'liq tasdiqlangan bo'lsa ham link qolishi kerak
+            // Avval DB'dagi telegraph_url dan foydalanish (FINAL_APPROVED da excel_data null bo'lishi mumkin)
+            let telegraphUrl = request.telegraph_url || null;
             let excelData = request.excel_data;
             let excelHeaders = request.excel_headers;
             let excelColumns = request.excel_columns;
@@ -220,15 +224,13 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                 }
             }
             
-            // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
-            // MUHIM: Preview message uchun ham Telegraph link ishlatilishi kerak
-            let telegraphUrl = null;
-            if (excelData && Array.isArray(excelData) && excelData.length > 0 && excelColumns) {
+            // Telegraph link yo'q bo'lsa va Excel mavjud bo'lsa — yaratish
+            if (!telegraphUrl && excelData && Array.isArray(excelData) && excelData.length > 0 && excelColumns) {
                 try {
                     const { createDebtDataPage } = require('./telegraph.js');
                     const { getPreviousMonthName } = require('./dateHelper.js');
                     telegraphUrl = await createDebtDataPage({
-                        request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                        request_id: request.id,
                         request_uid: request.request_uid,
                         brand_name: request.brand_name,
                         filial_name: request.filial_name,
@@ -238,7 +240,8 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                         excel_data: excelData,
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
-                        total_amount: request.excel_total
+                        total_amount: request.excel_total,
+                        logContext: 'preview_updater'
                     });
                     
                     if (!telegraphUrl) {
@@ -246,7 +249,7 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                         // Qayta urinish
                         try {
                             telegraphUrl = await createDebtDataPage({
-                                request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                                request_id: request.id,
                                 request_uid: request.request_uid,
                                 brand_name: request.brand_name,
                                 filial_name: request.filial_name,
@@ -256,7 +259,8 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                                 excel_data: excelData,
                                 excel_headers: excelHeaders,
                                 excel_columns: excelColumns,
-                                total_amount: request.excel_total
+                                total_amount: request.excel_total,
+                                logContext: 'preview_updater_retry'
                             });
                         } catch (retryError) {
                             log.error(`[MSG_UPDATER] [UPDATE_PREVIEW] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -269,7 +273,7 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                         const { createDebtDataPage } = require('./telegraph.js');
                         const { getPreviousMonthName } = require('./dateHelper.js');
                         telegraphUrl = await createDebtDataPage({
-                            request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                            request_id: request.id,
                             request_uid: request.request_uid,
                             brand_name: request.brand_name,
                             filial_name: request.filial_name,
@@ -279,13 +283,15 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                             excel_data: excelData,
                             excel_headers: excelHeaders,
                             excel_columns: excelColumns,
-                            total_amount: request.excel_total
+                            total_amount: request.excel_total,
+                            logContext: 'preview_updater_retry2'
                         });
                     } catch (retryError) {
                         log.error(`[MSG_UPDATER] [UPDATE_PREVIEW] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
                     }
                 }
             }
+            log.debug(`[LINK_HABAR] manager_preview: kimga=menejer_preview, requestId=${request.id}, request_uid=${request.request_uid}, telegraph_link=${telegraphUrl ? 'mavjud' : 'yo\'q'}, ma_lumotlar=telegraph_link+status_yangilanishi`);
             
             originalMessage = formatSetRequestMessage({
                 brand_name: request.brand_name,
@@ -402,7 +408,7 @@ async function updatePreviewMessage(request, newStatus, approverInfo) {
                 log.debug(`[MSG_UPDATER] Cleanup error (ignored): ${cleanupError.message}`);
             }
             
-            log.info(`[MSG_UPDATER] ✅ Preview message updated: requestId=${request.id}, status=${newStatus}, chatId=${chatId}, messageId=${request.preview_message_id}`);
+            log.debug(`[MSG_UPDATER] ✅ Preview message updated: requestId=${request.id}, status=${newStatus}, chatId=${chatId}, messageId=${request.preview_message_id}`);
         } catch (error) {
             // Agar xabarni yangilab bo'lmasa (masalan, o'chirilgan bo'lsa), e'tiborsiz qoldirish
             log.warn(`[MSG_UPDATER] ⚠️ Could not update preview message: requestId=${request.id}, chatId=${chatId}, messageId=${request.preview_message_id}, error=${error.message}`);

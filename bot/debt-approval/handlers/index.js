@@ -76,8 +76,8 @@ async function handleDebtApprovalCallback(query, bot) {
             return true;
         }
         if (data.startsWith('supervisor_debt_')) {
-            // TODO: Supervisor debt handler
-            await bot.answerCallbackQuery(query.id, { text: 'Qarzdorlik funksiyasi tez orada qo\'shiladi' });
+            log.info(`[QARZI_BOR] ═══ SUPERVISOR "Qarzi bor" tugmasi bosildi. callback=${data}, userId=${userId}, chatId=${chatId}`);
+            await supervisorHandlers.handleSupervisorDebt(query, bot);
             return true;
         }
         
@@ -86,10 +86,21 @@ async function handleDebtApprovalCallback(query, bot) {
             await cashierHandlers.handleCashierApproval(query, bot);
             return true;
         }
+        if (data.startsWith('cashier_confirm_reverse_')) {
+            await cashierHandlers.handleCashierConfirmReverse(query, bot);
+            return true;
+        }
+        if (data.startsWith('cashier_reenter_debt_')) {
+            await cashierHandlers.handleCashierReenterDebt(query, bot);
+            return true;
+        }
         if (data.startsWith('cashier_debt_')) {
             const parts = data.split('_');
+            const requestIdFromCallback = parts.length >= 3 ? parseInt(parts[parts.length - 1], 10) : null;
+            log.info(`[QARZI_BOR] ═══ KASSIR "Qarzi bor" tugmasi bosildi. callback=${data}, userId=${userId}, chatId=${chatId}, requestId=${requestIdFromCallback || 'parse qilinmadi'}`);
             if (parts.length >= 4) {
                 const subType = parts[2]; // total, agent, excel
+                log.info(`[QARZI_BOR] Kassir sub-turi: ${subType} (total/agent/excel)`);
                 if (subType === 'total') {
                     await cashierHandlers.handleCashierDebtTotal(query, bot);
                     return true;
@@ -113,6 +124,9 @@ async function handleDebtApprovalCallback(query, bot) {
             return true;
         }
         if (data.startsWith('operator_debt_')) {
+            const opParts = data.split('_');
+            const opRequestId = opParts.length >= 3 ? parseInt(opParts[2], 10) : null;
+            log.info(`[QARZI_BOR] ═══ OPERATOR "Qarzi bor" tugmasi bosildi. callback=${data}, userId=${userId}, chatId=${chatId}, requestId=${opRequestId || 'parse qilinmadi'}`);
             await operatorHandlers.handleOperatorDebt(query, bot);
             return true;
         }
@@ -182,48 +196,60 @@ async function handleDebtApprovalCallback(query, bot) {
                             locked_at: null
                         });
                     
-                    // ✅ MUHIM: Status yangilanganidan keyin request'ni qayta olish
+                    // ✅ MUHIM: Status yangilanganidan keyin request'ni Brend/Filial/SVR bilan olish
                     const updatedRequest = await db('debt_requests')
-                        .where('id', requestId)
+                        .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+                        .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+                        .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+                        .select(
+                            'debt_requests.*',
+                            'debt_brands.name as brand_name',
+                            'debt_branches.name as filial_name',
+                            'debt_svrs.name as svr_name'
+                        )
+                        .where('debt_requests.id', requestId)
                         .first();
                     
-                    // Xabarni yangilash
-                    const { formatRejectionMessage } = require('../../../utils/messageTemplates.js');
-                    const rejectionMessage = formatRejectionMessage({
-                        request_uid: request.request_uid,
-                        username: user.username,
-                        fullname: user.fullname,
-                        reason: 'Sabab kiritilmadi',
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    // Guruhdagi xabarni yangilash
+                    const { formatRejectionMessage, formatRequestMessageWithApprovals } = require('../../../utils/messageTemplates.js');
                     const leadersGroup = await db('debt_groups')
                         .where('group_type', 'leaders')
                         .where('is_active', true)
                         .first();
                     
-                    // Rahbarlar guruhidagi xabar ID'sini olish
                     const state = stateManager.getUserState(userId);
-                    const leadersMessageId = state?.data?.leaders_message_id || query.message?.message_id || null;
+                    const leadersMessageId = state?.data?.leaders_message_id || null;
                     
                     if (leadersGroup && leadersMessageId) {
                         try {
-                            await bot.editMessageText(
-                                rejectionMessage,
-                                {
-                                    chat_id: leadersGroup.telegram_group_id,
-                                    message_id: leadersMessageId,
-                                    parse_mode: 'HTML',
-                                    reply_markup: null // Knopkalarni olib tashlash
-                                }
-                            );
-                            log.info(`[LEADER] [REJECTION] ✅ Rahbarlar guruhidagi xabar yangilandi: requestId=${requestId}, messageId=${leadersMessageId}`);
+                            const fullMessage = await formatRequestMessageWithApprovals(updatedRequest, db, 'leader');
+                            const rejectionBlock = formatRejectionMessage({
+                                request_uid: request.request_uid,
+                                username: user.username,
+                                fullname: user.fullname,
+                                reason: 'Sabab kiritilmadi',
+                                timestamp: new Date().toISOString()
+                            });
+                            const finalLeadersMessage = fullMessage + '\n\n━━━━━━━━━━━━━━━━━━━━\n\n' + rejectionBlock;
+                            await bot.editMessageText(finalLeadersMessage, {
+                                chat_id: leadersGroup.telegram_group_id,
+                                message_id: leadersMessageId,
+                                parse_mode: 'HTML',
+                                reply_markup: null
+                            });
+                            log.info(`[LEADER] [REJECTION] ✅ Rahbarlar guruhidagi xabar to'liq yangilandi (link + bekor qilindi): requestId=${requestId}, messageId=${leadersMessageId}`);
                         } catch (error) {
                             log.warn(`[LEADER] [REJECTION] ⚠️ Rahbarlar guruhidagi xabarni yangilashda xatolik: requestId=${requestId}, messageId=${leadersMessageId}, error=${error.message}`);
                         }
                     } else {
                         log.warn(`[LEADER] [REJECTION] ⚠️ Rahbarlar guruhi yoki xabar ID topilmadi: requestId=${requestId}, leadersGroup=${!!leadersGroup}, leadersMessageId=${leadersMessageId}`);
+                    }
+                    
+                    // Sabab so'rash xabari va knopkani o'chirish (rahbarlar guruhida qolmasin)
+                    try {
+                        await bot.deleteMessage(chatId, query.message.message_id);
+                        log.debug(`[LEADER] [REJECTION] Sabab so'rash xabari o'chirildi: chatId=${chatId}, messageId=${query.message.message_id}`);
+                    } catch (delErr) {
+                        log.debug(`[LEADER] [REJECTION] Sabab so'rash xabarini o'chirishda xatolik (ignored): ${delErr.message}`);
                     }
                     
                     // ✅ MUHIM: Menejerga xabar yuborish va chatni tozalash
@@ -252,10 +278,11 @@ async function handleDebtApprovalCallback(query, bot) {
                             log.warn(`[LEADER] [REJECTION] ⚠️ Preview message ID topilmadi: requestId=${requestId}, preview_message_id=${updatedRequest?.preview_message_id}, preview_chat_id=${updatedRequest?.preview_chat_id}`);
                         }
                         
-                        // Avval eski xabarlarni o'chirish
+                        // Eski xabarlarni o'chirish — preview xabarini SAQLAB QOLAMIZ (birinchi xabar to'liq qolsin)
                         try {
                             const { getMessagesToCleanup, untrackMessage } = require('../utils/messageTracker.js');
-                            const messagesToDelete = getMessagesToCleanup(manager.telegram_chat_id, []);
+                            const keepPreviewId = updatedRequest.preview_message_id ? [updatedRequest.preview_message_id] : [];
+                            const messagesToDelete = getMessagesToCleanup(manager.telegram_chat_id, keepPreviewId);
                             
                             if (messagesToDelete.length > 0) {
                                 const messagesToDeleteNow = messagesToDelete.slice(-5);
@@ -566,16 +593,16 @@ async function handleDebtApprovalMessage(msg, bot) {
         
         // Manager - "Yangi so'rov"
         if (text && (text.includes('➕ Yangi so\'rov') || text.includes('Yangi so\'rov'))) {
-            log.info(`[DEBT_BOT] 📝 "Yangi so'rov" buyrug'i qabul qilindi. UserId: ${userId}, Text: ${text}`);
-            log.info(`[DEBT_BOT] 📝 handleNewRequest chaqirilmoqda: requestType='NORMAL'`);
+            log.debug(`[DEBT_BOT] 📝 "Yangi so'rov" buyrug'i qabul qilindi. UserId: ${userId}, Text: ${text}`);
+            log.debug(`[DEBT_BOT] 📝 handleNewRequest chaqirilmoqda: requestType='NORMAL'`);
             await managerHandlers.handleNewRequest(msg, bot, 'NORMAL');
             return true;
         }
         
         // Manager - "SET (Muddat uzaytirish)"
         if (text && (text.includes('💾 SET (Muddat uzaytirish)') || text.includes('SET (Muddat uzaytirish)') || (text.includes('SET') && text.includes('uzaytirish')))) {
-            log.info(`[DEBT_BOT] 📝 "SET (Muddat uzaytirish)" buyrug'i qabul qilindi. UserId: ${userId}, Text: ${text}`);
-            log.info(`[DEBT_BOT] 📝 handleNewRequest chaqirilmoqda: requestType='SET'`);
+            log.debug(`[DEBT_BOT] 📝 "SET (Muddat uzaytirish)" buyrug'i qabul qilindi. UserId: ${userId}, Text: ${text}`);
+            log.debug(`[DEBT_BOT] 📝 handleNewRequest chaqirilmoqda: requestType='SET'`);
             await managerHandlers.handleNewRequest(msg, bot, 'SET');
             return true;
         }

@@ -73,7 +73,7 @@ const axios = require('axios');
 app.post('/telegram-webhook/:token', async (req, res) => {
     try {
         const secretToken = req.params.token;
-        
+
         const bot = getBot();
 
         // Bot token'ni bazadan tekshirish
@@ -92,18 +92,18 @@ app.post('/telegram-webhook/:token', async (req, res) => {
         if (!req.body || Object.keys(req.body).length === 0) {
             return res.status(400).json({ error: 'Empty request body' });
         }
-        
+
         try {
             bot.processUpdate(req.body);
         } catch (error) {
             log.error('[WEBHOOK] bot.processUpdate() xatolik:', error.message);
             return res.status(500).json({ error: 'Update processing failed' });
         }
-        
+
         res.status(200).json({ ok: true });
     } catch (error) {
         log.error('[WEBHOOK] Endpoint xatoligi:', error.message);
-        
+
         // Xatolik bo'lsa ham 200 qaytaramiz, chunki Telegram qayta yuboradi
         res.status(200).json({ ok: false, error: error.message });
     }
@@ -121,10 +121,10 @@ let sessionStore;
 if (isPostgres) {
     // PostgreSQL session store
     const PostgreSQLStore = require('connect-pg-simple')(session);
-    
+
     // db.js dan connection string olish (Railway.com uchun to'g'ri config)
     let pgConnection = getDbConnectionString();
-    
+
     // Agar db.js dan connection string topilmasa, fallback: DATABASE_URL, DATABASE_PUBLIC_URL yoki knexfile
     if (!pgConnection) {
         if (process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim()) {
@@ -136,7 +136,7 @@ if (isPostgres) {
             const config = require('./knexfile.js');
             const env = process.env.NODE_ENV || 'development';
             const dbConfig = config[env] || config.development;
-            
+
             // PostgreSQL connection string yoki object
             if (typeof dbConfig.connection === 'string') {
                 pgConnection = dbConfig.connection;
@@ -146,17 +146,17 @@ if (isPostgres) {
             }
         }
     }
-    
+
     // Railway.com'da SSL sozlamalarini qo'shish (self-signed certificate uchun)
     // isRailway allaqachon yuqorida e'lon qilingan (18-qator)
-    
+
     // connect-pg-simple uchun config
     let pgConnectionConfig = {
         conString: pgConnection,
         tableName: 'sessions',
         createTableIfMissing: true
     };
-    
+
     // Railway.com'da self-signed certificate uchun SSL sozlamalarini qo'shish
     if (isRailway && typeof pgConnection === 'string' && pgConnection.startsWith('postgresql://')) {
         // Connection string'ni parse qilib, pg client uchun SSL sozlamalarini qo'shish
@@ -164,7 +164,7 @@ if (isPostgres) {
             const { Pool } = require('pg');
             const url = require('url');
             const parsedUrl = new URL(pgConnection);
-            
+
             // pg Pool: max:1 (Knex 3 + Session 1 = 4 jami, Railway Postgres max_connections ostida)
             const pool = new Pool({
                 host: parsedUrl.hostname,
@@ -172,7 +172,7 @@ if (isPostgres) {
                 database: (parsedUrl.pathname || '').replace(/^\//, '') || 'postgres',
                 user: parsedUrl.username,
                 password: parsedUrl.password,
-                ssl: { 
+                ssl: {
                     rejectUnauthorized: false,
                     // SSL handshake'ni optimallashtirish
                     requestCert: false,
@@ -184,7 +184,7 @@ if (isPostgres) {
                 // keepAlive ni o'chirish - pool o'zi ulanishlarni boshqaradi
                 // keepAlive: true - bu ba'zida SSL handshake muammolariga sabab bo'lishi mumkin
             });
-            
+
             // connect-pg-simple'ga pool'ni berish
             pgConnectionConfig = {
                 pool: pool,
@@ -205,7 +205,7 @@ if (isPostgres) {
             };
         }
     }
-    
+
     sessionStore = new PostgreSQLStore(pgConnectionConfig);
 } else {
     // SQLite session store (faqat development uchun)
@@ -215,7 +215,7 @@ if (isPostgres) {
         log.error('[SESSION] Railway.com uchun PostgreSQL service qo\'shing va DATABASE_URL ni sozlang.');
         throw new Error('Production rejimida SQLite ishlatilmaydi. PostgreSQL sozlang.');
     }
-    
+
     const SQLiteStore = require('connect-sqlite3')(session);
     sessionStore = new SQLiteStore({
         db: 'database.db',
@@ -224,10 +224,10 @@ if (isPostgres) {
     });
 }
 // Railway.com yoki boshqa cloud platformalar uchun HTTPS tekshiruvi
-const isSecure = isProduction || 
-                 process.env.RAILWAY_PUBLIC_DOMAIN || 
-                 process.env.APP_BASE_URL?.startsWith('https://') ||
-                 process.env.HTTPS === 'true';
+const isSecure = isProduction ||
+    process.env.RAILWAY_PUBLIC_DOMAIN ||
+    process.env.APP_BASE_URL?.startsWith('https://') ||
+    process.env.HTTPS === 'true';
 
 app.use(session({
     store: sessionStore,
@@ -235,7 +235,7 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     name: 'sessionId', // Default 'connect.sid' o'rniga
-    cookie: { 
+    cookie: {
         secure: isSecure, // Production'da HTTPS uchun true
         maxAge: 1000 * 60 * 60 * 24, // 1 kun
         sameSite: isSecure ? 'none' : 'lax', // HTTPS uchun cross-site cookie
@@ -261,24 +261,24 @@ app.get('/health', (req, res) => {
     if (!serverInitialized) {
         // Agar server hali initialization jarayonida bo'lsa, 503 qaytarish
         // Lekin Railway healthcheck uchun 200 qaytarish kerak
-        res.status(200).json({ 
-            status: 'starting', 
+        res.status(200).json({
+            status: 'starting',
             timestamp: new Date().toISOString(),
             uptime: process.uptime(),
             message: 'Server initialization in progress...'
         });
     } else if (serverInitError) {
         // Agar initialization xatolik bilan tugagan bo'lsa
-        res.status(503).json({ 
-            status: 'error', 
+        res.status(503).json({
+            status: 'error',
             timestamp: new Date().toISOString(),
             uptime: process.uptime(),
             error: serverInitError.message
         });
     } else {
         // Server to'liq tayyor
-        res.status(200).json({ 
-            status: 'ok', 
+        res.status(200).json({
+            status: 'ok',
             timestamp: new Date().toISOString(),
             uptime: process.uptime()
         });
@@ -294,7 +294,7 @@ app.get('/login', (req, res) => {
     log.info(`[ROUTE] 🌐 IP: ${req.headers['x-forwarded-for'] || req.socket.remoteAddress}`);
     log.info(`[ROUTE] 👤 User Agent: ${req.headers['user-agent']}`);
     log.info(`[ROUTE] 🔐 Session mavjud: ${!!req.session.user}`);
-    
+
     if (req.session.user) {
         log.info(`[ROUTE] ✅ User allaqachon login qilgan, redirect: /`);
         log.info(`[ROUTE] 👤 User ID: ${req.session.user.id}, Username: ${req.session.user.username}`);
@@ -330,19 +330,19 @@ const canAccessAdminPanel = (req, res, next) => {
     if (!req.session || !req.session.user) {
         return res.status(401).json({ message: "Avtorizatsiyadan o'tmagansiz." });
     }
-    
+
     const userRole = req.session.user?.role;
     const userPermissions = req.session.user?.permissions || [];
-    
+
     // Super admin yoki admin barcha cheklovlardan ozod
     if (userRole === 'superadmin' || userRole === 'super_admin' || userRole === 'admin') {
         return next();
     }
-    
+
     // Boshqa foydalanuvchilar uchun kerakli permissions'ga ega bo'lishi kerak
     const requiredPermissions = ['dashboard:view', 'users:view', 'settings:view', 'roles:manage', 'audit:view'];
     const hasAnyRequiredPermission = requiredPermissions.some(p => userPermissions.includes(p));
-    
+
     if (hasAnyRequiredPermission) {
         next();
     } else {
@@ -372,11 +372,11 @@ app.get('*', (req, res) => {
 // WebSocket ulanishlarini boshqarish
 wss.on('connection', (ws, req) => {
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-    
+
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            
+
             // Xabarni barcha ulanishga yuborish (broadcast)
             wss.clients.forEach(client => {
                 if (client.readyState === WebSocket.OPEN) {
@@ -387,15 +387,15 @@ wss.on('connection', (ws, req) => {
             wsLog.error('Xabarni qayta ishlashda xato:', error.message);
         }
     });
-    
+
     ws.on('close', (code, reason) => {
         // Connection closed (log removed for production)
     });
-    
+
     ws.on('error', (error) => {
         wsLog.error(`WebSocket xatolik. IP: ${clientIp}`, error.message);
     });
-    
+
     // Ping/Pong uchun
     ws.isAlive = true;
     ws.on('pong', () => {
@@ -424,7 +424,7 @@ wss.on('close', () => {
 // Broadcast funksiyasi (boshqa routerlar uchun)
 global.broadcastWebSocket = (type, payload) => {
     const message = JSON.stringify({ type, payload });
-    
+
     wss.clients.forEach((client) => {
         try {
             if (client.readyState === WebSocket.OPEN) {
@@ -448,7 +448,7 @@ global.broadcastWebSocket = (type, payload) => {
     log.info(`🔌 Port: ${PORT}`);
     log.info(`🌐 APP_BASE_URL: ${process.env.APP_BASE_URL || 'NOT SET'}`);
     log.info('═══════════════════════════════════════════════════════════');
-    
+
     try {
         // Database initialization BIRINCHI (listen'dan oldin – HTTP so'rovlar poolni to'ldirmasligi uchun)
         log.info('[INIT] Database initialization boshlandi...');
@@ -457,19 +457,19 @@ global.broadcastWebSocket = (type, payload) => {
             await initializeDB();
             const dbInitDuration = Date.now() - dbInitStartTime;
             log.info(`[INIT] ✅ Database initialization muvaffaqiyatli tugadi (${dbInitDuration}ms)`);
-            
+
             // Startup operatsiyalarini ketma-ket qilish (connection pool to'lib qolmasligi uchun)
             // Delay qo'shish connection'lar orasida
             log.info('[INIT] Startup operatsiyalari boshlandi...');
             await new Promise(resolve => setTimeout(resolve, 500));
-        
+
             // Buzilgan session'larni tozalash (server ishga tushganda)
             log.info("[INIT] Buzilgan session'larni tozalash boshlandi...");
             const sessionCleanupStartTime = Date.now();
             try {
                 const sessions = await db('sessions').select('sid', 'sess').limit(1000); // Limit qo'shish
                 let corruptedCount = 0;
-                
+
                 for (const session of sessions) {
                     try {
                         if (!session.sess || session.sess.trim() === '') {
@@ -477,7 +477,7 @@ global.broadcastWebSocket = (type, payload) => {
                             corruptedCount++;
                             continue;
                         }
-                        
+
                         const sessionData = JSON.parse(session.sess);
                         if (!sessionData || typeof sessionData !== 'object') {
                             await db('sessions').where({ sid: session.sid }).del();
@@ -489,7 +489,7 @@ global.broadcastWebSocket = (type, payload) => {
                         corruptedCount++;
                     }
                 }
-                
+
                 const sessionCleanupDuration = Date.now() - sessionCleanupStartTime;
                 if (corruptedCount > 0) {
                     log.info(`[INIT] ✅ ${corruptedCount} ta buzilgan sessiya tozalandi (${sessionCleanupDuration}ms)`);
@@ -499,19 +499,19 @@ global.broadcastWebSocket = (type, payload) => {
             } catch (cleanupError) {
                 log.warn('[INIT] ⚠️ Buzilgan sessionlarni tozalashda xatolik:', cleanupError.message);
             }
-            
+
             // Delay qo'shish
             await new Promise(resolve => setTimeout(resolve, 500));
-            
+
             // Vaqtinchalik fayllarni tozalash mexanizmini ishga tushirish
             log.info('[INIT] Vaqtinchalik fayllarni tozalash mexanizmi ishga tushirilmoqda...');
             // Har 1 soatda bir marta, 1 soatdan eski fayllarni o'chirish
             startCleanupInterval(1, 1);
             log.info('[INIT] ✅ Vaqtinchalik fayllarni tozalash mexanizmi ishga tushirildi');
-            
+
             // Delay qo'shish
             await new Promise(resolve => setTimeout(resolve, 500));
-            
+
             // Orphaned yozuvlarni tozalash (server ishga tushganda) - background'da
             log.info('[INIT] Orphaned yozuvlarni tozalash background\'da boshlandi...');
             // Bu operatsiyani background'ga o'tkazish, server bloklamasligi uchun
@@ -522,7 +522,7 @@ global.broadcastWebSocket = (type, payload) => {
                     const users = await db('users').select('id');
                     users.forEach(user => existingUserIds.add(user.id));
                     log.info(`[INIT] [CLEANUP] ${existingUserIds.size} ta foydalanuvchi topildi`);
-                    
+
                     const tablesToClean = [
                         { table: 'user_permissions', fkColumn: 'user_id' },
                         { table: 'user_locations', fkColumn: 'user_id' },
@@ -535,7 +535,7 @@ global.broadcastWebSocket = (type, payload) => {
                         { table: 'magic_links', fkColumn: 'user_id' },
                         { table: 'notifications', fkColumn: 'user_id' }
                     ];
-                    
+
                     let totalDeleted = 0;
                     for (const { table, fkColumn } of tablesToClean) {
                         try {
@@ -556,7 +556,7 @@ global.broadcastWebSocket = (type, payload) => {
                             // Jadval mavjud emas yoki xatolik - e'tiborsiz qoldirish
                         }
                     }
-                    
+
                     const orphanCleanupDuration = Date.now() - orphanCleanupStartTime;
                     if (totalDeleted > 0) {
                         log.info(`[INIT] [CLEANUP] ✅ Jami ${totalDeleted} ta orphaned yozuv o'chirildi (${orphanCleanupDuration}ms)`);
@@ -567,10 +567,10 @@ global.broadcastWebSocket = (type, payload) => {
                     log.error('[INIT] [CLEANUP] ❌ Orphaned yozuvlarni tozalashda xatolik:', cleanupError.message);
                 }
             });
-            
+
             // Delay qo'shish
             await new Promise(resolve => setTimeout(resolve, 500));
-            
+
             // Bot initialization
             log.info('[INIT] Bot initialization boshlandi...');
             const botInitStartTime = Date.now();
@@ -579,7 +579,7 @@ global.broadcastWebSocket = (type, payload) => {
             const botToken = await getSetting('telegram_bot_token', null);
             const telegramEnabled = await getSetting('telegram_enabled', 'false');
             const telegramEnabledBool = String(telegramEnabled).toLowerCase() === 'true' || String(telegramEnabled) === '1';
-            
+
             log.info(`[INIT] Bot token mavjud: ${!!botToken}, Telegram enabled: ${telegramEnabled}`);
 
             // Telegram o'chirilgan bo'lsa, botni umuman ishga tushirmaymiz.
@@ -588,73 +588,76 @@ global.broadcastWebSocket = (type, payload) => {
                 log.info('[INIT] [BOT] Telegram o\'chirilgan (telegram_enabled=false) - bot ishga tushirilmadi');
             } else if (botToken && botToken.trim() !== '') {
                 (async () => {
-                    // Deploy uchun webhook rejimida ishga tushirish
+                    // 1. Main Bot Initialization
                     const appBaseUrl = process.env.APP_BASE_URL;
-                    
+
                     if (appBaseUrl && appBaseUrl.startsWith('https://')) {
-                        // Webhook avtomatik o'rnatish
+                        // Deploy uchun webhook rejimida ishga tushirish
                         const webhookUrl = `${appBaseUrl}/telegram-webhook/${botToken}`;
                         const telegramApiUrl = `https://api.telegram.org/bot${botToken}/setWebhook`;
-                        
+
                         log.info(`[INIT] [BOT] Webhook URL: ${webhookUrl}`);
-                        
+
                         try {
-                            // Avval eski webhookni o'chirish (agar mavjud bo'lsa)
                             try {
                                 await axios.post(`${telegramApiUrl}`, { url: '' });
                                 log.info("[INIT] [BOT] Eski webhook o'chirildi");
                             } catch (deleteError) {
-                                // Xatolik bo'lsa ham davom etamiz
                                 log.debug("[INIT] [BOT] Eski webhook o'chirishda xatolik (e'tiborsiz qoldirildi)");
                             }
-                            
-                            // Yangi webhookni o'rnatish
+
                             log.info("[INIT] [BOT] Yangi webhook o'rnatilmoqda...");
-                            const response = await axios.post(telegramApiUrl, { 
+                            const response = await axios.post(telegramApiUrl, {
                                 url: webhookUrl,
                                 allowed_updates: ['message', 'callback_query', 'my_chat_member']
                             });
-                            
+
                             if (response.data.ok) {
                                 log.info("[INIT] [BOT] ✅ Webhook muvaffaqiyatli o'rnatildi");
-                                // Webhook rejimida botni ishga tushirish
                                 await initializeBot(botToken, { polling: false });
-                                const botInitDuration = Date.now() - botInitStartTime;
-                                log.info(`[INIT] [BOT] ✅ Bot webhook rejimida ishga tushirildi (${botInitDuration}ms)`);
+                                log.info(`[INIT] [BOT] ✅ Bot webhook rejimida ishga tushirildi`);
                             } else {
-                                botLog.error('[INIT] [BOT] ❌ Telegram webhookni o\'rnatishda xatolik:', response.data.description);
-                                
-                                // Fallback: polling rejimi (faqat development uchun)
+                                log.error('[INIT] [BOT] ❌ Telegram webhookni o\'rnatishda xatolik:', response.data.description);
                                 if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
-                                    log.info('[INIT] [BOT] Fallback: polling rejimi ishga tushirilmoqda...');
                                     await initializeBot(botToken, { polling: true });
-                                    const botInitDuration = Date.now() - botInitStartTime;
-                                    log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi (${botInitDuration}ms)`);
+                                    log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi`);
                                 }
                             }
                         } catch (error) {
-                            botLog.error('[INIT] [BOT] ❌ Telegram API\'ga ulanishda xatolik:', error.message);
-                            
-                            // Fallback: polling rejimi (faqat development uchun)
+                            log.error('[INIT] [BOT] ❌ Telegram API\'ga ulanishda xatolik:', error.message);
                             if (process.env.NODE_ENV !== 'production' && !process.env.RAILWAY_ENVIRONMENT) {
-                                log.info('[INIT] [BOT] Fallback: polling rejimi ishga tushirilmoqda...');
                                 await initializeBot(botToken, { polling: true });
-                                const botInitDuration = Date.now() - botInitStartTime;
-                                log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi (${botInitDuration}ms)`);
+                                log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi`);
                             }
                         }
                     } else {
-                        // Lokal yoki webhook sozlanmagan - polling rejimi (faqat development uchun)
+                        // Lokal yoki webhook sozlanmagan - polling rejimi
                         log.info('[INIT] [BOT] Lokal environment - polling rejimi ishga tushirilmoqda...');
                         await initializeBot(botToken, { polling: true });
-                        const botInitDuration = Date.now() - botInitStartTime;
-                        log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi (${botInitDuration}ms)`);
+                        log.info(`[INIT] [BOT] ✅ Bot polling rejimida ishga tushirildi`);
                     }
-                })(); // Async IIFE - bot initialization server bloklamaydi
+
+                    // 2. Feedback Bot Initialization
+                    try {
+                        const { initializeFeedbackBot } = require('./utils/feedbackBot.js');
+                        const fbToken = await getSetting('feedback_bot_token', null);
+                        const fbEnabled = await getSetting('feedback_bot_enabled', 'false');
+                        const isFbEnabled = String(fbEnabled).toLowerCase() === 'true' || String(fbEnabled) === '1';
+
+                        if (isFbEnabled && fbToken && fbToken.trim() !== '') {
+                            log.info(`[INIT] [FEEDBACK_BOT] Ishga tushirilmoqda...`);
+                            await initializeFeedbackBot(fbToken);
+                        } else {
+                            log.info(`[INIT] [FEEDBACK_BOT] Feedback bot o'chirilgan yoki token yo'q`);
+                        }
+                    } catch (fbError) {
+                        log.error('[INIT] [FEEDBACK_BOT] ❌ Feedback botni ishga tushirishda xatolik:', fbError.message);
+                    }
+                })();
             } else {
                 log.info('[INIT] [BOT] Bot token topilmadi, bot ishga tushirilmadi');
             }
-            
+
             // Server initialization muvaffaqiyatli tugadi
             global.serverInitialized = true;
             serverInitialized = true;
@@ -697,13 +700,13 @@ global.broadcastWebSocket = (type, payload) => {
 // Graceful shutdown funksiyasi
 async function gracefulShutdown(signal) {
     let shutdownTimeout;
-    
+
     // Timeout - agar 10 soniyada to'xtatilmasa, majburiy to'xtatish
     shutdownTimeout = setTimeout(() => {
         log.error('Graceful shutdown vaqti tugadi. Majburiy to\'xtatish...');
         process.exit(1);
     }, 10000);
-    
+
     try {
         // 1. Bot polling'ni to'xtatish
         const { getBot } = require('./utils/bot.js');
@@ -715,24 +718,24 @@ async function gracefulShutdown(signal) {
                 log.error('Bot polling to\'xtatishda xatolik:', botError.message);
             }
         }
-        
+
         // 2. WebSocket server'ni yopish
         if (wss && wss.clients) {
-            
+
             // Barcha clientlarni yopish
             wss.clients.forEach(client => {
                 if (client.readyState === WebSocket.OPEN) {
                     client.close();
                 }
             });
-            
+
             await new Promise((resolve) => {
                 wss.close(() => {
                     resolve();
                 });
             });
         }
-        
+
         // 3. HTTP server'ni yopish
         if (server && server.listening) {
             await new Promise((resolve) => {
@@ -741,7 +744,7 @@ async function gracefulShutdown(signal) {
                 });
             });
         }
-        
+
         // 4. Database connection'ni yopish (agar kerak bo'lsa)
         const { db } = require('./db.js');
         if (db && db.destroy) {
@@ -751,10 +754,10 @@ async function gracefulShutdown(signal) {
                 log.error('Database yopishda xatolik:', dbError.message);
             }
         }
-        
+
         clearTimeout(shutdownTimeout);
         process.exit(0);
-        
+
     } catch (error) {
         log.error('Graceful shutdown xatolik:', error.message);
         clearTimeout(shutdownTimeout);

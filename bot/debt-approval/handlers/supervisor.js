@@ -4,6 +4,7 @@
 const { createLogger } = require('../../../utils/logger.js');
 const { db } = require('../../../db.js');
 const { getBot } = require('../../../utils/bot.js');
+const stateManager = require('../../unified/stateManager.js');
 const userHelper = require('../../unified/userHelper.js');
 const { formatNormalRequestMessage, formatSetRequestMessage } = require('../../../utils/messageTemplates.js');
 const { logRequestAction, logApproval } = require('../../../utils/auditLogger.js');
@@ -408,22 +409,90 @@ async function handleSupervisorApproval(query, bot) {
             log.info(`[SUPERVISOR] [APPROVAL] ✅ So'rov final guruhga yuborildi: requestId=${requestId}`);
         }
         
-        // Xabarni yangilash
-        await updateRequestMessage(requestId, 'APPROVED_BY_SUPERVISOR', {
+        // Xabarni yangilash: final guruhga yuborilgan bo'lsa FINAL_APPROVED (menejer previewda link + "Final guruh - tugallandi")
+        const statusForUpdate = approvalStage === 'operator' ? 'FINAL_APPROVED' : 'APPROVED_BY_SUPERVISOR';
+        await updateRequestMessage(requestId, statusForUpdate, {
             username: user.username,
             fullname: user.fullname,
             approval_type: 'supervisor',
             approval_stage: approvalStage
         });
         
+        // Nazoratchi xabarida Brend/Filial/SVR va telegraph link bo'lishi kerak (rasmdagi holatda)
+        const fullReq = await db('debt_requests')
+            .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+            .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+            .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+            .where('debt_requests.id', requestId)
+            .select('debt_requests.*', 'debt_brands.name as brand_name', 'debt_branches.name as filial_name', 'debt_svrs.name as svr_name')
+            .first();
+        
+        let telegraphUrl = request.telegraph_url || null;
+        if (!telegraphUrl && fullReq && fullReq.type === 'SET' && fullReq.excel_data) {
+                let excelData = fullReq.excel_data;
+                let excelHeaders = fullReq.excel_headers;
+                let excelColumns = fullReq.excel_columns;
+                if (typeof excelData === 'string' && excelData) {
+                    try { excelData = JSON.parse(excelData); } catch (e) { excelData = null; }
+                }
+                if (typeof excelHeaders === 'string' && excelHeaders) {
+                    try { excelHeaders = JSON.parse(excelHeaders); } catch (e) { excelHeaders = null; }
+                }
+                if (typeof excelColumns === 'string' && excelColumns) {
+                    try { excelColumns = JSON.parse(excelColumns); } catch (e) { excelColumns = null; }
+                }
+                if (excelData && Array.isArray(excelData) && excelData.length > 0) {
+                    try {
+                        const { createDebtDataPage } = require('../../../utils/telegraph.js');
+                        telegraphUrl = await createDebtDataPage({
+                            request_id: requestId,
+                            request_uid: fullReq.request_uid,
+                            brand_name: fullReq.brand_name,
+                            filial_name: fullReq.filial_name,
+                            svr_name: fullReq.svr_name,
+                            month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
+                            extra_info: fullReq.extra_info,
+                            excel_data: excelData,
+                            excel_headers: excelHeaders,
+                            excel_columns: excelColumns,
+                            total_amount: fullReq.excel_total,
+                            isForCashier: false,
+                            logContext: 'supervisor_approval'
+                        });
+                    } catch (telegraphError) {
+                        log.debug(`[SUPERVISOR] [APPROVAL] Telegraph yaratishda xatolik (nazorat javobi): requestId=${requestId}, error=${telegraphError.message}`);
+                    }
+                }
+        }
+        
+        // Nazoratchiga so'rovni yuborgan kassir/operator: ism-familiya va Telegram username
+        const lastApprover = await db('debt_request_approvals')
+            .join('users', 'debt_request_approvals.approver_id', 'users.id')
+            .where('debt_request_approvals.request_id', requestId)
+            .where('debt_request_approvals.approval_type', approvalStage)
+            .whereIn('debt_request_approvals.status', ['approved', 'debt_marked'])
+            .orderBy('debt_request_approvals.created_at', 'desc')
+            .select('users.fullname', 'users.telegram_username', 'users.username')
+            .first();
+        const roleLabel = approvalStage === 'cashier' ? 'Kasir' : 'Operator';
+        const uname = lastApprover ? (lastApprover.telegram_username || lastApprover.username || null) : null;
+        const kimdanKeyin = lastApprover
+            ? `${roleLabel}: ${lastApprover.fullname || '-'}${uname ? ` (@${uname})` : ''}`
+            : (approvalStage === 'cashier' ? 'Kasirlardan keyin keldi' : 'Operatorlardan keyin keldi');
+        let replyText = `✅ So'rov tasdiqlandi!\n\n📋 ID: ${request.request_uid}\n📥 ${kimdanKeyin}\n\n${approvalStage === 'cashier' ? 'Operatorga yuborildi.' : 'Final guruhga yuborildi.'}`;
+        if (fullReq && (fullReq.brand_name || fullReq.filial_name || fullReq.svr_name)) {
+            replyText += `\n\n🏷 Brend: ${fullReq.brand_name || '-'}\n📍 Filial: ${fullReq.filial_name || '-'}\n👤 SVR: ${fullReq.svr_name || '-'}`;
+        }
+        if (telegraphUrl) {
+            replyText += `\n\n🔗 <a href="${telegraphUrl}">📊 Qarzdorlik klientlar</a>`;
+        }
+        
         // Supervisor'ga javob
-        await bot.editMessageText(
-            `✅ So'rov tasdiqlandi!\n\n📋 ID: ${request.request_uid}\n\n${approvalStage === 'cashier' ? 'Operatorga yuborildi.' : 'Final guruhga yuborildi.'}`,
-            {
-                chat_id: chatId,
-                message_id: query.message.message_id
-            }
-        );
+        await bot.editMessageText(replyText, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            parse_mode: 'HTML'
+        });
         
         // ✅ Tasdiqlangan xabarni belgilash (saqlanib qolishi uchun)
         try {
@@ -849,9 +918,100 @@ async function handleShowPendingRequests(query, bot) {
     }
 }
 
+/**
+ * Supervisor "Qarzi bor" – Excel yuklash state va operator bilan bir xil teskari jarayon
+ * Reja: Supervisor ham Excel yuboradi, tasdiqlash/farq bo'lsa operator.sendDebtResponse (bir xil mantiq)
+ */
+async function handleSupervisorDebt(query, bot) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const parts = query.data.split('_');
+    // supervisor_debt_<requestId>_<approvalStage>
+    const requestId = parseInt(parts[2], 10);
+    const approvalStage = parts[3] || 'cashier';
+
+    try {
+        await bot.answerCallbackQuery(query.id, { text: 'Qarzdorlik faylini yuborish...' });
+
+        const user = await userHelper.getUserByTelegram(chatId, userId);
+        if (!user) {
+            await bot.sendMessage(chatId, '❌ Siz ro\'yxatdan o\'tmagansiz.');
+            return;
+        }
+
+        const supervisorTask = await db('debt_user_tasks')
+            .where('user_id', user.id)
+            .where(function() {
+                if (approvalStage === 'cashier') {
+                    this.where('task_type', 'approve_supervisor_cashier');
+                } else {
+                    this.where('task_type', 'approve_supervisor_operator');
+                }
+            })
+            .first();
+
+        if (!supervisorTask) {
+            await bot.sendMessage(chatId, '❌ Sizda Nazoratchi tasdiqlash huquqi yo\'q.');
+            return;
+        }
+
+        const expectedStatus = approvalStage === 'cashier' ? 'APPROVED_BY_CASHIER' : 'APPROVED_BY_OPERATOR';
+        const request = await db('debt_requests')
+            .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+            .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+            .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+            .select(
+                'debt_requests.*',
+                'debt_brands.name as brand_name',
+                'debt_branches.name as filial_name',
+                'debt_svrs.name as svr_name'
+            )
+            .where('debt_requests.id', requestId)
+            .first();
+
+        if (!request) {
+            await bot.sendMessage(chatId, '❌ So\'rov topilmadi.');
+            return;
+        }
+        if (request.status !== expectedStatus) {
+            await bot.sendMessage(chatId, `❌ So'rov statusi noto'g'ri. Kutilgan: ${expectedStatus}.`);
+            return;
+        }
+        if (request.locked) {
+            await bot.sendMessage(chatId, '❌ So\'rov allaqachon boshqacha jarayonda.');
+            return;
+        }
+
+        await db('debt_requests')
+            .where('id', requestId)
+            .update({
+                current_approver_id: user.id,
+                current_approver_type: 'supervisor'
+            });
+
+        stateManager.setUserState(userId, stateManager.CONTEXTS.DEBT_APPROVAL, 'upload_debt_excel', {
+            request_id: requestId,
+            request_uid: request.request_uid,
+            brand_id: request.brand_id,
+            branch_id: request.branch_id,
+            brand_name: request.brand_name,
+            filial_name: request.filial_name,
+            svr_name: request.svr_name,
+            allowed_user_id: user.id
+        });
+
+        log.info(`[QARZI_BOR] [SUPERVISOR] Tugma bosildi → State: UPLOAD_DEBT_EXCEL. requestId=${requestId}, approvalStage=${approvalStage}. Keyingi: Excel yuboriladi.`);
+        await bot.sendMessage(chatId, '📎 Qarzdorlik faylingizni yuboring.');
+    } catch (error) {
+        log.error('Error handling supervisor debt:', error);
+        await bot.sendMessage(chatId, '❌ Xatolik yuz berdi.');
+    }
+}
+
 module.exports = {
     showRequestToSupervisor,
     handleSupervisorApproval,
+    handleSupervisorDebt,
     checkActiveSupervisorRequest,
     showNextSupervisorRequest,
     showPendingSupervisorRequests,

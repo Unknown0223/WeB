@@ -30,7 +30,8 @@ const STATES = {
     SELECT_DEBT_INPUT_TYPE: 'select_debt_input_type',
     ENTER_TOTAL_AMOUNT: 'enter_total_amount',
     ENTER_AGENT_DEBTS: 'enter_agent_debts',
-    AUTO_DETECT_DEBT_INPUT: 'auto_detect_debt_input' // Avtomatik tanib olish
+    AUTO_DETECT_DEBT_INPUT: 'auto_detect_debt_input', // Avtomatik tanib olish
+    PENDING_CONFIRM_REVERSE: 'pending_confirm_reverse' // Farq topilganda: Yuborish / Qaytadan kiritish kutish
 };
 
 /**
@@ -351,7 +352,7 @@ async function showPendingCashierRequests(userId, chatId) {
                 this.where('debt_requests.current_approver_id', user.id)
                     .where('debt_requests.current_approver_type', 'cashier');
             })
-            .whereIn('debt_requests.status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER'])
+            .whereIn('debt_requests.status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER', 'REVERSED_BY_CASHIER'])
             .where('debt_requests.locked', false)
             .select(
                 'debt_requests.*',
@@ -455,12 +456,12 @@ async function checkActiveCashierRequest(userId, chatId) {
             return null;
         }
         
-        // Faol so'rovni qidirish (current_approver_id = user.id, status = PENDING_APPROVAL yoki APPROVED_BY_LEADER, locked = false)
+        // Faol so'rovni qidirish (current_approver_id = user.id, status = PENDING_APPROVAL / APPROVED_BY_LEADER / REVERSED_BY_CASHIER, locked = false)
         const activeRequest = await db('debt_requests')
             .whereIn('branch_id', cashierBranches)
             .where('current_approver_id', user.id)
             .where('current_approver_type', 'cashier')
-            .whereIn('status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER'])
+            .whereIn('status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER', 'REVERSED_BY_CASHIER'])
             .where('locked', false)
             .first();
         
@@ -500,7 +501,7 @@ async function showNextCashierRequest(userId, chatId) {
             .whereIn('debt_requests.branch_id', cashierBranches)
             .where('debt_requests.current_approver_id', user.id)
             .where('debt_requests.current_approver_type', 'cashier')
-            .whereIn('debt_requests.status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER'])
+            .whereIn('debt_requests.status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER', 'REVERSED_BY_CASHIER'])
             .where('debt_requests.locked', false)
             .where('debt_requests.created_at', '>=', fiveMinutesAgo)
             .select(
@@ -521,7 +522,7 @@ async function showNextCashierRequest(userId, chatId) {
                 .whereIn('debt_requests.branch_id', cashierBranches)
                 .where('debt_requests.current_approver_id', user.id)
                 .where('debt_requests.current_approver_type', 'cashier')
-                .whereIn('debt_requests.status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER'])
+                .whereIn('debt_requests.status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER', 'REVERSED_BY_CASHIER'])
                 .where('debt_requests.locked', false)
                 .where('debt_requests.created_at', '<', fiveMinutesAgo)
                 .select(
@@ -540,7 +541,7 @@ async function showNextCashierRequest(userId, chatId) {
                 .whereIn('branch_id', cashierBranches)
                 .where('current_approver_id', user.id)
                 .where('current_approver_type', 'cashier')
-                .whereIn('status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER'])
+                .whereIn('status', ['PENDING_APPROVAL', 'APPROVED_BY_LEADER', 'REVERSED_BY_CASHIER'])
                 .where('locked', false)
                 .where('id', '!=', nextRequest.id)
                 .count('* as count')
@@ -628,11 +629,11 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
         
         // Agar so'rov SET bo'lsa va Excel ma'lumotlari bo'lsa, ularni qo'shish
         let message;
+        let telegraphUrl = null; // LINK_HABAR log uchun funksiya doirada
         // Excel ma'lumotlarini parse qilish (agar string bo'lsa) - funksiya boshida e'lon qilish
         let excelData = null;
         let excelHeaders = null;
         let excelColumns = null;
-        let telegraphUrl = null; // ✅ Funksiya boshida e'lon qilish (barcha holatlar uchun)
         
         if (request.type === 'SET' && request.excel_data) {
             // SET so'rov uchun formatSetRequestMessage ishlatish
@@ -667,12 +668,9 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                 }
             }
             
-            // ✅ MUHIM: Avval database'dan mavjud URL ni tekshirish
-            if (request.telegraph_url && typeof request.telegraph_url === 'string' && request.telegraph_url.trim() !== '') {
-                telegraphUrl = request.telegraph_url;
-                log.info(`[CASHIER] [SHOW_REQUEST] ✅ Telegraph URL database'dan olingan: requestId=${request.id}, URL=${telegraphUrl}`);
-            } else if (excelData && Array.isArray(excelData) && excelData.length > 0) {
-                // Agar database'da URL bo'lmasa, yangi yaratish
+            // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa)
+            // MUHIM: Kassirga har doim Telegraph link ishlatilishi kerak
+            if (excelData && Array.isArray(excelData) && excelData.length > 0) {
                 try {
                     const { createDebtDataPage } = require('../../../utils/telegraph.js');
                     telegraphUrl = await createDebtDataPage({
@@ -687,10 +685,12 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
                         total_amount: request.excel_total,
-                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                        isForCashier: false,
+                        logContext: 'cashier'
                     });
                     
                     if (!telegraphUrl) {
+                        log.warn(`[CASHIER] [SHOW_REQUEST] Telegraph sahifa yaratilmadi (null qaytdi): requestId=${request.id}`);
                         // Qayta urinish
                         try {
                             telegraphUrl = await createDebtDataPage({
@@ -705,7 +705,8 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                                 excel_headers: excelHeaders,
                                 excel_columns: excelColumns,
                                 total_amount: request.excel_total,
-                                isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                                isForCashier: false,
+                                logContext: 'cashier'
                             });
                         } catch (retryError) {
                             log.error(`[CASHIER] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -727,7 +728,8 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                             excel_headers: excelHeaders,
                             excel_columns: excelColumns,
                             total_amount: request.excel_total,
-                            isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                            isForCashier: false,
+                            logContext: 'cashier'
                         });
                     } catch (retryError) {
                         log.error(`[CASHIER] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -735,12 +737,11 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                 }
             }
             
-            
-            // Debug: telegraphUrl tekshiruvi
-            if (!telegraphUrl && excelData && excelData.length > 0) {
-                log.warn(`[CASHIER] [SHOW_REQUEST] ⚠️ Telegraph URL mavjud emas: requestId=${request.id}, excelDataLength=${excelData.length}, excelColumns=${!!excelColumns}`);
-            } else if (telegraphUrl) {
+            // Debug: Telegraph URL tekshiruvi
+            if (telegraphUrl) {
                 log.info(`[CASHIER] [SHOW_REQUEST] ✅ Telegraph URL mavjud: requestId=${request.id}, URL=${telegraphUrl}`);
+            } else {
+                log.warn(`[CASHIER] [SHOW_REQUEST] ⚠️ Telegraph URL mavjud emas: requestId=${request.id}, excelData=${!!excelData}, excelDataLength=${excelData?.length || 0}, excelColumns=${!!excelColumns}`);
             }
             
             message = formatSetRequestMessage({
@@ -753,8 +754,8 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                 excel_headers: excelHeaders,
                 excel_columns: excelColumns,
                 excel_total: request.excel_total,
-                is_for_cashier: true, // Kassirga yuborilayotgani (lekin Telegraph link ko'rsatiladi)
-                telegraph_url: telegraphUrl // ✅ MUHIM: telegraphUrl o'zgaruvchisini to'g'ridan-to'g'ri o'tkazish
+                is_for_cashier: true, // Kassirga yuborilayotgani
+                telegraph_url: telegraphUrl
             });
         } else {
             // Oddiy so'rov uchun formatNormalRequestMessage
@@ -777,6 +778,7 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
         };
         
         // Agent nomlari bilan knopkalar kerak emas (rejada yo'q)
+        log.info(`[LINK_HABAR] cashier: kimga=kassir, requestId=${request.id}, request_uid=${request.request_uid}, telegraph_link=${telegraphUrl ? 'mavjud' : 'yo\'q'}, ma_lumotlar=${request.type === 'SET' ? 'agent_royxati+telegraph_link' : 'oddiy'}, chatId=${chatId}`);
         
         const sentMessage = await bot.sendMessage(chatId, message, {
             reply_markup: keyboard,
@@ -810,9 +812,8 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
             log.debug(`[CASHIER] [SHOW_REQUEST] [CLEANUP] Bildirishnoma xabarlarini o'chirishda xatolik (ignored): ${cleanupError.message}`);
         }
         
-        // Reply keyboard'ni har safar yangilash (pendingCount ga qarab)
-        // MUHIM: Har safar yangi xabar yuborilganda, reply keyboard'da son to'g'ri yangilanadi
-        // Telegram API'da reply keyboard faqat yangi xabar bilan yangilanadi, shuning uchun har safar yangi xabar yuboramiz
+        // Faqat boshqa kutilayotgan so'rovlar bo'lsa (pendingCount > 0) "Sizda X ta kutilayotgan so'rov bor" xabari va tugma yuboriladi.
+        // pendingCount === 0 bo'lsa hech qanday qo'shimcha xabar yuborilmaydi — "sifrasi xato" va keraksiz xabar bo'lmasin.
         if (pendingCount > 0) {
             const replyKeyboard = {
                 keyboard: [
@@ -822,44 +823,15 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
                 one_time_keyboard: false
             };
             
-            // Reply keyboard'ni yangilash uchun yangi xabar yuborish (reply keyboard faqat yangi xabar bilan yangilanadi)
-            // MUHIM: Har safar yangi xabar yuborilganda, reply keyboard'da son to'g'ri yangilanadi
             const pendingMessage = await bot.sendMessage(chatId, `📋 Sizda ${pendingCount} ta kutilayotgan so'rov bor.`, {
                 reply_markup: replyKeyboard
             });
             
-            // "Kutilayotgan so'rovlar" xabarlarini track qilish (keyinchalik o'chirish uchun)
             try {
                 const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
-                trackMessage(chatId, pendingMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, true); // shouldCleanup=true - o'chirilishi kerak
+                trackMessage(chatId, pendingMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, true);
             } catch (trackError) {
                 // Silent fail
-            }
-        } else {
-            // Agar kutilayotgan so'rovlar yo'q bo'lsa, reply keyboard'ni yangilash (0 ta ko'rsatish)
-            const replyKeyboard = {
-                keyboard: [
-                    [{ text: `⏰ Kutilayotgan so'rovlar (0 ta)` }]
-                ],
-                resize_keyboard: true,
-                one_time_keyboard: false
-            };
-            
-            // Reply keyboard'ni yangilash uchun xabar yuborish
-            try {
-                const pendingMessage = await bot.sendMessage(chatId, `📭 Hozircha kutilayotgan so'rovlar yo'q.`, {
-                    reply_markup: replyKeyboard
-                });
-                
-                // Xabarni track qilish
-                try {
-                    const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
-                    trackMessage(chatId, pendingMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, true);
-                } catch (trackError) {
-                    // Silent fail
-                }
-            } catch (sendError) {
-                log.error(`[CASHIER] [SHOW_REQUEST] Xabar yuborishda xatolik: ${sendError.message}`);
             }
         }
         
@@ -867,7 +839,7 @@ async function showRequestToCashier(request, chatId, user, pendingCount = 0) {
         try {
             const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
             trackMessage(chatId, sentMessage.message_id, MESSAGE_TYPES.USER_MESSAGE, true, request.id, false); // shouldCleanup=true, isApproved=false - pending so'rov
-            log.info(`[CASHIER] [SHOW_REQUEST] ✅ Kassirga xabar yuborildi: requestId=${request.id}, requestUID=${request.request_uid}, chatId=${chatId}, messageId=${sentMessage.message_id}, chatType=personal, telegraphUrl=${telegraphUrl || 'yo\'q'}, format=client-based`);
+            log.debug(`[CASHIER] [SHOW_REQUEST] Xabar kuzatishga qo'shildi: chatId=${chatId}, messageId=${sentMessage.message_id}, requestId=${request.id}`);
         } catch (trackError) {
             log.debug(`[CASHIER] [SHOW_REQUEST] Xabarni kuzatishga qo'shishda xatolik (ignored): ${trackError.message}`);
         }
@@ -929,6 +901,7 @@ async function handleCashierApproval(query, bot) {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
     const requestId = parseInt(query.data.split('_').pop());
+    log.info(`[CASHIER] [APPROVAL] [START] Kassir tasdiqlash boshlandi: requestId=${requestId}, userId=${userId}, chatId=${chatId}`);
     
     try {
         // Callback query'ga tez javob berish (timeout muammosini oldini olish uchun)
@@ -975,9 +948,11 @@ async function handleCashierApproval(query, bot) {
             .first();
         
         if (!request) {
+            log.warn(`[CASHIER] [APPROVAL] ❌ So'rov topilmadi yoki kassirga tegishli emas: requestId=${requestId}, userId=${userId}`);
             await bot.sendMessage(chatId, '❌ So\'rov topilmadi yoki sizga tegishli emas.');
             return;
         }
+        log.info(`[CASHIER] [APPROVAL] [STEP_1] So'rov topildi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}, status=${request.status}, current_approver_type=${request.current_approver_type}, brand=${request.brand_name}`);
         
         // Foydalanuvchiga tegishli ekanligini tekshirish
         // Agar current_approver_type = 'cashier' bo'lsa, current_approver_id tekshirish kerak
@@ -1003,9 +978,11 @@ async function handleCashierApproval(query, bot) {
             });
         
         if (lockResult === 0) {
+            log.warn(`[CASHIER] [APPROVAL] ❌ Lock muvaffaqiyatsiz (allaqachon tasdiqlanmoqda): requestId=${requestId}`);
             await bot.sendMessage(chatId, '❌ So\'rov allaqachon tasdiqlanmoqda.');
             return;
         }
+        log.info(`[CASHIER] [APPROVAL] [STEP_2] Lock muvaffaqiyatli: requestId=${requestId}, cashierId=${user.id}`);
         
         // ✅ OPTIMALLASHTIRISH: Loglarni parallel qilish
         await Promise.all([
@@ -1016,6 +993,7 @@ async function handleCashierApproval(query, bot) {
         ]);
         
         // Operator tayinlash (avval, chunki u current_approver_id va current_approver_type ni o'rnatadi)
+        log.info(`[CASHIER] [APPROVAL] [STEP_3] Operator tayinlash: requestId=${requestId}, type=${request.type}, brandId=${request.brand_id}. Ketma-ketlik: kassir tasdiqladi → operatorga boradi.`);
         const { assignOperatorToRequest } = require('../../../utils/cashierAssignment.js');
         const operator = await assignOperatorToRequest(request.brand_id, requestId);
         
@@ -1026,6 +1004,7 @@ async function handleCashierApproval(query, bot) {
         }
         
         // Status yangilash (current_approver_id va current_approver_type operator tayinlashda o'rnatilgan, agar operator topilsa)
+        log.debug(`[CASHIER] [APPROVAL] 8. Status yangilash: APPROVED_BY_CASHIER`);
         await db('debt_requests')
             .where('id', requestId)
             .update({
@@ -1038,11 +1017,12 @@ async function handleCashierApproval(query, bot) {
         log.info(`[CASHIER] [APPROVAL] 8.1. ✅ Status yangilandi: APPROVED_BY_CASHIER`);
         
         // Supervisor'larga yuborish (agar kasirlarga nazoratchi biriktirilgan bo'lsa)
+        log.debug(`[CASHIER] [APPROVAL] 9. Supervisor'larga yuborish tekshirilmoqda...`);
         const { getSupervisorsForCashiers } = require('../../../utils/supervisorAssignment.js');
         const supervisors = await getSupervisorsForCashiers(requestId, request.branch_id);
         
         if (supervisors.length > 0) {
-            log.info(`[CASHIER] [APPROVAL] 9.1. ✅ Supervisor'lar topildi: ${supervisors.length} ta`);
+            log.info(`[CASHIER] [APPROVAL] [STEP_4A] Supervisor'lar topildi: requestId=${requestId}, count=${supervisors.length}. So'rov avval supervisor'larga yuboriladi.`);
             const { showRequestToSupervisor } = require('./supervisor.js');
             
             const fullRequest = await db('debt_requests')
@@ -1060,16 +1040,20 @@ async function handleCashierApproval(query, bot) {
             
             if (fullRequest) {
                 await showRequestToSupervisor(fullRequest, supervisors, 'cashier');
-                log.info(`[CASHIER] [APPROVAL] 9.2. ✅ So'rov supervisor'larga yuborildi: requestId=${requestId}`);
+                log.info(`[CASHIER] [APPROVAL] [STEP_5A] So'rov supervisor'larga yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}`);
             }
         } else {
-            log.info(`[CASHIER] [APPROVAL] 9.1. ⚠️ Supervisor'lar topilmadi, operatorga to'g'ridan-to'g'ri yuborilmoqda`);
+            log.info(`[CASHIER] [APPROVAL] [STEP_4B] Supervisor'lar yo'q: requestId=${requestId}, type=${request.type}. Operatorga to'g'ridan-to'g'ri yuboriladi (ketma-ketlik: kassir→operator→final).`);
             
             // Operatorga guruh orqali yuborish
+            log.info(`[CASHIER] [APPROVAL] [STEP_5B] Operatorga yuborish: requestId=${requestId}, requestUID=${request.request_uid}`);
             const { showRequestToOperator } = require('./operator.js');
             
             if (operator) {
+                log.info(`[CASHIER] [APPROVAL] 9.2.1. Operator topildi: OperatorId=${operator.user_id}, Name=${operator.fullname}`);
+                
                 // So'rovni to'liq ma'lumotlar bilan olish (brand_name, filial_name, svr_name bilan)
+                log.debug(`[CASHIER] [APPROVAL] 9.2.2. So'rov ma'lumotlarini olish: requestId=${requestId}`);
                 const fullRequest = await db('debt_requests')
                     .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
                     .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
@@ -1111,9 +1095,9 @@ async function handleCashierApproval(query, bot) {
                     
                     // HAR DOIM joriy so'rovni yuborish (fullRequest)
                     // pendingCount = boshqa pending so'rovlar soni (joriy so'rovni istisno qilgan holda)
-                    log.info(`[CASHIER] [APPROVAL] 📤 Operatorlar guruhiga xabar yuborilmoqda: requestId=${requestId}, operatorId=${operator.user_id}, operatorName=${operator.fullname}, pendingCount=${operatorPendingCount}`);
+                    log.info(`[CASHIER] [APPROVAL] 9.2.4. Operatorlar guruhiga xabar yuborilmoqda: operatorId=${operator.user_id}, requestId=${requestId}, pendingCount=${operatorPendingCount} (type: ${typeof operatorPendingCount})`);
                     await showRequestToOperator(fullRequest, operator.user_id, operatorUser || operator, operatorPendingCount);
-                    log.info(`[CASHIER] [APPROVAL] ✅ Operatorlar guruhiga xabar yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, operatorId=${operator.user_id}, operatorName=${operator.fullname}, pendingCount=${operatorPendingCount}, chatType=group`);
+                    log.info(`[CASHIER] [APPROVAL] [DONE_OP] So'rov operatorga yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}, operatorId=${operator.user_id}, pendingCount=${operatorPendingCount}. Keyingi bosqich: operator tasdiqlasa → final guruh.`);
                 } else {
                     log.error(`[CASHIER] [APPROVAL] 9.2.3. ❌ So'rov ma'lumotlari topilmadi: requestId=${requestId}`);
                 }
@@ -1122,7 +1106,7 @@ async function handleCashierApproval(query, bot) {
             }
         }
         
-        log.info(`[CASHIER] [APPROVAL] ✅ Kassir tasdiqladi: requestId=${requestId}, requestUID=${request.request_uid}, cashierId=${user.id}, cashierName=${user.fullname}, brand=${request.brand_name}, branch=${request.filial_name}`);
+        log.info(`[CASHIER] [APPROVAL] [DONE] Kassir tasdiqlash yakunlandi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}, cashierId=${user.id}. So'rov operatorga/supervisor'ga yuborildi (ketma-ketlik davom etadi).`);
         
         // ✅ MUHIM: "Qarzi bor" bosilganda yuborilgan xabarlarni tozalash
         // Agar state mavjud bo'lsa va "Qarzi bor" bosilgan bo'lsa, namuna va xatolik xabarlarini o'chirish
@@ -1228,7 +1212,7 @@ async function handleCashierApproval(query, bot) {
                 try {
                     const { createDebtDataPage } = require('../../../utils/telegraph.js');
                     telegraphUrl = await createDebtDataPage({
-                        request_id: requestId, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                        request_id: requestId,
                         request_uid: request.request_uid,
                         brand_name: request.brand_name,
                         filial_name: request.filial_name,
@@ -1239,7 +1223,8 @@ async function handleCashierApproval(query, bot) {
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
                         total_amount: request.excel_total,
-                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                        isForCashier: false,
+                        logContext: 'cashier'
                     });
                 } catch (telegraphError) {
                     // Telegraph xatolari silent qilinadi (ixtiyoriy xizmat)
@@ -1311,7 +1296,33 @@ async function handleCashierDebt(query, bot) {
             return;
         }
         
-        // So'rovni olish (brand_name, filial_name, svr_name bilan)
+        // So'rovni avval ID bo'yicha olish (statusni tekshirish uchun – qaytarilgan bo'lsa chatga xabar yubormaslik)
+        const requestById = await db('debt_requests')
+            .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+            .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+            .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+            .select(
+                'debt_requests.*',
+                'debt_brands.name as brand_name',
+                'debt_branches.name as filial_name',
+                'debt_svrs.name as svr_name'
+            )
+            .where('debt_requests.id', requestId)
+            .first();
+        
+        if (!requestById) {
+            await bot.sendMessage(chatId, '❌ So\'rov topilmadi yoki sizga tegishli emas.');
+            return;
+        }
+        if (requestById.status === 'REJECTED' || requestById.status === 'FINAL_APPROVED') {
+            log.info(`[CASHIER_DEBT] So'rov tugatilgan – chatga xabar yuborilmaydi: requestId=${requestId}, status=${requestById.status}`);
+            return;
+        }
+        if (requestById.status === 'REVERSED_BY_CASHIER' && requestById.current_approver_id !== user.id) {
+            log.info(`[CASHIER_DEBT] So'rov qaytarilgan va boshqa kassirga biriktirilgan – chatga xabar yuborilmaydi: requestId=${requestId}`);
+            return;
+        }
+        
         const request = await db('debt_requests')
             .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
             .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
@@ -1345,6 +1356,7 @@ async function handleCashierDebt(query, bot) {
         });
         
         log.info(`[CASHIER_DEBT] Qarzi bor bosildi (avtomatik tanib olish): requestId=${requestId}, userId=${user.id}, brandId=${request.brand_id}, branchId=${request.branch_id}, type=${request.type}`);
+        log.info(`[QARZI_BOR] [KASSIR] 1. Tugma bosildi → State: AUTO_DETECT_DEBT_INPUT. So'rov: ${request.request_uid}, brend: ${request.brand_name}, filial: ${request.filial_name}. Keyingi: Kassir umumiy summa / agent bo'yicha / Excel yuboradi.`);
         
         // Namuna ko'rsatish - agar SET bo'lsa, real ma'lumotlar bilan
         let exampleMessage = '📊 <b>Qarzdorlik ma\'lumotlarini kiriting</b>\n\n';
@@ -1710,14 +1722,20 @@ async function handleTotalAmountInput(msg, bot) {
             debtData.comparison_result = comparisonResult;
         }
         
+        // Foydalanuvchi xabarini keyinroq o'chirish uchun (chat toza)
+        debtData.user_message_id = msg.message_id;
         // sendDebtResponse ni chaqirish (keyingi jarayon o'zgarmasdan)
+        log.info(`[QARZI_BOR] [KASSIR] Umumiy summa kiritildi → sendDebtResponse chaqiriladi. requestId=${state.data.request_id}, totalAmount=${debtData.total_amount}.`);
         await sendDebtResponse(state.data.request_id, userId, chatId, debtData);
         
-        // State'ni tozalash
+        // Farq topilganda sendDebtResponse state ni pending_confirm_reverse qiladi – "Yuborish" / "Qaytadan kiritish" kutiladi. State ni tozalamaslik.
+        const stateAfter = stateManager.getUserState(userId);
+        if (stateAfter && stateAfter.state === STATES.PENDING_CONFIRM_REVERSE) {
+            log.info(`[CASHIER] [TOTAL_AMOUNT] State pending_confirm_reverse – Yuborish/Qaytadan kiritish kutilmoqda, state tozalanmadi.`);
+            return true;
+        }
         stateManager.clearUserState(userId);
-        
         await bot.sendMessage(chatId, '✅ Qarzdorlik ma\'lumotlari qabul qilindi.');
-        
         return true;
     } catch (error) {
         log.error('Error handling total amount input:', error);
@@ -2021,14 +2039,20 @@ async function handleAgentDebtsInput(msg, bot) {
             debtData.comparison_result = comparisonResult;
         }
         
+        // Foydalanuvchi xabarini keyinroq o'chirish uchun (chat toza)
+        debtData.user_message_id = msg.message_id;
         // sendDebtResponse ni chaqirish (keyingi jarayon o'zgarmasdan)
+        log.info(`[QARZI_BOR] [KASSIR] Agent bo'yicha qarzdorlik kiritildi → sendDebtResponse chaqiriladi. requestId=${state.data.request_id}, agentlar=${debtData.excel_data?.length || 0}.`);
         await sendDebtResponse(state.data.request_id, userId, chatId, debtData);
         
-        // State'ni tozalash
+        // Farq topilganda sendDebtResponse state ni pending_confirm_reverse qiladi – "Yuborish" / "Qaytadan kiritish" kutiladi. State ni tozalamaslik.
+        const stateAfter = stateManager.getUserState(userId);
+        if (stateAfter && stateAfter.state === STATES.PENDING_CONFIRM_REVERSE) {
+            log.info(`[CASHIER] [AGENT_DEBTS] State pending_confirm_reverse – Yuborish/Qaytadan kiritish kutilmoqda, state tozalanmadi.`);
+            return true;
+        }
         stateManager.clearUserState(userId);
-        
         await bot.sendMessage(chatId, '✅ Qarzdorlik ma\'lumotlari qabul qilindi.');
-        
         return true;
     } catch (error) {
         log.error('Error handling agent debts input:', error);
@@ -2529,6 +2553,103 @@ async function handleAutoDetectDebtInput(msg, bot) {
 }
 
 /**
+ * Teskari jarayonni yakunlash: menejer (edit), rahbarlar (yangi xabar), final (yangi xabar), status, logApproval.
+ * "Yuborish" tugmasi bosilganda yoki kassir xabari topilmasa chaqiriladi.
+ */
+async function completeCashierReverseProcess(requestId, userId, chatId, pendingData, debtDataOptional = null) {
+    const user = await userHelper.getUserByTelegram(chatId, userId);
+    if (!user) return;
+    const debtData = debtDataOptional || {
+        telegraph_url: pendingData.telegraph_url,
+        differences_telegraph_url: pendingData.differences_telegraph_url
+    };
+    const request = await db('debt_requests')
+        .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+        .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+        .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+        .select(
+            'debt_requests.*',
+            'debt_brands.name as brand_name',
+            'debt_branches.name as filial_name',
+            'debt_svrs.name as svr_name'
+        )
+        .where('debt_requests.id', requestId)
+        .first();
+    if (!request) return;
+    const fullRequest = await db('debt_requests')
+        .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+        .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+        .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+        .select(
+            'debt_requests.*',
+            'debt_brands.name as brand_name',
+            'debt_branches.name as filial_name',
+            'debt_svrs.name as svr_name'
+        )
+        .where('debt_requests.id', requestId)
+        .first();
+    fullRequest.status = 'reversed';
+    const reversedBy = 'Kassir';
+    const bot = getBot();
+    const isNormalRequest = request && request.type !== 'SET';
+    log.info(`[CASHIER] [COMPLETE_REVERSE] [REJA_2] Teskari jarayon boshlandi: requestId=${requestId}, type=${request.type}, NORMAL=${isNormalRequest}. Menejer edit + ${isNormalRequest ? 'final (rahbarlarga yo\'q)' : 'rahbarlar + final'}.`);
+    // Tasdiqlash jarayonida "Kassir - Qaytarilindi" ko'rinsin: avval DBga yozamiz, keyin xabarlar formatlanadi
+    // Ro'yxatga qaytarish: so'rov yana kassirga biriktiriladi (Kutilayotgan so'rovlar da ko'rinsin)
+    await db('debt_requests').where('id', requestId).update({
+        status: 'REVERSED_BY_CASHIER',
+        current_approver_id: user.id,
+        current_approver_type: 'cashier'
+    });
+    await logApproval(requestId, user.id, 'cashier', 'reversed', {
+        telegraph_url: pendingData.telegraph_url,
+        differences_telegraph_url: pendingData.differences_telegraph_url,
+        total_difference: pendingData.total_difference,
+        differences_count: pendingData.differences_count
+    });
+    // Qaytarilish soni: shu so'rov (request_id) bo'yicha debt_request_approvals da status='reversed' soni
+    const reversalRow = await db('debt_request_approvals').where('request_id', requestId).where('status', 'reversed').count('* as c').first();
+    const reversalCount = reversalRow && reversalRow.c != null ? parseInt(reversalRow.c, 10) : 1;
+    const reversalSuffix = reversalCount > 0 ? ` (${reversalCount}-marta)` : '';
+    // Menejer preview yangilash
+    const manager = await db('users').where('id', request.created_by).first();
+    if (manager && manager.telegram_chat_id && fullRequest.preview_message_id && fullRequest.preview_chat_id) {
+        let reverseMessage = `⚠️ <b>Teskari jarayon${reversalSuffix}</b>\n\n` +
+            `${reversedBy} tomonidan yuborilgan ma'lumotlar so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
+        const approvalMessage = await formatRequestMessageWithApprovals(fullRequest, db, 'manager', debtData);
+        reverseMessage += approvalMessage;
+        try {
+            await bot.editMessageText(reverseMessage, {
+                chat_id: fullRequest.preview_chat_id,
+                message_id: fullRequest.preview_message_id,
+                parse_mode: 'HTML'
+            });
+            log.info(`[CASHIER] [COMPLETE_REVERSE] [REJA_2] Menejer preview xabari edit qilindi (teskari jarayon + link): requestId=${requestId}`);
+        } catch (e) {
+            log.warn(`[CASHIER] [COMPLETE_REVERSE] Menejer xabarini yangilab bo'lmadi: ${e.message}`);
+        }
+    }
+    // Teskari jarayon: qaytgan roldan oldingi zanjirga va final guruhga. NORMAL da rahbar yo'q (kassirdan oldin faqat menejer).
+    const leadersGroup = await db('debt_groups').where('group_type', 'leaders').where('is_active', true).first();
+    const finalGroup = await db('debt_groups').where('group_type', 'final').where('is_active', true).first();
+    const leaderText = `⚠️ <b>Teskari jarayon${reversalSuffix}</b>\n\n${reversedBy} tomonidan yuborilgan ma'lumotlar so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
+    const finalText = `⚠️ <b>Teskari jarayon${reversalSuffix}</b>\n\n${reversedBy} tomonidan yuborilgan ma'lumotlar so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
+    const isSetRequest = (request && request.type === 'SET');
+    if (leadersGroup && isSetRequest) {
+        const approvalMsgLeader = await formatRequestMessageWithApprovals(fullRequest, db, 'leader', debtData);
+        await bot.sendMessage(leadersGroup.telegram_group_id, leaderText + approvalMsgLeader, { parse_mode: 'HTML' });
+        log.info(`[CASHIER] [COMPLETE_REVERSE] Rahbarlar guruhiga yuborildi: requestId=${requestId}, type=SET`);
+    } else if (leadersGroup && !isSetRequest) {
+        log.info(`[CASHIER] [COMPLETE_REVERSE] NORMAL so'rov – rahbarlar guruhiga yuborilmaydi (kassirdan oldin faqat menejer). requestId=${requestId}`);
+    }
+    if (finalGroup) {
+        const approvalMsgFinal = await formatRequestMessageWithApprovals(fullRequest, db, 'final', debtData);
+        await bot.sendMessage(finalGroup.telegram_group_id, finalText + approvalMsgFinal, { parse_mode: 'HTML' });
+        log.info(`[CASHIER] [COMPLETE_REVERSE] [REJA_2] Final guruhga linkli xabar yuborildi: requestId=${requestId}, type=${request.type}`);
+    }
+    log.info(`[CASHIER] [COMPLETE_REVERSE] [REJA_2] Teskari jarayon yakunlandi: requestId=${requestId}, cashierId=${user.id}, menejer_edit=ha, final_yuborildi=${!!finalGroup}`);
+}
+
+/**
  * Qarzi bor javobini yuborish
  */
 async function sendDebtResponse(requestId, userId, chatId, debtData) {
@@ -2537,26 +2658,26 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
         if (!user) {
             return;
         }
+        log.info(`[QARZI_BOR] [KASSIR] 2. sendDebtResponse boshlandi. requestId=${requestId}, kassirId=${user.id}. Ma'lumot: excelQator=${debtData.excel_data?.length || 0}, totalAmount=${debtData.total_amount ?? 'yo\'q'}, inputType=${debtData.input_type || 'nomalum'}.`);
         
-        // ✅ MUHIM: "Qarzi bor" bosilganda yuborilgan xabarlarni tozalash
-        // Agar state mavjud bo'lsa va "Qarzi bor" bosilgan bo'lsa, namuna va xatolik xabarlarini o'chirish
+        // ✅ MUHIM: "Qarzi bor" bosilganda yuborilgan xabarlarni tozalash (reja: chat toza)
+        // Namuna, xatolik va foydalanuvchi xabarlarini o'chirish
         const currentState = stateManager.getUserState(userId);
-        if (currentState && currentState.state === STATES.AUTO_DETECT_DEBT_INPUT && currentState.data && currentState.data.request_id === requestId) {
+        const shouldCleanup = currentState && currentState.data && currentState.data.request_id === requestId &&
+            (currentState.data.first_example_message_id || currentState.data.last_error_message_id || debtData.user_message_id);
+        if (shouldCleanup) {
             const messagesToDelete = [];
-            
-            // Birinchi namuna xabarini o'chirish
             if (currentState.data.first_example_message_id) {
                 messagesToDelete.push(currentState.data.first_example_message_id);
             }
-            
-            // Xatolik xabarini o'chirish
             if (currentState.data.last_error_message_id) {
                 messagesToDelete.push(currentState.data.last_error_message_id);
             }
-            
-            // Barcha eski xabarlarni o'chirish
+            if (debtData.user_message_id) {
+                messagesToDelete.push(debtData.user_message_id);
+            }
             const bot = getBot();
-            if (bot) {
+            if (bot && messagesToDelete.length > 0) {
                 for (const messageId of messagesToDelete) {
                     try {
                         await bot.deleteMessage(chatId, messageId);
@@ -2565,9 +2686,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                         log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [CLEANUP] Eski xabar o'chirilmadi: messageId=${messageId}, error=${deleteError.message}`);
                     }
                 }
+                log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [CLEANUP] ${messagesToDelete.length} ta xabar o'chirildi (state=${currentState.state})`);
             }
-            
-            log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [CLEANUP] ${messagesToDelete.length} ta xabar o'chirildi`);
         }
         
         const request = await db('debt_requests')
@@ -2604,7 +2724,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     excel_headers: debtData.excel_headers,
                     excel_columns: debtData.excel_columns,
                     total_amount: debtData.total_amount,
-                    isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                    isForCashier: false,
+                    logContext: 'cashier'
                 });
                 
                 if (!telegraphUrl) {
@@ -2622,7 +2743,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                             excel_headers: debtData.excel_headers,
                             excel_columns: debtData.excel_columns,
                             total_amount: debtData.total_amount,
-                            isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                            isForCashier: false,
+                            logContext: 'cashier'
                         });
                     } catch (retryError) {
                         log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -2643,7 +2765,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                         excel_headers: debtData.excel_headers,
                         excel_columns: debtData.excel_columns,
                         total_amount: debtData.total_amount,
-                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                        isForCashier: false,
+                        logContext: 'cashier'
                     });
                 } catch (retryError) {
                     log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -2660,6 +2783,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
         // SET so'rovlar uchun: Agar farq bo'lsa va farqi ko'p bo'lsa (totalDifference > 0), teskari jarayon
         if (isSetRequest && hasDifferences && comparisonResult.totalDifference > 0) {
             log.info(`[CASHIER] [SEND_DEBT_RESPONSE] SET so'rovda farq topildi va teskari jarayon boshlanmoqda: requestId=${requestId}, totalDifference=${comparisonResult.totalDifference}, inputType=${debtData.input_type}`);
+            log.info(`[QARZI_BOR] [KASSIR] 3. TESKARI JARAYON (SET, farq bor). Xabarlar: Menejer (preview yangilanadi), Rahbarlar guruhi, Final guruh. Status → REVERSED_BY_CASHIER.`);
             
             // Farqlar uchun Telegraph sahifasini yaratish (input_type bo'yicha)
             let differencesTelegraphUrl = null;
@@ -2704,196 +2828,165 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Umumiy summa bo'yicha farqlar sahifasini yaratishda xatolik: ${error.message}`);
                 }
             }
-            
-            // Menejerga xabar yuborish (tasdiqlanganlar va qaytarilgan holatlar bilan)
-            const manager = await db('users').where('id', request.created_by).first();
-            if (manager && manager.telegram_chat_id) {
-                // ✅ formatRequestMessageWithApprovals ishlatish (tasdiqlanganlar va qaytarilgan holatlar bilan)
-                const { formatRequestMessageWithApprovals } = require('../../../utils/messageTemplates.js');
-                const fullRequest = await db('debt_requests')
-                    .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
-                    .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
-                    .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
-                    .select(
-                        'debt_requests.*',
-                        'debt_brands.name as brand_name',
-                        'debt_branches.name as filial_name',
-                        'debt_svrs.name as svr_name'
-                    )
-                    .where('debt_requests.id', requestId)
-                    .first();
-                
-                if (fullRequest) {
-                    // Status'ni reversed ga o'zgartirish (formatRequestMessageWithApprovals uchun)
-                    fullRequest.status = 'reversed';
-                    
-                    // Kim tomonidan qaytarilganini aniqlash
-                    const reversedApproval = await db('debt_request_approvals')
-                        .where('request_id', requestId)
-                        .where('status', 'reversed')
-                        .orderBy('created_at', 'desc')
-                        .first();
-                    
-                    let reversedBy = 'Kassir';
-                    if (reversedApproval) {
-                        if (reversedApproval.approval_type === 'cashier') {
-                            reversedBy = 'Kassir';
-                        } else if (reversedApproval.approval_type === 'operator') {
-                            reversedBy = 'Operator';
-                        }
-                    }
-                    
-                    let reverseMessage = `⚠️ <b>Teskari jarayon</b>\n\n` +
-                        `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
-                    
-                    // Telegraph link qo'shish (farqlar ro'yxati bilan) - faqat farqlar sahifasi
-                    if (differencesTelegraphUrl) {
-                        reverseMessage += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
-                    }
-                    
-                    // Tasdiqlanganlar va qaytarilgan holatlar (debtData bilan)
-                    const approvalMessage = await formatRequestMessageWithApprovals(fullRequest, db, 'manager', debtData);
-                    reverseMessage += approvalMessage;
-                
-                const bot = getBot();
-                    
-                    // ✅ "So'rov muvaffaqiyatli yaratildi!" xabarini "Teskari jarayon" formatiga o'zgartirish
-                    if (fullRequest.preview_message_id && fullRequest.preview_chat_id) {
-                        try {
-                            await bot.editMessageText(
-                                reverseMessage,
-                                {
-                                    chat_id: fullRequest.preview_chat_id,
-                                    message_id: fullRequest.preview_message_id,
-                                    parse_mode: 'HTML'
-                                }
-                            );
-                            log.info(`[CASHIER] [SEND_DEBT_RESPONSE] ✅ "So'rov muvaffaqiyatli yaratildi!" xabari "Teskari jarayon" formatiga o'zgartirildi: requestId=${requestId}, messageId=${fullRequest.preview_message_id}`);
-                        } catch (updateError) {
-                            log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] ⚠️ "So'rov muvaffaqiyatli yaratildi!" xabarini yangilashda xatolik: requestId=${requestId}, error=${updateError.message}`);
-                            // Xatolik bo'lsa, yangi xabar sifatida yuborish
-                await bot.sendMessage(manager.telegram_chat_id, reverseMessage, { parse_mode: 'HTML' });
-                            log.info(`[CASHIER] [SEND_DEBT_RESPONSE] Menejerga teskari jarayon xabari yangi xabar sifatida yuborildi: requestId=${requestId}, managerId=${manager.id}`);
-            }
+            // Reja: Link 1 = menejer yuborgan ro'yxat (asl so'rov), Link 2 = qaytarilgan farqlar
+            // [REJA_2] Kassir uchun Link 1 faqat agent bo'yicha – createDebtDataPage isForCashier: true bilan chaqiriladi
+            let originalTelegraphUrl = request.telegraph_url || null;
+            const needCashierLink1 = true; // Kassir "Teskari jarayon" xabaridagi Link 1 – agent bo'yicha
+            log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] Link 1 (So'rov ro'yxati) yaratish: requestId=${requestId}, dbUrl=${originalTelegraphUrl ? 'mavjud' : 'yo\'q'}, kassirUchunAgentBoyicha=${needCashierLink1}`);
+            if (!originalTelegraphUrl && request.excel_data && request.excel_headers && request.excel_columns) {
+                try {
+                    let reqExcelData = request.excel_data;
+                    if (typeof reqExcelData === 'string' && reqExcelData) reqExcelData = JSON.parse(reqExcelData);
+                    const reqHeaders = typeof request.excel_headers === 'string' ? JSON.parse(request.excel_headers) : request.excel_headers;
+                    const reqColumns = typeof request.excel_columns === 'string' ? JSON.parse(request.excel_columns) : request.excel_columns;
+                    if (Array.isArray(reqExcelData) && reqExcelData.length > 0 && reqColumns) {
+                        const { createDebtDataPage } = require('../../../utils/telegraph.js');
+                        log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] createDebtDataPage chaqirilmoqda: isForCashier=true (kassir uchun agent bo'yicha sahifa). requestId=${requestId}`);
+                        originalTelegraphUrl = await createDebtDataPage({
+                            request_uid: request.request_uid,
+                            brand_name: request.brand_name,
+                            filial_name: request.filial_name,
+                            svr_name: request.svr_name,
+                            month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
+                            extra_info: request.extra_info,
+                            excel_data: reqExcelData,
+                            excel_headers: reqHeaders,
+                            excel_columns: reqColumns,
+                            total_amount: request.excel_total,
+                            isForCashier: needCashierLink1,
+                            logContext: 'cashier_reversed_link1_agent'
+                        });
+                        log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] Link 1 yaratildi (kassir uchun agent bo'yicha): requestId=${requestId}, URL=${originalTelegraphUrl ? 'mavjud' : 'yo\'q'}`);
                     } else {
-                        // Preview message ID yo'q bo'lsa, yangi xabar sifatida yuborish
-                        await bot.sendMessage(manager.telegram_chat_id, reverseMessage, { parse_mode: 'HTML' });
-                        log.info(`[CASHIER] [SEND_DEBT_RESPONSE] Menejerga teskari jarayon xabari yuborildi: requestId=${requestId}, managerId=${manager.id}, hasDifferencesTelegraphUrl=${!!differencesTelegraphUrl}`);
+                        log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] Link 1 yaratilmadi: excel ma'lumotlari yetarli emas. requestId=${requestId}`);
                     }
+                } catch (err) {
+                    log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] Link 1 sahifasi yaratilmadi: requestId=${requestId}, error=${err.message}`);
+                }
+            } else if (originalTelegraphUrl && needCashierLink1) {
+                // DB da URL bor, lekin u odatda klient_boyicha. Kassir uchun agent bo'yicha yangi sahifa yaratish kerak.
+                try {
+                    let reqExcelData = request.excel_data;
+                    if (typeof reqExcelData === 'string' && reqExcelData) reqExcelData = JSON.parse(reqExcelData);
+                    const reqHeaders = typeof request.excel_headers === 'string' ? JSON.parse(request.excel_headers) : request.excel_headers;
+                    const reqColumns = typeof request.excel_columns === 'string' ? JSON.parse(request.excel_columns) : request.excel_columns;
+                    if (Array.isArray(reqExcelData) && reqExcelData.length > 0 && reqColumns) {
+                        const { createDebtDataPage } = require('../../../utils/telegraph.js');
+                        log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] Kassir uchun Link 1 (agent bo'yicha) alohida yaratilmoqda, DB URL klient bo'yicha. requestId=${requestId}`);
+                        originalTelegraphUrl = await createDebtDataPage({
+                            request_uid: request.request_uid,
+                            brand_name: request.brand_name,
+                            filial_name: request.filial_name,
+                            svr_name: request.svr_name,
+                            month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
+                            extra_info: request.extra_info,
+                            excel_data: reqExcelData,
+                            excel_headers: reqHeaders,
+                            excel_columns: reqColumns,
+                            total_amount: request.excel_total,
+                            isForCashier: true,
+                            logContext: 'cashier_reversed_link1_agent'
+                        });
+                        log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] Kassir uchun Link 1 (agent bo'yicha) yaratildi. requestId=${requestId}, URL=${originalTelegraphUrl ? 'mavjud' : 'yo\'q'}`);
+                    }
+                } catch (err) {
+                    log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_2] Kassir Link 1 (agent) yaratilmadi, DB URL ishlatiladi: requestId=${requestId}, error=${err.message}`);
                 }
             }
+            debtData.telegraph_url = originalTelegraphUrl;
+            debtData.differences_telegraph_url = differencesTelegraphUrl;
             
-            // SET so'rov bo'lsa, rahbarlarga va final guruhga ham yuborish (reverse process)
-            const leadersGroup = await db('debt_groups')
-                .where('group_type', 'leaders')
-                .where('is_active', true)
-                .first();
+            // Reja: Farq topilganda kassir asosiy xabariga Link 2 qo'shamiz va tugmalar: Yuborish / Qaytadan kiritish
+            const { getMessageIdsForRequest } = require('../utils/messageTracker.js');
+            const cashierMessageIds = getMessageIdsForRequest(chatId, requestId);
+            const cashierMessageId = cashierMessageIds.length > 0 ? cashierMessageIds[0] : null;
             
-            const finalGroup = await db('debt_groups')
-                .where('group_type', 'final')
-                .where('is_active', true)
-                .first();
-            
-            // ✅ formatRequestMessageWithApprovals ishlatish (tasdiqlanganlar va qaytarilgan holatlar bilan)
-            const { formatRequestMessageWithApprovals } = require('../../../utils/messageTemplates.js');
-            const fullRequest = await db('debt_requests')
-                .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
-                .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
-                .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
-                .select(
-                    'debt_requests.*',
-                    'debt_brands.name as brand_name',
-                    'debt_branches.name as filial_name',
-                    'debt_svrs.name as svr_name'
-                )
-                .where('debt_requests.id', requestId)
-                .first();
-            
-            if (fullRequest) {
-                // Status'ni reversed ga o'zgartirish (formatRequestMessageWithApprovals uchun)
-                fullRequest.status = 'reversed';
-                
-                // Kim tomonidan qaytarilganini aniqlash
-                const reversedApproval = await db('debt_request_approvals')
-                    .where('request_id', requestId)
-                    .where('status', 'reversed')
-                    .orderBy('created_at', 'desc')
-                    .first();
-                
-                let reversedBy = 'Kassir';
-                if (reversedApproval) {
-                    if (reversedApproval.approval_type === 'cashier') {
-                        reversedBy = 'Kassir';
-                    } else if (reversedApproval.approval_type === 'operator') {
-                        reversedBy = 'Operator';
-                    }
+            if (cashierMessageId) {
+                // Kassir xabarini "Teskari jarayon" + Link 1 + Link 2 + Yuborish / Qaytadan kiritish tugmalari bilan yangilash
+                // [REJA_1] Link tepadagi tavsif matnida: "So'rov ro'yxati (menejer yuborgan)" va "Qaytarilgan farqlar" – bosilganda mos ro'yxat ochiladi
+                let cashierReverseText = `⚠️ <b>Teskari jarayon</b>\n\n` +
+                    `Kassir tomonidan yuborilgan ma'lumotlar so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
+                if (originalTelegraphUrl) {
+                    cashierReverseText += `🔗 <a href="${originalTelegraphUrl}">So'rov ro'yxati (menejer yuborgan)</a>\n\n`;
+                    log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] Link 1: matn "So'rov ro'yxati (menejer yuborgan)" ga ornatildi, URL mavjud. requestId=${requestId}`);
+                } else {
+                    log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] Link 1: URL yo'q, matn qo'shilmadi. requestId=${requestId}`);
                 }
-                
-                let reverseMessage = `⚠️ <b>Teskari jarayon</b>\n\n` +
-                    `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
-                
-                // Telegraph link qo'shish (farqlar ro'yxati bilan) - faqat farqlar sahifasi
                 if (differencesTelegraphUrl) {
-                    reverseMessage += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
+                    cashierReverseText += `🔗 <a href="${differencesTelegraphUrl}">Qaytarilgan farqlar</a>\n\n`;
+                    log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] Link 2: matn "Qaytarilgan farqlar" ga ornatildi, URL mavjud. requestId=${requestId}`);
+                } else {
+                    log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] Link 2: URL yo'q, matn qo'shilmadi. requestId=${requestId}`);
                 }
-                
-                // Rahbarlar guruhiga yuborish
-            if (leadersGroup) {
-                    // Tasdiqlanganlar va qaytarilgan holatlar (rahbarlar uchun - 'leader' roli)
-                    const approvalMessageForLeaders = await formatRequestMessageWithApprovals(fullRequest, db, 'leader', debtData);
-                    let reverseMessageForLeaders = `⚠️ <b>Teskari jarayon</b>\n\n` +
-                        `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
-                    
-                    // ✅ Telegraph link qo'shish (farqlar ro'yxati bilan) - faqat farqlar sahifasi
-                    if (differencesTelegraphUrl) {
-                        reverseMessageForLeaders += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
-                    }
-                    reverseMessageForLeaders += approvalMessageForLeaders;
+                // [REJA_3] Xabarda to'liq ma'lumot: So'rov ID, Brend, Filial, SVR, SET bo'lsa qarzdorlik umumiy summasi
+                cashierReverseText += `So'rov ID: ${request.request_uid} | Brend: ${request.brand_name} | Filial: ${request.filial_name}`;
+                if (request.svr_name) {
+                    cashierReverseText += ` | SVR: ${request.svr_name}`;
+                    log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_3] SVR qo'shildi: requestId=${requestId}, svr_name=${request.svr_name}`);
+                } else {
+                    log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_3] SVR yo'q, qo'shilmadi. requestId=${requestId}`);
+                }
+                if (request.type === 'SET' && request.excel_total != null && request.excel_total !== undefined) {
+                    const totalAbs = Math.round(Math.abs(Number(request.excel_total)));
+                    const totalFormatted = totalAbs.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                    cashierReverseText += `\nQarzdorlik umumiy summasi: ${totalFormatted} so'm`;
+                    log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_3] SET so'rov – umumiy summa qo'shildi. requestId=${requestId}, excel_total=${request.excel_total}, formatted=${totalFormatted} so'm`);
+                } else {
+                    log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_3] Umumiy summa qo'shilmadi: type=${request.type}, excel_total=${request.excel_total}. requestId=${requestId}`);
+                }
+                log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_3] Teskari jarayon xabari to'liq: So'rov ID, Brend, Filial, SVR${request.type === 'SET' ? ', umumiy summa' : ''}. requestId=${requestId}`);
+                log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] Teskari jarayon xabari tayyor: linklar tavsif matnida (Telegraph emas). requestId=${requestId}, hasLink1=${!!originalTelegraphUrl}, hasLink2=${!!differencesTelegraphUrl}`);
                 
                 const bot = getBot();
-                    await bot.sendMessage(leadersGroup.telegram_group_id, reverseMessageForLeaders, { parse_mode: 'HTML' });
-                    log.info(`[CASHIER] [SEND_DEBT_RESPONSE] Rahbarlar guruhiga teskari jarayon xabari yuborildi: requestId=${requestId}, groupId=${leadersGroup.telegram_group_id}, hasDifferencesTelegraphUrl=${!!differencesTelegraphUrl}`);
+                try {
+                    await bot.editMessageText(cashierReverseText, {
+                        chat_id: chatId,
+                        message_id: cashierMessageId,
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '📤 Yuborish', callback_data: `cashier_confirm_reverse_${requestId}` },
+                                    { text: '🔄 Qaytadan kiritish', callback_data: `cashier_reenter_debt_${requestId}` }
+                                ]
+                            ]
+                        }
+                    });
+                    log.info(`[CASHIER] [SEND_DEBT_RESPONSE] Kassir xabari yangilandi: Link 1 + Link 2, tugmalar Yuborish/Qaytadan kiritish. requestId=${requestId}, messageId=${cashierMessageId}`);
+                    log.info(`[QARZI_BOR] [KASSIR] Farq topildi → Kassirda pending: Yuborish (teskari yuborish) yoki Qaytadan kiritish. requestId=${requestId}.`);
+                } catch (editErr) {
+                    log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] Kassir xabarini yangilab bo'lmadi, teskari jarayon darhol bajariladi: requestId=${requestId}, error=${editErr.message}`);
+                    // Xabar edit xatolik bo'lsa – darhol teskari jarayonni bajarish
+                    await completeCashierReverseProcess(requestId, userId, chatId, {
+                        telegraph_url: originalTelegraphUrl,
+                        differences_telegraph_url: differencesTelegraphUrl,
+                        total_difference: comparisonResult.totalDifference,
+                        differences_count: comparisonResult.differences.length
+                    });
+                    return;
                 }
                 
-                // Final guruhga yuborish
-                if (finalGroup) {
-                    // ✅ Final guruh uchun 'final' roli bilan chaqirish (agent ro'yxati yoki link)
-                    const approvalMessageForFinal = await formatRequestMessageWithApprovals(fullRequest, db, 'final', debtData);
-                    let reverseMessageForFinal = `⚠️ <b>Teskari jarayon</b>\n\n` +
-                        `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
-                    
-                    // ✅ Telegraph link qo'shish (faqat total bo'lsa, yoki farqlar sahifasi)
-                    if (differencesTelegraphUrl) {
-                        reverseMessageForFinal += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
-                    }
-                    reverseMessageForFinal += approvalMessageForFinal;
-                    
-                    const bot = getBot();
-                    await bot.sendMessage(finalGroup.telegram_group_id, reverseMessageForFinal, { parse_mode: 'HTML' });
-                    log.info(`[CASHIER] [SEND_DEBT_RESPONSE] Final guruhga teskari jarayon xabari yuborildi: requestId=${requestId}, groupId=${finalGroup.telegram_group_id}, hasDifferencesTelegraphUrl=${!!differencesTelegraphUrl}`);
-                }
+                // State: pending_confirm_reverse – "Yuborish" bosilguncha kutamiz
+                stateManager.updateUserState(userId, STATES.PENDING_CONFIRM_REVERSE, {
+                    request_id: requestId,
+                    telegraph_url: originalTelegraphUrl,
+                    differences_telegraph_url: differencesTelegraphUrl,
+                    total_difference: comparisonResult.totalDifference,
+                    differences_count: comparisonResult.differences.length,
+                    cashier_message_id: cashierMessageId
+                });
+                log.info(`[CASHIER] [SEND_DEBT_RESPONSE] State: pending_confirm_reverse. requestId=${requestId}. Yuborish yoki Qaytadan kiritish kutilmoqda.`);
+                return;
             }
             
-            // Status yangilash - teskari jarayon
-            await db('debt_requests')
-                .where('id', requestId)
-                .update({
-                    status: 'REVERSED_BY_CASHIER',
-                    current_approver_id: null,
-                    current_approver_type: null
-                });
-            
-            // Tasdiqlashni log qilish (solishtirish ma'lumotlari bilan)
-            await logApproval(requestId, user.id, 'cashier', 'reversed', {
-                excel_file_path: debtData.excel_file_path,
-                image_file_path: debtData.image_file_path,
+            // Kassir xabari topilmadi – eski mantiq: darhol teskari jarayon (menejer, rahbarlar, final)
+            await completeCashierReverseProcess(requestId, userId, chatId, {
+                telegraph_url: originalTelegraphUrl,
+                differences_telegraph_url: differencesTelegraphUrl,
                 total_difference: comparisonResult.totalDifference,
-                differences_count: comparisonResult.differences.length,
-                comparison_result: comparisonResult
-            });
-            
-            log.info(`[CASHIER] [SEND_DEBT_RESPONSE] Teskari jarayon yakunlandi: requestId=${requestId}, cashierId=${user.id}`);
-            return; // Teskari jarayon - operatorga yuborilmaydi
+                differences_count: comparisonResult.differences.length
+            }, debtData);
+            return;
         }
         
         // Telegraph sahifa yaratish (agar Excel ma'lumotlari mavjud bo'lsa va teskari jarayon bo'lmasa)
@@ -2912,9 +3005,10 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     excel_headers: debtData.excel_headers,
                     excel_columns: debtData.excel_columns,
                     total_amount: debtData.total_amount,
-                    isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                    isForCashier: false,
+                    logContext: 'cashier'
                 });
-                
+                if (telegraphUrl) log.info(`[QARZI_BOR] [KASSIR] Telegraph sahifa yaratildi (qarzdorlik ro'yxati): ${telegraphUrl}`);
                 if (!telegraphUrl) {
                     log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratilmadi (null qaytdi): requestId=${requestId}`);
                     // Qayta urinish
@@ -2930,7 +3024,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                             excel_headers: debtData.excel_headers,
                             excel_columns: debtData.excel_columns,
                             total_amount: debtData.total_amount,
-                            isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                            isForCashier: false,
+                            logContext: 'cashier'
                         });
                     } catch (retryError) {
                         log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -2951,7 +3046,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                         excel_headers: debtData.excel_headers,
                         excel_columns: debtData.excel_columns,
                         total_amount: debtData.total_amount,
-                        isForCashier: false // ✅ Hammaga bir xil: klient bo'yicha format
+                        isForCashier: false,
+                        logContext: 'cashier'
                     });
                 } catch (retryError) {
                     log.error(`[CASHIER] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -2984,6 +3080,99 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
             return;
         }
         
+        // [REJA_1] NORMAL so'rov: qiymat kiritilgach darhol yubormaslik, Yuborish/Qaytadan kiritish ko'rsatish
+        if (!isSetRequest) {
+            log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL so'rov – qiymat kiritilgan, darhol yuborilmaydi. requestId=${requestId}, inputType=${debtData.input_type || 'nomalum'}, totalAmount=${debtData.total_amount ?? 'yo\'q'}`);
+            
+            // Link yaratish (NORMAL uchun Telegraph sahifa – qarzdorlik ma'lumotlari)
+            let normalTelegraphUrl = null;
+            const { createDebtDataPage } = require('../../../utils/telegraph.js');
+            const monthName = require('../../../utils/dateHelper.js').getPreviousMonthName();
+            let excelDataForPage = debtData.excel_data;
+            let excelHeadersForPage = debtData.excel_headers;
+            let excelColumnsForPage = debtData.excel_columns;
+            if (!excelDataForPage || !Array.isArray(excelDataForPage) || excelDataForPage.length === 0) {
+                const totalAbs = debtData.total_amount != null ? Math.abs(Number(debtData.total_amount)) : 0;
+                excelDataForPage = [{ 'Agent': 'Umumiy', 'Summa': totalAbs }];
+                excelHeadersForPage = ['Agent', 'Summa'];
+                excelColumnsForPage = { agent: 0, summa: 1 };
+                log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL: faqat umumiy summa, minimal excel_data yaratildi. totalAmount=${debtData.total_amount}`);
+            }
+            try {
+                normalTelegraphUrl = await createDebtDataPage({
+                    request_uid: request.request_uid,
+                    brand_name: request.brand_name,
+                    filial_name: request.filial_name,
+                    svr_name: request.svr_name,
+                    month_name: monthName,
+                    extra_info: request.extra_info,
+                    excel_data: excelDataForPage,
+                    excel_headers: excelHeadersForPage,
+                    excel_columns: excelColumnsForPage,
+                    total_amount: debtData.total_amount != null ? debtData.total_amount : request.excel_total,
+                    logContext: 'cashier_normal_reja1'
+                });
+                log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL Telegraph sahifa yaratildi: requestId=${requestId}, url=${normalTelegraphUrl ? 'mavjud' : 'yo\'q'}`);
+            } catch (telegraphErr) {
+                log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL Telegraph sahifa yaratilmadi: requestId=${requestId}, error=${telegraphErr.message}`);
+            }
+            
+            const { getMessageIdsForRequest } = require('../utils/messageTracker.js');
+            const cashierMessageIds = getMessageIdsForRequest(chatId, requestId);
+            const cashierMessageId = cashierMessageIds.length > 0 ? cashierMessageIds[0] : null;
+            log.debug(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] Kassir xabar ID lari: requestId=${requestId}, count=${cashierMessageIds.length}, cashierMessageId=${cashierMessageId}`);
+            
+            if (cashierMessageId) {
+                let normalReverseText = `⚠️ <b>Qarzdorlik ma'lumotlari kiritildi</b>\n\n`;
+                normalReverseText += `So'rov ID: ${request.request_uid} | Brend: ${request.brand_name} | Filial: ${request.filial_name}`;
+                if (request.svr_name) {
+                    normalReverseText += ` | SVR: ${request.svr_name}`;
+                }
+                const totalVal = debtData.total_amount != null ? debtData.total_amount : request.excel_total;
+                if (totalVal != null && totalVal !== undefined) {
+                    const totalFormatted = Math.round(Math.abs(Number(totalVal))).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+                    normalReverseText += `\nQarzdorlik umumiy summasi: ${totalFormatted} so'm`;
+                }
+                if (normalTelegraphUrl) {
+                    normalReverseText += `\n\n🔗 <a href="${normalTelegraphUrl}">Qarzdorlik ro'yxati</a>\n\n`;
+                }
+                normalReverseText += `Yuborish yoki Qaytadan kiritish tugmalarini bosing.`;
+                
+                const bot = getBot();
+                try {
+                    await bot.editMessageText(normalReverseText, {
+                        chat_id: chatId,
+                        message_id: cashierMessageId,
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '📤 Yuborish', callback_data: `cashier_confirm_reverse_${requestId}` },
+                                    { text: '🔄 Qaytadan kiritish', callback_data: `cashier_reenter_debt_${requestId}` }
+                                ]
+                            ]
+                        }
+                    });
+                    log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL kassir xabari yangilandi: Yuborish/Qaytadan kiritish tugmalari. requestId=${requestId}, messageId=${cashierMessageId}`);
+                } catch (editErr) {
+                    log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL kassir xabarini yangilab bo'lmadi: requestId=${requestId}, error=${editErr.message}`);
+                }
+            } else {
+                log.warn(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL kassir xabar ID topilmadi. requestId=${requestId}`);
+            }
+            
+            stateManager.updateUserState(userId, STATES.PENDING_CONFIRM_REVERSE, {
+                request_id: requestId,
+                telegraph_url: normalTelegraphUrl,
+                differences_telegraph_url: null,
+                total_difference: debtData.total_amount,
+                differences_count: 0,
+                cashier_message_id: cashierMessageId
+            });
+            log.info(`[CASHIER] [SEND_DEBT_RESPONSE] [REJA_1] NORMAL state: pending_confirm_reverse. requestId=${requestId}. Yuborish yoki Qaytadan kiritish kutilmoqda. Menejerga darhol xabar ketmaydi.`);
+            return;
+        }
+        
         // QARDIKLIK JAVOBI HAR DOIM TESKARI JARAYON - menejerga va rahbarlarga yuboriladi
         // Operatorga yuborilmaydi (faqat tasdiqlash operatorga yuboriladi)
         const recipients = [];
@@ -3013,6 +3202,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
         }
         
         // Xabarlarni yuborish
+        log.info(`[QARZI_BOR] [KASSIR] 4. "Qarzi bor" xabari yuboriladi. Kimga: ${recipients.map(r => r.role).join(', ') || 'menejer'}.`);
         const bot = getBot();
         for (const recipient of recipients) {
             try {
@@ -3020,6 +3210,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     parse_mode: 'HTML'
                 });
                 log.info(`[CASHIER] [SEND_DEBT_RESPONSE] Qardorlik javobi yuborildi: requestId=${requestId}, recipient=${recipient.role}, recipientId=${recipient.id}`);
+                log.info(`[QARZI_BOR] [KASSIR] Xabar yuborildi → ${recipient.role === 'manager' ? 'Menejer (shaxsiy)' : recipient.role === 'leaders' ? 'Rahbarlar guruhi' : recipient.role}. chatId=${recipient.id}`);
             } catch (error) {
                 log.error(`Error sending debt response to ${recipient.role}:`, error);
             }
@@ -3033,6 +3224,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                 current_approver_id: null,
                 current_approver_type: null
             });
+        log.info(`[QARZI_BOR] [KASSIR] 5. Status yangilandi → DEBT_FOUND_BY_CASHIER. requestId=${requestId}. Jarayon tugadi.`);
         
         // Tasdiqlashni log qilish
         const logData = {
@@ -3098,6 +3290,199 @@ async function sendRequestToOperator(request, operatorChatId) {
 }
 
 /**
+ * "Yuborish" tugmasi – teskari jarayonni tasdiqlash (menejer, rahbarlar, final ga yuborish)
+ */
+async function handleCashierConfirmReverse(query, bot) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const data = query.data || '';
+    const requestId = parseInt(data.replace('cashier_confirm_reverse_', ''), 10);
+    if (!requestId) {
+        await bot.answerCallbackQuery(query.id);
+        return;
+    }
+    try {
+        const state = stateManager.getUserState(userId);
+        if (!state || state.state !== STATES.PENDING_CONFIRM_REVERSE || !state.data || state.data.request_id !== requestId) {
+            log.info(`[CASHIER] [CONFIRM_REVERSE] [REJA_2] State tekshiruvdan o'tmadi: state=${state?.state}, requestId=${requestId}, stateRequestId=${state?.data?.request_id}`);
+            await bot.answerCallbackQuery(query.id, { text: '❌ So\'rov topilmadi yoki allaqachon yuborilgan.' });
+            return;
+        }
+        const requestRow = await db('debt_requests').where('id', requestId).select('type').first();
+        const isNormal = requestRow && requestRow.type !== 'SET';
+        log.info(`[CASHIER] [CONFIRM_REVERSE] [REJA_2] Yuborish bosildi: requestId=${requestId}, type=${requestRow?.type || 'nomalum'}, ${isNormal ? 'NORMAL – menejer edit, final guruhga xabar' : 'SET – menejer, rahbarlar, final'}. completeCashierReverseProcess chaqiriladi.`);
+        await completeCashierReverseProcess(requestId, userId, chatId, state.data);
+        stateManager.clearUserState(userId);
+        const cashierMsgId = state.data.cashier_message_id;
+        if (cashierMsgId) {
+            try {
+                await bot.editMessageReplyMarkup(
+                    { inline_keyboard: [] },
+                    { chat_id: chatId, message_id: cashierMsgId }
+                );
+            } catch (e) {
+                log.debug(`[CASHIER] [CONFIRM_REVERSE] Tugmalarni olib tashlashda xatolik (ignored): ${e.message}`);
+            }
+        }
+        await bot.answerCallbackQuery(query.id, { text: '✅ Teskari jarayon yuborildi.' });
+        log.info(`[CASHIER] [CONFIRM_REVERSE] Yuborish bajarildi: requestId=${requestId}, userId=${userId}`);
+    } catch (error) {
+        log.error(`[CASHIER] [CONFIRM_REVERSE] Xatolik: ${error.message}`);
+        await bot.answerCallbackQuery(query.id, { text: '❌ Xatolik yuz berdi.' });
+    }
+}
+
+/**
+ * "Qaytadan kiritish" tugmasi – qiymatlarni qayta kiritish, namuna qayta yuboriladi
+ */
+async function handleCashierReenterDebt(query, bot) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const data = query.data || '';
+    const requestId = parseInt(data.replace('cashier_reenter_debt_', ''), 10);
+    if (!requestId) {
+        await bot.answerCallbackQuery(query.id);
+        return;
+    }
+    try {
+        const state = stateManager.getUserState(userId);
+        // Tugmalar joylashgan xabar – "Qaytadan kiritish" shu xabarda; state bo‘lmasa ham query.message.message_id yoki messageTracker dan foydalanamiz
+        let cashierMessageId = state && state.data && state.data.cashier_message_id ? state.data.cashier_message_id : null;
+        if (!cashierMessageId && query.message && query.message.message_id) {
+            cashierMessageId = query.message.message_id;
+            log.info(`[CASHIER] [REENTER_DEBT] cashier_message_id state dan yo‘q, callback xabar ID ishlatildi: requestId=${requestId}, messageId=${cashierMessageId}`);
+        }
+        if (!cashierMessageId) {
+            const { getMessageIdsForRequest } = require('../../../utils/messageTracker.js');
+            const ids = getMessageIdsForRequest(chatId, requestId);
+            if (ids.length > 0) cashierMessageId = ids[0];
+        }
+        // [REJA_3/REJA_4] Chat toza: NORMAL va SET ikkalasida ham state tozalamasdan oldin oraliq xabarlarni o‘chirish (namuna, xatolik, foydalanuvchi)
+        if (state && state.data) {
+            const messagesToDelete = [];
+            if (state.data.first_example_message_id) messagesToDelete.push(state.data.first_example_message_id);
+            if (state.data.last_error_message_id) messagesToDelete.push(state.data.last_error_message_id);
+            if (state.data.user_message_id) messagesToDelete.push(state.data.user_message_id);
+            for (const msgId of messagesToDelete) {
+                try {
+                    await bot.deleteMessage(chatId, msgId);
+                    log.info(`[CASHIER] [REENTER_DEBT] [REJA_3] Chat toza: oraliq xabar o‘chirildi: messageId=${msgId}, requestId=${requestId}`);
+                } catch (e) {
+                    log.debug(`[CASHIER] [REENTER_DEBT] [REJA_3] Xabar o‘chirishda xatolik (ignored): messageId=${msgId}, error=${e.message}`);
+                }
+            }
+        }
+        stateManager.clearUserState(userId);
+
+        const request = await db('debt_requests')
+            .join('debt_brands', 'debt_requests.brand_id', 'debt_brands.id')
+            .join('debt_branches', 'debt_requests.branch_id', 'debt_branches.id')
+            .join('debt_svrs', 'debt_requests.svr_id', 'debt_svrs.id')
+            .select(
+                'debt_requests.*',
+                'debt_brands.name as brand_name',
+                'debt_branches.name as filial_name',
+                'debt_svrs.name as svr_name'
+            )
+            .where('debt_requests.id', requestId)
+            .first();
+        if (!request) {
+            await bot.answerCallbackQuery(query.id, { text: '❌ So\'rov topilmadi.' });
+            return;
+        }
+
+        if (cashierMessageId) {
+            let telegraphUrl = request.telegraph_url || null;
+            let excelData = request.excel_data;
+            let excelHeaders = request.excel_headers;
+            let excelColumns = request.excel_columns;
+            if (typeof excelData === 'string' && excelData) try { excelData = JSON.parse(excelData); } catch (_) {}
+            if (typeof excelHeaders === 'string' && excelHeaders) try { excelHeaders = JSON.parse(excelHeaders); } catch (_) {}
+            if (typeof excelColumns === 'string' && excelColumns) try { excelColumns = JSON.parse(excelColumns); } catch (_) {}
+            if (!telegraphUrl && excelData && Array.isArray(excelData) && excelData.length > 0 && excelColumns) {
+                try {
+                    const { createDebtDataPage } = require('../../../utils/telegraph.js');
+                    telegraphUrl = await createDebtDataPage({
+                        request_uid: request.request_uid,
+                        brand_name: request.brand_name,
+                        filial_name: request.filial_name,
+                        svr_name: request.svr_name,
+                        month_name: require('../../../utils/dateHelper.js').getPreviousMonthName(),
+                        extra_info: request.extra_info,
+                        excel_data: excelData,
+                        excel_headers: excelHeaders,
+                        excel_columns: excelColumns,
+                        total_amount: request.excel_total,
+                        logContext: 'cashier_reenter'
+                    });
+                } catch (_) {}
+            }
+            const message = request.type === 'SET'
+                ? formatSetRequestMessage({
+                    brand_name: request.brand_name,
+                    filial_name: request.filial_name,
+                    svr_name: request.svr_name,
+                    extra_info: request.extra_info,
+                    request_uid: request.request_uid,
+                    excel_data: excelData,
+                    excel_headers: excelHeaders,
+                    excel_columns: excelColumns,
+                    excel_total: request.excel_total,
+                    is_for_cashier: true,
+                    telegraph_url: telegraphUrl
+                })
+                : formatNormalRequestMessage({
+                    brand_name: request.brand_name,
+                    filial_name: request.filial_name,
+                    svr_name: request.svr_name,
+                    request_uid: request.request_uid
+                });
+            try {
+                await bot.editMessageText(message, {
+                    chat_id: chatId,
+                    message_id: cashierMessageId,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '✅ Tasdiqlash', callback_data: `cashier_approve_${requestId}` },
+                                { text: '⚠️ Qarzi bor', callback_data: `cashier_debt_${requestId}` }
+                            ]
+                        ]
+                    }
+                });
+            } catch (editErr) {
+                log.debug(`[CASHIER] [REENTER_DEBT] Asosiy xabarni qayta yozishda xatolik (ignored): ${editErr.message}`);
+            }
+        }
+
+        // State allaqachon tozalandi – yangi state setUserState bilan yaratish kerak (updateUserState mavjud state talab qiladi)
+        stateManager.setUserState(userId, stateManager.CONTEXTS.DEBT_APPROVAL, STATES.AUTO_DETECT_DEBT_INPUT, {
+            request_id: requestId,
+            brand_id: request.brand_id,
+            branch_id: request.branch_id,
+            svr_id: request.svr_id,
+            svr_name: request.svr_name
+        });
+        const fullExampleMessage = await buildFullExampleMessage(requestId, request.svr_name);
+        const exampleMsg = await bot.sendMessage(chatId, fullExampleMessage, { parse_mode: 'HTML' });
+        const newState = stateManager.getUserState(userId);
+        if (newState && newState.data) {
+            newState.data.first_example_message_id = exampleMsg.message_id;
+            stateManager.updateUserState(userId, newState.state, newState.data);
+        }
+        const { trackMessage, MESSAGE_TYPES } = require('../utils/messageTracker.js');
+        trackMessage(chatId, exampleMsg.message_id, MESSAGE_TYPES.USER_MESSAGE, true);
+
+        await bot.answerCallbackQuery(query.id, { text: '🔄 Qaytadan kiriting.' });
+        log.info(`[CASHIER] [REENTER_DEBT] Qaytadan kiritish: requestId=${requestId}, namuna yuborildi.`);
+    } catch (error) {
+        log.error(`[CASHIER] [REENTER_DEBT] Xatolik: ${error.message}`);
+        await bot.answerCallbackQuery(query.id, { text: '❌ Xatolik yuz berdi.' });
+    }
+}
+
+/**
  * Kutilinayotgan so'rovlarni ko'rsatish (knopka bosilganda)
  */
 async function handleShowPendingRequests(query, bot) {
@@ -3133,6 +3518,9 @@ module.exports = {
     handleAutoDetectDebtInput, // ✅ Avtomatik tanib olish
     handleCopyAgent, // ✅ Agent nomini nusxalash
     sendDebtResponse,
+    completeCashierReverseProcess,
+    handleCashierConfirmReverse,
+    handleCashierReenterDebt,
     sendRequestToOperator,
     handleShowPendingRequests,
     STATES

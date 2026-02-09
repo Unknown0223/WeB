@@ -124,7 +124,7 @@ function getRequestMessagesToCleanup(chatId, keepMessageIds = []) {
             }
         }
         
-        log.info(`[MSG_TRACKER] [GET_REQUEST_MESSAGES] Pending so'rov xabarlari topildi: chatId=${chatId}, count=${messagesToCleanup.length}, keepCount=${keepMessageIds.length}`);
+        log.debug(`[MSG_TRACKER] [GET_REQUEST_MESSAGES] Pending so'rov xabarlari topildi: chatId=${chatId}, count=${messagesToCleanup.length}, keepCount=${keepMessageIds.length}`);
         return messagesToCleanup;
     } catch (error) {
         log.error(`[MSG_TRACKER] [GET_REQUEST_MESSAGES] Xatolik: chatId=${chatId}, error=${error.message}`, error);
@@ -311,6 +311,34 @@ function getTrackedMessages(chatId) {
 }
 
 /**
+ * Berilgan so'rov (requestId) uchun chat'dagi xabar ID'larini olish
+ * Kassir so'rov kartochkasi (Tasdiqlash / Qarzi bor) ni edit qilish uchun ishlatiladi
+ * @param {number} chatId - Chat ID
+ * @param {number} requestId - So'rov ID
+ * @returns {Array<number>} - Message ID'lar (message_id bo'yicha o'sish tartibida – eng eski birinchi)
+ */
+function getMessageIdsForRequest(chatId, requestId) {
+    try {
+        const chatMessages = trackedMessages.get(chatId);
+        if (!chatMessages) {
+            return [];
+        }
+        const ids = [];
+        for (const [messageId, data] of chatMessages.entries()) {
+            if (data.requestId === requestId) {
+                ids.push(messageId);
+            }
+        }
+        ids.sort((a, b) => a - b);
+        log.debug(`[MSG_TRACKER] getMessageIdsForRequest: chatId=${chatId}, requestId=${requestId}, count=${ids.length}`);
+        return ids;
+    } catch (error) {
+        log.error(`[MSG_TRACKER] getMessageIdsForRequest xatolik: chatId=${chatId}, requestId=${requestId}, error=${error.message}`);
+        return [];
+    }
+}
+
+/**
  * Belirli turdagi xabarlarni olish
  * @param {number} chatId - Chat ID
  * @param {string} type - Xabar turi
@@ -341,6 +369,7 @@ module.exports = {
     trackMessage,
     getMessagesToCleanup,
     getRequestMessagesToCleanup,
+    getMessageIdsForRequest,
     untrackMessage,
     clearChatMessages,
     markAsStatusMessage,

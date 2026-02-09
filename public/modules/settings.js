@@ -8,12 +8,12 @@ import { showToast, showConfirmDialog } from './utils.js';
 
 export function renderTableSettings() {
     const { columns = [], locations = [] } = state.settings.app_settings || {};
-    
+
     // Zamonaviy card-style render
     const renderModernList = (containerId, items, emptyText, icon = '📋') => {
         const container = document.getElementById(containerId);
         if (!container) return;
-        
+
         // Ustunlar, Brendlar, Filiallar uchun grid ko'rinish va scroll
         const gridContainers = ['columns-settings', 'brands-settings', 'locations-settings'];
         if (gridContainers.includes(containerId)) {
@@ -21,12 +21,12 @@ export function renderTableSettings() {
         } else {
             container.classList.remove('settings-grid');
         }
-        
+
         if (items.length === 0) {
             container.innerHTML = `<p style="color: rgba(255,255,255,0.5); text-align: center; padding: 20px;">${emptyText}</p>`;
             return;
         }
-        
+
         container.innerHTML = items.map((item, index) => `
             <div class="modern-setting-item" data-name="${item}" style="
                 background: linear-gradient(135deg, rgba(79, 172, 254, 0.1), rgba(0, 242, 254, 0.05));
@@ -55,10 +55,10 @@ export function renderTableSettings() {
             </div>
         `).join('');
     };
-    
+
     renderModernList('columns-settings', columns, 'Ustunlar yo\'q', '📊');
     renderModernList('locations-settings', locations, 'Filiallar yo\'q', '📍');
-    
+
     // Foydalanuvchilar uchun filiallar ro'yxati
     if (DOM.locationsCheckboxList) {
         DOM.locationsCheckboxList.innerHTML = locations.map(loc => `
@@ -68,7 +68,7 @@ export function renderTableSettings() {
             </label>
         `).join('');
     }
-    
+
     if (DOM.approvalLocationsCheckboxList) {
         DOM.approvalLocationsCheckboxList.innerHTML = locations.map(loc => `
             <label class="checkbox-item">
@@ -95,7 +95,7 @@ export function renderTelegramSettings() {
     if (DOM.telegramEnabledToggle) {
         DOM.telegramEnabledToggle.checked = telegramEnabled;
     }
-    
+
     // Telegram sozlamalarini ko'rsatish
     if (DOM.botTokenInput) DOM.botTokenInput.value = state.settings.telegram_bot_token || '';
     if (DOM.botUsernameInput) DOM.botUsernameInput.value = state.settings.telegram_bot_username || '';
@@ -103,23 +103,34 @@ export function renderTelegramSettings() {
     if (DOM.adminChatIdInput) DOM.adminChatIdInput.value = state.settings.telegram_admin_chat_id || '';
 }
 
+export function renderFeedbackBotSettings() {
+    const feedbackEnabled = state.settings.feedback_bot_enabled === 'true' || state.settings.feedback_bot_enabled === true;
+    if (DOM.feedbackBotEnabledToggle) {
+        DOM.feedbackBotEnabledToggle.checked = feedbackEnabled;
+    }
+
+    if (DOM.feedbackBotTokenInput) {
+        DOM.feedbackBotTokenInput.value = state.settings.feedback_bot_token || '';
+    }
+}
+
 export async function renderKpiSettings() {
     const kpiSettings = state.settings.kpi_settings || { latePenalty: 0.5, editPenalty: 0.3, roleFilter: [] };
     if (DOM.latePenaltyInput) DOM.latePenaltyInput.value = kpiSettings.latePenalty;
     if (DOM.editPenaltyInput) DOM.editPenaltyInput.value = kpiSettings.editPenalty;
-    
+
     // Rol tanlash knopkasini yangilash
     updateKpiRoleButton(kpiSettings.roleFilter || []);
-    
+
     // Rol tanlash knopkasi event listener
     const roleSelectBtn = document.getElementById('kpi-role-select-btn');
     if (roleSelectBtn) {
         roleSelectBtn.onclick = () => openKpiRoleSelectModal();
     }
-    
+
     // Modal event listenerlar
     setupKpiRoleModalListeners();
-    
+
     // Feather iconlarni yangilash
     setTimeout(() => {
         if (typeof feather !== 'undefined') feather.replace();
@@ -132,12 +143,12 @@ function updateKpiRoleButton(selectedRoles) {
     const textSpan = document.getElementById('kpi-role-select-text');
     const countSpan = document.getElementById('kpi-role-select-count');
     const hiddenInput = document.getElementById('kpi-settings-role-filter');
-    
+
     if (!btn || !textSpan || !countSpan || !hiddenInput) return;
-    
+
     // Hidden inputni yangilash
     hiddenInput.value = JSON.stringify(selectedRoles);
-    
+
     if (selectedRoles.length === 0) {
         textSpan.textContent = 'Rollarni tanlang';
         countSpan.style.display = 'none';
@@ -157,17 +168,17 @@ async function openKpiRoleSelectModal() {
     const roleList = document.getElementById('kpi-role-list');
     const kpiSettings = state.settings.kpi_settings || { roleFilter: [] };
     const selectedRoles = kpiSettings.roleFilter || [];
-    
+
     if (!modal || !roleList) return;
-    
+
     try {
         const res = await safeFetch('/api/roles');
         if (!res || !res.ok) throw new Error('Rollarni yuklab bo\'lmadi');
-        
+
         const data = await res.json();
         const roles = data.roles || [];
         const uniqueRoles = [...new Set(roles.map(r => r.role_name))].sort();
-        
+
         // Rol ro'yxatini yaratish
         roleList.innerHTML = '';
         uniqueRoles.forEach(role => {
@@ -184,10 +195,10 @@ async function openKpiRoleSelectModal() {
             roleItem.onclick = () => toggleKpiRole(role, roleItem);
             roleList.appendChild(roleItem);
         });
-        
+
         // Modalni ochish
         modal.classList.remove('hidden');
-        
+
         // Feather iconlarni yangilash
         setTimeout(() => {
             if (typeof feather !== 'undefined') feather.replace();
@@ -229,13 +240,13 @@ function closeKpiRoleModal() {
 // Rol tanlash/yechish
 function toggleKpiRole(role, element) {
     const isSelected = element.classList.contains('selected');
-    
+
     if (isSelected) {
         element.classList.remove('selected');
     } else {
         element.classList.add('selected');
     }
-    
+
     // Iconni yangilash
     const icon = element.querySelector('i[data-feather]');
     if (icon) {
@@ -250,47 +261,47 @@ function setupKpiRoleModalListeners() {
     const cancelBtn = document.getElementById('kpi-role-modal-cancel');
     const saveBtn = document.getElementById('kpi-role-modal-save');
     const closeBtn = modal?.querySelector('.close-modal-btn');
-    
+
     // Bekor qilish
     if (cancelBtn) {
         cancelBtn.onclick = () => {
             closeKpiRoleModal();
         };
     }
-    
+
     // Yopish
     if (closeBtn) {
         closeBtn.onclick = () => {
             closeKpiRoleModal();
         };
     }
-    
+
     // Saqlash
     if (saveBtn) {
         saveBtn.onclick = () => {
             const roleList = document.getElementById('kpi-role-list');
             if (!roleList) return;
-            
+
             const selectedRoles = Array.from(roleList.querySelectorAll('.kpi-role-item.selected'))
                 .map(item => item.dataset.role)
                 .filter(Boolean);
-            
+
             // State yangilash
             if (!state.settings.kpi_settings) {
                 state.settings.kpi_settings = {};
             }
             state.settings.kpi_settings.roleFilter = selectedRoles;
-            
+
             // Knopkani yangilash
             updateKpiRoleButton(selectedRoles);
-            
+
             // Modalni yopish
             if (modal) modal.classList.add('hidden');
-            
+
             showToast('Rollar tanlovi saqlandi. KPI sozlamalarini saqlashni unutmang!', 'success');
         };
     }
-    
+
     // Modal tashqarisiga bosilganda yopish
     if (modal) {
         modal.onclick = (e) => {
@@ -303,38 +314,38 @@ function setupKpiRoleModalListeners() {
 
 export async function saveTableSettings() {
     const newSettings = { columns: [], locations: [] };
-    document.querySelectorAll('#columns-settings .setting-name').forEach(span => 
+    document.querySelectorAll('#columns-settings .setting-name').forEach(span =>
         newSettings.columns.push(span.textContent)
     );
-    document.querySelectorAll('#locations-settings .setting-name').forEach(span => 
+    document.querySelectorAll('#locations-settings .setting-name').forEach(span =>
         newSettings.locations.push(span.textContent)
     );
-    
+
     try {
-        const res = await safeFetch('/api/settings', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ key: 'app_settings', value: newSettings }) 
+        const res = await safeFetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'app_settings', value: newSettings })
         });
         if (!res || !res.ok) throw new Error((await res.json()).message);
-        
+
         showToast("Jadval sozlamalari saqlandi!");
         state.settings.app_settings = newSettings;
         renderTableSettings();
-    } catch (error) { 
-        showToast(error.message, true); 
+    } catch (error) {
+        showToast(error.message, true);
     }
 }
 
 export async function handleTableSettingsActions(e) {
     const button = e.target.closest('button');
     if (!button) return;
-    
+
     // O'chirish tugmasi
     if (button.classList.contains('delete-item-btn')) {
         const name = button.dataset.name;
         const container = button.closest('.settings-list');
-        
+
         const confirmed = await showConfirmDialog({
             title: '🗑️ O\'chirish',
             message: `"${name}" ni o'chirmoqchimisiz?`,
@@ -343,9 +354,9 @@ export async function handleTableSettingsActions(e) {
             type: 'warning',
             icon: 'trash-2'
         });
-        
+
         if (!confirmed) return;
-        
+
         if (container.id === 'columns-settings') {
             const { columns = [] } = state.settings.app_settings || {};
             const index = columns.indexOf(name);
@@ -353,7 +364,7 @@ export async function handleTableSettingsActions(e) {
                 columns.splice(index, 1);
                 await saveAppSettings({ ...state.settings.app_settings, columns });
             }
-        // rows-settings bo'limi olib tashlandi
+            // rows-settings bo'limi olib tashlandi
         } else if (container.id === 'locations-settings') {
             const { locations = [] } = state.settings.app_settings || {};
             const index = locations.indexOf(name);
@@ -374,16 +385,16 @@ export async function saveTelegramSettings() {
     if (isSavingTelegramSettings) {
         return;
     }
-    
+
     // Telegram aktiv/neaktiv holatini saqlash
     const telegramEnabled = DOM.telegramEnabledToggle ? DOM.telegramEnabledToggle.checked : false;
-    
+
     // Input elementlarini xavfsiz o'qish
     const botToken = DOM.botTokenInput ? DOM.botTokenInput.value.trim() : '';
     const botUsername = DOM.botUsernameInput ? DOM.botUsernameInput.value.trim() : '';
     const groupId = DOM.groupIdInput ? DOM.groupIdInput.value.trim() : '';
     const adminChatId = DOM.adminChatIdInput ? DOM.adminChatIdInput.value.trim() : '';
-    
+
     const settingsToSave = [
         { key: 'telegram_enabled', value: telegramEnabled ? 'true' : 'false' },
         { key: 'telegram_bot_token', value: botToken },
@@ -391,37 +402,37 @@ export async function saveTelegramSettings() {
         { key: 'telegram_group_id', value: groupId },
         { key: 'telegram_admin_chat_id', value: adminChatId }
     ];
-    
+
     try {
         isSavingTelegramSettings = true;
-        
+
         // Save button'ni disable qilish
         if (DOM.saveTelegramBtn) {
             DOM.saveTelegramBtn.disabled = true;
             const originalText = DOM.saveTelegramBtn.innerHTML;
             DOM.saveTelegramBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saqlanmoqda...';
-            
+
             try {
                 for (const setting of settingsToSave) {
                     // Bo'sh string'lar ham yuborilishi mumkin (tozalash uchun)
-                    const res = await safeFetch('/api/settings', { 
-                        method: 'POST', 
-                        headers: { 'Content-Type': 'application/json' }, 
-                        body: JSON.stringify(setting) 
+                    const res = await safeFetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(setting)
                     });
                     if (!res || !res.ok) {
                         const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
                         throw new Error(errorData.message || 'Sozlamalarni saqlashda xatolik');
                     }
                 }
-                
+
                 // State yangilash
                 state.settings.telegram_enabled = telegramEnabled ? 'true' : 'false';
                 state.settings.telegram_bot_token = botToken;
                 state.settings.telegram_bot_username = botUsername;
                 state.settings.telegram_group_id = groupId;
                 state.settings.telegram_admin_chat_id = adminChatId;
-                
+
                 showToast("Telegram sozlamalari saqlandi!");
             } finally {
                 // Button'ni qayta tiklash
@@ -431,47 +442,98 @@ export async function saveTelegramSettings() {
         } else {
             // Agar button topilmasa, oddiy saqlash
             for (const setting of settingsToSave) {
-                const res = await safeFetch('/api/settings', { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' }, 
-                    body: JSON.stringify(setting) 
+                const res = await safeFetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(setting)
                 });
                 if (!res || !res.ok) {
                     const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
                     throw new Error(errorData.message || 'Sozlamalarni saqlashda xatolik');
                 }
             }
-            
+
             // State yangilash
             state.settings.telegram_enabled = telegramEnabled ? 'true' : 'false';
             state.settings.telegram_bot_token = botToken;
             state.settings.telegram_bot_username = botUsername;
             state.settings.telegram_group_id = groupId;
             state.settings.telegram_admin_chat_id = adminChatId;
-            
+
             showToast("Telegram sozlamalari saqlandi!");
         }
-    } catch (error) { 
+    } catch (error) {
         console.error('Telegram sozlamalarini saqlashda xatolik:', error);
-        showToast(`Sozlamalarni saqlashda xatolik: ${error.message}`, true); 
+        showToast(`Sozlamalarni saqlashda xatolik: ${error.message}`, true);
     } finally {
         isSavingTelegramSettings = false;
     }
 }
 
+let isSavingFeedbackSettings = false;
+
+export async function saveFeedbackBotSettings() {
+    if (isSavingFeedbackSettings) return;
+
+    const feedbackEnabled = DOM.feedbackBotEnabledToggle ? DOM.feedbackBotEnabledToggle.checked : false;
+    const botToken = DOM.feedbackBotTokenInput ? DOM.feedbackBotTokenInput.value.trim() : '';
+
+    const settingsToSave = [
+        { key: 'feedback_bot_enabled', value: feedbackEnabled ? 'true' : 'false' },
+        { key: 'feedback_bot_token', value: botToken }
+    ];
+
+    try {
+        isSavingFeedbackSettings = true;
+
+        if (DOM.saveFeedbackBotBtn) {
+            DOM.saveFeedbackBotBtn.disabled = true;
+            const originalText = DOM.saveFeedbackBotBtn.innerHTML;
+            DOM.saveFeedbackBotBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saqlanmoqda...';
+
+            try {
+                for (const setting of settingsToSave) {
+                    const res = await safeFetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(setting)
+                    });
+                    if (!res || !res.ok) {
+                        const errorData = await res.json().catch(() => ({ message: 'Noma\'lum xatolik' }));
+                        throw new Error(errorData.message || 'Sozlamalarni saqlashda xatolik');
+                    }
+                }
+
+                state.settings.feedback_bot_enabled = feedbackEnabled ? 'true' : 'false';
+                state.settings.feedback_bot_token = botToken;
+
+                showToast("Feedback bot sozlamalari saqlandi!");
+            } finally {
+                DOM.saveFeedbackBotBtn.disabled = false;
+                DOM.saveFeedbackBotBtn.innerHTML = originalText;
+            }
+        }
+    } catch (error) {
+        console.error('Feedback bot sozlamalarini saqlashda xatolik:', error);
+        showToast(`Sozlamalarni saqlashda xatolik: ${error.message}`, true);
+    } finally {
+        isSavingFeedbackSettings = false;
+    }
+}
+
 export async function saveGeneralSettings() {
     const limit = DOM.paginationLimitInput.value;
-    
+
     try {
-        const res = await safeFetch('/api/settings', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ key: 'pagination_limit', value: limit }) 
+        const res = await safeFetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'pagination_limit', value: limit })
         });
         if (!res || !res.ok) throw new Error((await res.json()).message);
         showToast("Umumiy sozlamalar saqlandi!");
-    } catch (error) { 
-        showToast(error.message, true); 
+    } catch (error) {
+        showToast(error.message, true);
     }
 }
 
@@ -511,10 +573,10 @@ export async function saveKpiSettings() {
     };
 
     try {
-        const res = await safeFetch('/api/settings', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ key: 'kpi_settings', value: settings }) 
+        const res = await safeFetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'kpi_settings', value: settings })
         });
         if (!res || !res.ok) {
             const errorData = await res.json().catch(() => ({ message: 'Xatolik yuz berdi' }));
@@ -522,8 +584,8 @@ export async function saveKpiSettings() {
         }
         showToast("KPI sozlamalari muvaffaqiyatli saqlandi!");
         state.settings.kpi_settings = settings;
-    } catch (error) { 
-        showToast(error.message, 'error'); 
+    } catch (error) {
+        showToast(error.message, 'error');
     }
 }
 
@@ -532,59 +594,59 @@ export async function createRoleFromSettings() {
     const requiresLocationsCheckbox = document.getElementById('new-role-requires-locations-settings');
     const requiresBrandsCheckbox = document.getElementById('new-role-requires-brands-settings');
     const createBtn = document.getElementById('create-role-settings-btn');
-    
+
     if (!roleNameInput || !requiresLocationsCheckbox || !requiresBrandsCheckbox || !createBtn) {
         return;
     }
-    
+
     const roleName = roleNameInput.value.trim().toLowerCase();
     const requiresLocations = requiresLocationsCheckbox.checked;
     const requiresBrands = requiresBrandsCheckbox.checked;
-    
+
     // Validation
     if (!roleName) {
         showToast('Rol nomini kiriting!', 'error');
         roleNameInput.focus();
         return;
     }
-    
+
     if (!/^[a-z_]+$/.test(roleName)) {
         showToast('Rol nomida faqat lotin harflari va pastki chiziq (_) bo\'lishi mumkin!', 'error');
         roleNameInput.focus();
         return;
     }
-    
+
     createBtn.disabled = true;
     createBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Yaratilmoqda...';
-    
+
     try {
         const response = await safeFetch('/api/roles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 role_name: roleName,
                 requires_locations: requiresLocations,
                 requires_brands: requiresBrands
             })
         });
-        
+
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ message: 'Xatolik yuz berdi' }));
             throw new Error(errorData.message);
         }
-        
+
         showToast('Yangi rol muvaffaqiyatli yaratildi!', 'success');
-        
+
         // Clear form
         roleNameInput.value = '';
         requiresLocationsCheckbox.checked = false;
         requiresBrandsCheckbox.checked = false;
-        
+
         // Reload roles if roles module is loaded
         if (window.loadRoles) {
             await window.loadRoles();
         }
-        
+
     } catch (error) {
         showToast(error.message || 'Rol yaratishda xatolik!', 'error');
     } finally {
@@ -610,7 +672,7 @@ export function openColumnModal(columnName = null) {
     const modal = document.getElementById('column-modal');
     const title = document.getElementById('column-modal-title');
     const input = document.getElementById('column-name-input');
-    
+
     if (columnName) {
         title.textContent = 'Ustunni Tahrirlash';
         input.value = columnName;
@@ -618,7 +680,7 @@ export function openColumnModal(columnName = null) {
         title.textContent = 'Yangi Ustun';
         input.value = '';
     }
-    
+
     modal.classList.remove('hidden');
     setTimeout(() => input.focus(), 100);
     feather.replace();
@@ -632,14 +694,14 @@ export function closeColumnModal() {
 export async function saveColumn() {
     const input = document.getElementById('column-name-input');
     const newName = input.value.trim();
-    
+
     if (!newName) {
         showToast('Ustun nomini kiriting', 'error');
         return;
     }
-    
+
     const { columns = [] } = state.settings.app_settings || {};
-    
+
     if (editingColumn) {
         // Tahrirlash
         const index = columns.indexOf(editingColumn);
@@ -654,7 +716,7 @@ export async function saveColumn() {
         }
         columns.push(newName);
     }
-    
+
     await saveAppSettings({ ...state.settings.app_settings, columns });
     closeColumnModal();
 }
@@ -667,7 +729,7 @@ export function openRowModal(rowName = null) {
     const modal = document.getElementById('row-modal');
     const title = document.getElementById('row-modal-title');
     const input = document.getElementById('row-name-input');
-    
+
     if (rowName) {
         title.textContent = 'Qatorni Tahrirlash';
         input.value = rowName;
@@ -675,7 +737,7 @@ export function openRowModal(rowName = null) {
         title.textContent = 'Yangi Qator';
         input.value = '';
     }
-    
+
     modal.classList.remove('hidden');
     setTimeout(() => input.focus(), 100);
     feather.replace();
@@ -689,14 +751,14 @@ export function closeRowModal() {
 export async function saveRow() {
     const input = document.getElementById('row-name-input');
     const newName = input.value.trim();
-    
+
     if (!newName) {
         showToast('Qator nomini kiriting', 'error');
         return;
     }
-    
+
     const { rows = [] } = state.settings.app_settings || {};
-    
+
     if (editingRow) {
         // Tahrirlash
         const index = rows.indexOf(editingRow);
@@ -711,7 +773,7 @@ export async function saveRow() {
         }
         rows.push(newName);
     }
-    
+
     await saveAppSettings({ ...state.settings.app_settings, rows });
     closeRowModal();
 }
@@ -724,7 +786,7 @@ export function openLocationModal(locationName = null) {
     const modal = document.getElementById('location-modal');
     const title = document.getElementById('location-modal-title');
     const input = document.getElementById('location-name-input');
-    
+
     if (locationName) {
         title.textContent = 'Filialni Tahrirlash';
         input.value = locationName;
@@ -732,7 +794,7 @@ export function openLocationModal(locationName = null) {
         title.textContent = 'Yangi Filial';
         input.value = '';
     }
-    
+
     modal.classList.remove('hidden');
     setTimeout(() => input.focus(), 100);
     feather.replace();
@@ -746,14 +808,14 @@ export function closeLocationModal() {
 export async function saveLocation() {
     const input = document.getElementById('location-name-input');
     const newName = input.value.trim();
-    
+
     if (!newName) {
         showToast('Filial nomini kiriting', 'error');
         return;
     }
-    
+
     const { locations = [] } = state.settings.app_settings || {};
-    
+
     if (editingLocation) {
         // Tahrirlash
         const index = locations.indexOf(editingLocation);
@@ -768,7 +830,7 @@ export async function saveLocation() {
         }
         locations.push(newName);
     }
-    
+
     await saveAppSettings({ ...state.settings.app_settings, locations });
     closeLocationModal();
 }
@@ -781,12 +843,12 @@ async function saveAppSettings(newSettings) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: 'app_settings', value: newSettings })
         });
-        
+
         if (!res || !res.ok) {
             const error = await res.json();
             throw new Error(error.message);
         }
-        
+
         state.settings.app_settings = newSettings;
         renderTableSettings();
         showToast('Saqlandi', 'success');

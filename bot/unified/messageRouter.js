@@ -41,13 +41,13 @@ function routeMessage(msg, user, stateManager) {
     // 1. Registration state tekshirish (eng yuqori prioritet)
     const state = stateManager.getUserState(userId);
     if (state && state.context === CONTEXTS.REGISTRATION) {
-        log.info(`[MSG_ROUTER] Message routed to REGISTRATION: userId=${userId}, state=${state.state}, hasDocument=${hasDocument}`);
+        log.debug(`[MSG_ROUTER] Message routed to REGISTRATION: userId=${userId}, state=${state.state}, hasDocument=${hasDocument}`);
         return CONTEXTS.REGISTRATION;
     }
     
     // 2. Debt-approval state tekshirish
     if (state && state.context === CONTEXTS.DEBT_APPROVAL) {
-        log.info(`[MSG_ROUTER] Message routed to DEBT_APPROVAL: userId=${userId}, state=${state.state}, hasDocument=${hasDocument}, requestId=${state.data?.request_id}`);
+        log.debug(`[MSG_ROUTER] Message routed to DEBT_APPROVAL: userId=${userId}, state=${state.state}, hasDocument=${hasDocument}, requestId=${state.data?.request_id}`);
         return CONTEXTS.DEBT_APPROVAL;
     }
     

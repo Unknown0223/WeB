@@ -558,7 +558,7 @@ function formatDifferencesToTelegraphNodes(data) {
 async function createDifferencesPage(data) {
     try {
         const title = `Farqlar - ${data.request_uid || 'N/A'}`;
-        log.info(`[TELEGRAPH] Farqlar sahifasini yaratish boshlanmoqda: requestUID=${data.request_uid}, differencesCount=${data.differences?.length || 0}`);
+        log.debug(`[TELEGRAPH] Farqlar sahifasini yaratish boshlanmoqda: requestUID=${data.request_uid}, differencesCount=${data.differences?.length || 0}`);
         
         // Telegraph Node array formatiga o'tkazish
         const telegraphContent = formatDifferencesToTelegraphNodes(data);
@@ -570,7 +570,7 @@ async function createDifferencesPage(data) {
         });
         
         if (pageUrl) {
-            log.info(`[TELEGRAPH] ✅ Farqlar sahifasi muvaffaqiyatli yaratildi: requestUID=${data.request_uid}, URL=${pageUrl}`);
+            log.debug(`[TELEGRAPH] ✅ Farqlar sahifasi muvaffaqiyatli yaratildi: requestUID=${data.request_uid}, URL=${pageUrl}`);
         }
         
         return pageUrl;
@@ -589,7 +589,13 @@ async function createDifferencesPage(data) {
  */
 async function createDebtDataPage(data) {
     try {
-        const { request_id, request_uid, isForCashier = false } = data;
+        const { request_id, request_uid, isForCashier = false, logContext } = data;
+        const sahifaFormati = isForCashier ? 'agent_boyicha' : 'klient_boyicha';
+        
+        // [REJA_2] Kassir uchun agent bo'yicha sahifa – batafsil log
+        if (isForCashier || logContext === 'cashier_reversed_link1_agent') {
+            log.info(`[TELEGRAPH] [REJA_2] createDebtDataPage: kassir uchun agent bo'yicha sahifa. request_uid=${request_uid || 'n/a'}, request_id=${request_id ?? 'n/a'}, sahifa_formati=${sahifaFormati}, logContext=${logContext || 'n/a'}`);
+        }
         
         const title = `Muddat uzaytirilishi kerak bo'lgan klientlar - ${request_uid || 'N/A'}`;
         
@@ -602,7 +608,15 @@ async function createDebtDataPage(data) {
             author_name: 'Debt Approval System'
         });
         
-        if (pageUrl && request_id) {
+        // Batafsil log: link qanday ro'yxat (agent/klient) va kim uchun yaratilgani
+        log.debug(`[LINK_SAHIFA] createDebtDataPage: kim_uchun=${logContext || 'nomalum'}, request_uid=${request_uid || 'n/a'}, request_id=${request_id ?? 'n/a'}, sahifa_formati=${sahifaFormati}, url=${pageUrl ? pageUrl.substring(0, 55) + '...' : 'null'}`);
+        if (isForCashier && pageUrl) {
+            log.info(`[TELEGRAPH] [REJA_2] Agent bo'yicha sahifa yaratildi (kassir Link 1). request_uid=${request_uid || 'n/a'}, url_mavjud=true`);
+        }
+        
+        // Kassir uchun agent sahifasi – DB ga yozilmasin (boshqalar klient bo'yicha URL ishlatadi)
+        const skipDbUpdate = logContext === 'cashier_reversed_link1_agent';
+        if (pageUrl && request_id && !skipDbUpdate) {
             // ✅ MUHIM: Yangi yaratilgan URL'ni database'ga saqlash
             try {
                 const db = require('../db.js').db;
@@ -613,6 +627,8 @@ async function createDebtDataPage(data) {
                 // Database xatoliklarini silent qilamiz (ixtiyoriy)
                 log.debug(`[TELEGRAPH] Database'ga URL saqlashda xatolik (ignored): ${dbError.message}`);
             }
+        } else if (skipDbUpdate && pageUrl) {
+            log.debug(`[TELEGRAPH] [REJA_2] Kassir agent sahifasi DB ga yozilmadi (faqat kassir xabarida ishlatiladi). request_id=${request_id}`);
         }
         // Agar sahifa yaratilmagan bo'lsa, log qilmaymiz (ixtiyoriy xizmat)
         

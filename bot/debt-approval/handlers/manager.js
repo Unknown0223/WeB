@@ -1562,7 +1562,7 @@ async function handleSendRequest(query, bot) {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
     
-    log.info(`[SEND_REQUEST] So'rov yuborish boshlanmoqda. UserId: ${userId}, ChatId: ${chatId}`);
+    log.debug(`[SEND_REQUEST] So'rov yuborish boshlanmoqda. UserId: ${userId}, ChatId: ${chatId}`);
     
     try {
         await bot.answerCallbackQuery(query.id, { text: 'Yuborilmoqda...' });
@@ -1626,8 +1626,8 @@ async function handleSendRequest(query, bot) {
         
         // SET Type so'rov uchun fayl va qiymat tekshiruvi
         if (state.data.type === 'SET') {
-            log.info(`[SEND_REQUEST] 🔍 SET so'rov tekshiruvi boshlanmoqda: userId=${userId}`);
-            log.info(`[SEND_REQUEST] 📊 State ma'lumotlari: type=${state.data.type}, excel_data=${!!state.data.excel_data}, excel_data_type=${typeof state.data.excel_data}, excel_total=${state.data.excel_total}, excel_headers=${!!state.data.excel_headers}, excel_columns=${!!state.data.excel_columns}`);
+            log.debug(`[SEND_REQUEST] 🔍 SET so'rov tekshiruvi boshlanmoqda: userId=${userId}`);
+            log.debug(`[SEND_REQUEST] 📊 State ma'lumotlari: type=${state.data.type}, excel_data=${!!state.data.excel_data}, excel_data_type=${typeof state.data.excel_data}, excel_total=${state.data.excel_total}, excel_headers=${!!state.data.excel_headers}, excel_columns=${!!state.data.excel_columns}`);
             
             // Fayl yuborilganligini tekshirish
             const hasExcelData = state.data.excel_data && 
@@ -1635,7 +1635,7 @@ async function handleSendRequest(query, bot) {
                  Array.isArray(state.data.excel_data) ? state.data.excel_data.length > 0 : 
                  Object.keys(state.data.excel_data || {}).length > 0);
             
-            log.info(`[SEND_REQUEST] 📋 Excel fayl tekshiruvi: hasExcelData=${hasExcelData}`);
+            log.debug(`[SEND_REQUEST] 📋 Excel fayl tekshiruvi: hasExcelData=${hasExcelData}`);
             
             if (!hasExcelData) {
                 log.warn(`[SEND_REQUEST] ❌ SET so'rov uchun Excel fayl yuborilmagan: userId=${userId}, excel_data=${state.data.excel_data}, excel_data_type=${typeof state.data.excel_data}`);
@@ -1652,7 +1652,7 @@ async function handleSendRequest(query, bot) {
             const excelTotal = state.data.excel_total;
             const isValidTotal = excelTotal !== null && excelTotal !== undefined && excelTotal !== 0 && !isNaN(excelTotal) && Math.abs(excelTotal) > 0;
             
-            log.info(`[SEND_REQUEST] 💰 Qiymat tekshiruvi: excelTotal=${excelTotal}, isValidTotal=${isValidTotal}`);
+            log.debug(`[SEND_REQUEST] 💰 Qiymat tekshiruvi: excelTotal=${excelTotal}, isValidTotal=${isValidTotal}`);
             
             if (!isValidTotal) {
                 log.warn(`[SEND_REQUEST] ❌ SET so'rov uchun fayldagi qiymat 0 yoki noto'g'ri: userId=${userId}, excelTotal=${excelTotal}, type=${typeof excelTotal}`);
@@ -1666,7 +1666,7 @@ async function handleSendRequest(query, bot) {
                 return;
             }
             
-            log.info(`[SEND_REQUEST] ✅ SET so'rov tekshiruvi muvaffaqiyatli o'tdi: userId=${userId}, excelTotal=${excelTotal}`);
+            log.debug(`[SEND_REQUEST] ✅ SET so'rov tekshiruvi muvaffaqiyatli o'tdi: userId=${userId}, excelTotal=${excelTotal}`);
         }
         
         // Foydalanuvchi ma'lumotlarini olish
@@ -1791,6 +1791,8 @@ async function handleSendRequest(query, bot) {
                 
                 // SET so'rov uchun rahbarlar guruhiga yuborish
                 if (requestType === 'SET') {
+                    log.debug(`[SEND_REQUEST] 🔍 SET so'rov uchun rahbarlar guruhini topish boshlanmoqda. RequestId: ${requestId}, RequestUID: ${requestUID}`);
+                    
                     log.debug(`[SEND_REQUEST] SET.1. Rahbarlar guruhini qidirish...`);
                     const leadersGroup = await db('debt_groups')
                         .where('group_type', 'leaders')
@@ -1798,7 +1800,7 @@ async function handleSendRequest(query, bot) {
                         .first();
                     
                     if (leadersGroup) {
-                        log.info(`[SEND_REQUEST] SET.1.1. ✅ Rahbarlar guruhi topildi: GroupId=${leadersGroup.telegram_group_id}, GroupName=${leadersGroup.name}`);
+                        log.debug(`[SEND_REQUEST] SET.1.1. ✅ Rahbarlar guruhi topildi: GroupId=${leadersGroup.telegram_group_id}, GroupName=${leadersGroup.name}`);
                         
                         log.debug(`[SEND_REQUEST] SET.2. So'rov ma'lumotlarini olish: requestId=${requestId}`);
                         const fullRequest = await db('debt_requests')
@@ -1815,13 +1817,12 @@ async function handleSendRequest(query, bot) {
                             .first();
                         
                         if (fullRequest) {
-                            log.info(`[MANAGER] [SEND_REQUEST] 📤 SET so'rov yuborilmoqda: requestId=${requestId}, requestUID=${requestUID}, brand=${fullRequest.brand_name}, branch=${fullRequest.filial_name}, svr=${fullRequest.svr_name}, managerId=${user.id}, managerName=${user.fullname}`);
-                            log.info(`[SEND_REQUEST] SET.2.1. ✅ So'rov ma'lumotlari topildi: RequestUID=${fullRequest.request_uid}, Brand=${fullRequest.brand_name}, Branch=${fullRequest.filial_name}, SVR=${fullRequest.svr_name}`);
+                            log.debug(`[SEND_REQUEST] SET.2.1. ✅ So'rov ma'lumotlari topildi: RequestUID=${fullRequest.request_uid}, Brand=${fullRequest.brand_name}, Branch=${fullRequest.filial_name}, SVR=${fullRequest.svr_name}`);
                             
-                            log.info(`[SEND_REQUEST] SET.3. Rahbarlar guruhiga xabar yuborilmoqda: groupId=${leadersGroup.telegram_group_id}, requestId=${requestId}`);
+                            log.debug(`[SEND_REQUEST] SET.3. Rahbarlar guruhiga xabar yuborilmoqda: groupId=${leadersGroup.telegram_group_id}, requestId=${requestId}`);
                             const { showSetRequestToLeaders } = require('./leader.js');
                             await showSetRequestToLeaders(fullRequest, leadersGroup.telegram_group_id);
-                            log.info(`[MANAGER] [SEND_REQUEST] ✅ SET so'rov rahbarlar guruhiga yuborildi: requestId=${requestId}, requestUID=${requestUID}, groupId=${leadersGroup.telegram_group_id}, chatType=group`);
+                            log.debug(`[SEND_REQUEST] SET.4. ✅ SET so'rov rahbarlar guruhiga muvaffaqiyatli yuborildi: GroupId=${leadersGroup.telegram_group_id}, RequestId=${requestId}, RequestUID=${requestUID}`);
                         } else {
                             log.error(`[SEND_REQUEST] SET.2.1. ❌ SET so'rov topilmadi: RequestId=${requestId}`);
                         }
@@ -1833,7 +1834,7 @@ async function handleSendRequest(query, bot) {
                 
                 // NORMAL so'rov uchun kassir tayinlash
                 if (requestType === 'NORMAL' && state.data.branch_id) {
-                    log.info(`[SEND_REQUEST] 🔍 Oddiy so'rov uchun kassirlarni topish boshlanmoqda. BranchId: ${state.data.branch_id}, BrandId: ${state.data.brand_id}`);
+                    log.debug(`[SEND_REQUEST] 🔍 Oddiy so'rov uchun kassirlarni topish boshlanmoqda. BranchId: ${state.data.branch_id}, BrandId: ${state.data.brand_id}`);
                     
                     // 0. Barcha kassirlarga qaysi filiallar bog'langanini ko'rsatish
                     log.debug(`[SEND_REQUEST] 0. Barcha kassirlarga bog'langan filiallarni tekshirish...`);
@@ -1867,14 +1868,14 @@ async function handleSendRequest(query, bot) {
                         });
                         const allBranches = Array.from(allBranchesMap.entries()).map(([id, name]) => ({ id, name }));
                         
-                        log.info(`[SEND_REQUEST] 0.1. Kassir: ${cashier.fullname} (ID: ${cashier.id}), Role: ${cashier.role}, TelegramChatId: ${cashier.telegram_chat_id ? 'mavjud' : 'yo\'q'}, Bog'langan filiallar: ${allBranches.length} ta`, 
+                        log.debug(`[SEND_REQUEST] 0.1. Kassir: ${cashier.fullname} (ID: ${cashier.id}), Role: ${cashier.role}, TelegramChatId: ${cashier.telegram_chat_id ? 'mavjud' : 'yo\'q'}, Bog'langan filiallar: ${allBranches.length} ta`, 
                             allBranches.map(b => ({ id: b.id, name: b.name }))
                         );
                         
                         // Agar shu filialga bog'langan bo'lsa, alohida log
                         const hasThisBranch = allBranches.some(b => b.id === state.data.branch_id);
                         if (hasThisBranch) {
-                            log.info(`[SEND_REQUEST] 0.2. ✅ Kassir ${cashier.fullname} (ID: ${cashier.id}) shu filialga (BranchId: ${state.data.branch_id}) bog'langan!`);
+                            log.debug(`[SEND_REQUEST] 0.2. ✅ Kassir ${cashier.fullname} (ID: ${cashier.id}) shu filialga (BranchId: ${state.data.branch_id}) bog'langan!`);
                         }
                     }
                     
@@ -1884,7 +1885,7 @@ async function handleSendRequest(query, bot) {
                         .select('id', 'name')
                         .first();
                     
-                    log.info(`[SEND_REQUEST] 0.5. Joriy filial ma'lumotlari: BranchId=${state.data.branch_id}, BranchName=${currentBranchInfo?.name || 'topilmadi'}`);
+                    log.debug(`[SEND_REQUEST] 0.5. Joriy filial ma'lumotlari: BranchId=${state.data.branch_id}, BranchName=${currentBranchInfo?.name || 'topilmadi'}`);
                     
                     // 1. Filialga biriktirilgan kassirlarni topish
                     // 1.1. debt_cashiers jadvalidan (eski usul) - avval ID bo'yicha
@@ -1926,7 +1927,7 @@ async function handleSendRequest(query, bot) {
                                     'users.role'
                                 );
                             
-                            log.info(`[SEND_REQUEST] 1.1.1. Filial nomi bo'yicha debt_cashiers jadvalidan topildi: ${branchCashiersFromTable.length} ta`, 
+                            log.debug(`[SEND_REQUEST] 1.1.1. Filial nomi bo'yicha debt_cashiers jadvalidan topildi: ${branchCashiersFromTable.length} ta`, 
                                 branchCashiersFromTable.map(c => ({ 
                                     user_id: c.user_id, 
                                     fullname: c.fullname, 
@@ -1937,7 +1938,7 @@ async function handleSendRequest(query, bot) {
                         }
                     }
                     
-                    log.info(`[SEND_REQUEST] 1.1. debt_cashiers jadvalidan topildi: ${branchCashiersFromTable.length} ta`, 
+                    log.debug(`[SEND_REQUEST] 1.1. debt_cashiers jadvalidan topildi: ${branchCashiersFromTable.length} ta`, 
                         branchCashiersFromTable.map(c => ({ 
                             user_id: c.user_id, 
                             fullname: c.fullname, 
@@ -2011,7 +2012,7 @@ async function handleSendRequest(query, bot) {
                                 )
                                 .groupBy('debt_user_branches.user_id', 'users.telegram_chat_id', 'users.fullname', 'users.username', 'users.role');
                             
-                            log.info(`[SEND_REQUEST] 1.2.2. Filial nomi bo'yicha debt_user_branches jadvalidan topildi: ${branchCashiersFromBindings.length} ta`, 
+                            log.debug(`[SEND_REQUEST] 1.2.2. Filial nomi bo'yicha debt_user_branches jadvalidan topildi: ${branchCashiersFromBindings.length} ta`, 
                                 branchCashiersFromBindings.map(c => ({ 
                                     user_id: c.user_id, 
                                     fullname: c.fullname, 
@@ -2022,7 +2023,7 @@ async function handleSendRequest(query, bot) {
                         }
                     }
                     
-                    log.info(`[SEND_REQUEST] 1.2. debt_user_branches jadvalidan topildi: ${branchCashiersFromBindings.length} ta`, 
+                    log.debug(`[SEND_REQUEST] 1.2. debt_user_branches jadvalidan topildi: ${branchCashiersFromBindings.length} ta`, 
                         branchCashiersFromBindings.map(c => ({ 
                             user_id: c.user_id, 
                             fullname: c.fullname, 
@@ -2040,7 +2041,7 @@ async function handleSendRequest(query, bot) {
                     });
                     const branchCashiers = Array.from(branchCashiersMap.values());
                     
-                    log.info(`[SEND_REQUEST] 1.3. Filialga biriktirilgan kassirlar (birlashtirilgan): ${branchCashiers.length} ta`, 
+                    log.debug(`[SEND_REQUEST] 1.3. Filialga biriktirilgan kassirlar (birlashtirilgan): ${branchCashiers.length} ta`, 
                         branchCashiers.map(c => ({ 
                             user_id: c.user_id, 
                             fullname: c.fullname, 
@@ -2131,7 +2132,7 @@ async function handleSendRequest(query, bot) {
                         });
                         
                         const allCashiers = Array.from(allCashiersMap.values());
-                        log.info(`[SEND_REQUEST] 4.1. ✅ Jami kassirlar (dublikatsiz): ${allCashiers.length} ta`, allCashiers.map(c => ({ 
+                        log.debug(`[SEND_REQUEST] 4.1. ✅ Jami kassirlar (dublikatsiz): ${allCashiers.length} ta`, allCashiers.map(c => ({ 
                             id: c.user_id, 
                             name: c.fullname, 
                             reason: c.reason,
@@ -2144,7 +2145,7 @@ async function handleSendRequest(query, bot) {
                         const assignedCashier = await assignCashierToRequest(state.data.branch_id, requestId);
                         
                         if (assignedCashier) {
-                            log.info(`[SEND_REQUEST] 5.1. ✅ So'rovga tayinlangan kassir: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, TelegramChatId=${assignedCashier.telegram_chat_id ? 'mavjud' : 'yo\'q'}`);
+                            log.debug(`[SEND_REQUEST] 5.1. ✅ So'rovga tayinlangan kassir: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, TelegramChatId=${assignedCashier.telegram_chat_id ? 'mavjud' : 'yo\'q'}`);
                         } else {
                             log.warn(`[SEND_REQUEST] 5.1. ❌ So'rovga kassir tayinlanmadi: branchId=${state.data.branch_id}`);
                         }
@@ -2158,8 +2159,8 @@ async function handleSendRequest(query, bot) {
                         } else if (!assignedCashier.telegram_chat_id) {
                             log.warn(`[SEND_REQUEST] 6.1. ⚠️ Kassir tayinlangan (ID: ${assignedCashier.user_id}, Name: ${assignedCashier.fullname}), lekin telegram_chat_id yo'q. Xabar yuborilmadi.`);
                         } else {
-                            log.info(`[SEND_REQUEST] 6.1. Kassir tayinlangan va telegram_chat_id mavjud. Xabar yuborishga tayyorlanmoqda...`);
-                            log.info(`[SEND_REQUEST] 6.2. Kassir ma'lumotlari: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, TelegramChatId=${assignedCashier.telegram_chat_id}`);
+                            log.debug(`[SEND_REQUEST] 6.1. Kassir tayinlangan va telegram_chat_id mavjud. Xabar yuborishga tayyorlanmoqda...`);
+                            log.debug(`[SEND_REQUEST] 6.2. Kassir ma'lumotlari: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, TelegramChatId=${assignedCashier.telegram_chat_id}`);
                             
                             const cashierHandlers = require('./cashier.js');
                             const fullRequest = await db('debt_requests')
@@ -2178,14 +2179,14 @@ async function handleSendRequest(query, bot) {
                             if (!fullRequest) {
                                 log.error(`[SEND_REQUEST] 6.3. ❌ So'rov topilmadi: requestId=${requestId}`);
                             } else {
-                                log.info(`[SEND_REQUEST] 6.3. So'rov topildi: RequestId=${requestId}, RequestUID=${fullRequest.request_uid}, BranchName=${fullRequest.filial_name}`);
+                                log.debug(`[SEND_REQUEST] 6.3. So'rov topildi: RequestId=${requestId}, RequestUID=${fullRequest.request_uid}, BranchName=${fullRequest.filial_name}`);
                                 
                                 try {
                                     const cashierUser = await db('users').where('id', assignedCashier.user_id).first();
                                     if (!cashierUser) {
                                         log.error(`[SEND_REQUEST] 6.4. ❌ Kassir foydalanuvchi topilmadi: CashierId=${assignedCashier.user_id}`);
                                     } else {
-                                        log.info(`[SEND_REQUEST] 6.4. Kassir foydalanuvchi topildi: CashierId=${cashierUser.id}, Fullname=${cashierUser.fullname}, Status=${cashierUser.status}, TelegramChatId=${cashierUser.telegram_chat_id ? 'mavjud' : 'yo\'q'}`);
+                                        log.debug(`[SEND_REQUEST] 6.4. Kassir foydalanuvchi topildi: CashierId=${cashierUser.id}, Fullname=${cashierUser.fullname}, Status=${cashierUser.status}, TelegramChatId=${cashierUser.telegram_chat_id ? 'mavjud' : 'yo\'q'}`);
                                         
                                         // Kassirning boshqa faol so'rovlarini tekshirish (pendingCount hisoblash uchun)
                                         // MUHIM: Joriy so'rovni (requestId) istisno qilish kerak
@@ -2202,10 +2203,10 @@ async function handleSendRequest(query, bot) {
                                         
                                         // HAR DOIM so'rovni yuborish (navbatli ko'rsatish uchun)
                                         // pendingCount = boshqa pending so'rovlar soni (joriy so'rovni istisno qilgan holda)
-                                        log.info(`[SEND_REQUEST] 6.5. showRequestToCashier funksiyasini chaqirish boshlanmoqda... (pendingCount=${pendingCount})`);
+                                        log.debug(`[SEND_REQUEST] 6.5. showRequestToCashier funksiyasini chaqirish boshlanmoqda... (pendingCount=${pendingCount})`);
                                         await cashierHandlers.showRequestToCashier(fullRequest, assignedCashier.telegram_chat_id, cashierUser, pendingCount);
                                         notifiedCashiersCount++;
-                                        log.info(`[SEND_REQUEST] 6.6. ✅ Kassirga xabar muvaffaqiyatli yuborildi: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, ChatId=${assignedCashier.telegram_chat_id}, RequestUID=${fullRequest.request_uid}, pendingCount=${pendingCount}`);
+                                        log.debug(`[SEND_REQUEST] 6.6. ✅ Kassirga xabar muvaffaqiyatli yuborildi: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, ChatId=${assignedCashier.telegram_chat_id}, RequestUID=${fullRequest.request_uid}, pendingCount=${pendingCount}`);
                                     }
                                 } catch (notifyError) {
                                     log.error(`[SEND_REQUEST] 6.7. ❌ Kassirga xabar yuborishda xatolik: CashierId=${assignedCashier.user_id}, Name=${assignedCashier.fullname}, ChatId=${assignedCashier.telegram_chat_id}, Error=${notifyError.message}`, notifyError);
@@ -2214,7 +2215,7 @@ async function handleSendRequest(query, bot) {
                             }
                         }
                         
-                        log.info(`[SEND_REQUEST] 6.8. 📊 Xabar yuborish natijasi: Jami kassirlar=${allCashiers.length} ta, Tayinlangan=${assignedCashier ? 1 : 0} ta, Yuborildi=${notifiedCashiersCount} ta`);
+                        log.debug(`[SEND_REQUEST] 6.8. 📊 Xabar yuborish natijasi: Jami kassirlar=${allCashiers.length} ta, Tayinlangan=${assignedCashier ? 1 : 0} ta, Yuborildi=${notifiedCashiersCount} ta`);
                         
                         if (assignedCashier) {
                             cashierAssigned = true;
@@ -2284,7 +2285,7 @@ async function handleSendRequest(query, bot) {
                 
                 // Status xabari yuborilgandan keyin tozalash
                 try {
-                    log.info(`[SEND_REQUEST] [CLEANUP] Cleanup boshlanmoqda: chatId=${chatId}, userId=${userId}, statusMessageId=${query.message.message_id}`);
+                    log.debug(`[SEND_REQUEST] [CLEANUP] Cleanup boshlanmoqda: chatId=${chatId}, userId=${userId}, statusMessageId=${query.message.message_id}`);
                     
                     // Kichik kutish - so'rov rahborga/kassirga yuborilishini kutish
                     await new Promise(resolve => setTimeout(resolve, 500));
@@ -2297,7 +2298,7 @@ async function handleSendRequest(query, bot) {
                         { maxMessages: 50, delayBetween: 100, silent: true }
                     );
                     
-                    log.info(`[SEND_REQUEST] [CLEANUP] ✅ Tozalash yakunlandi: deleted=${cleanupResult.deleted}, errors=${cleanupResult.errors}`);
+                    log.debug(`[SEND_REQUEST] [CLEANUP] ✅ Tozalash yakunlandi: deleted=${cleanupResult.deleted}, errors=${cleanupResult.errors}`);
                 } catch (cleanupError) {
                     // Silent fail - cleanup ixtiyoriy
                     log.warn(`[SEND_REQUEST] [CLEANUP] Cleanup xatolik (ixtiyoriy):`, cleanupError.message);
@@ -2305,7 +2306,7 @@ async function handleSendRequest(query, bot) {
                 
             // State'ni tozalash
             stateManager.clearUserState(userId);
-            log.info(`[SEND_REQUEST] ✅ State tozalandi`);
+            log.debug(`[SEND_REQUEST] ✅ State tozalandi`);
         } catch (error) {
             log.error(`[SEND_REQUEST] ❌ So'rov yaratishda xatolik:`, error);
             throw error;

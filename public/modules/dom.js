@@ -82,6 +82,9 @@ export const DOM = {
     botUsernameInput: null,
     groupIdInput: null,
     adminChatIdInput: null,
+    feedbackBotEnabledToggle: null,
+    feedbackBotTokenInput: null,
+    saveFeedbackBotBtn: null,
     paginationLimitInput: null,
     saveGeneralSettingsBtn: null,
     saveKpiSettingsBtn: null,
@@ -234,7 +237,7 @@ function initDOM() {
     DOM.sessionsModal = document.getElementById('sessions-modal');
     DOM.sessionsModalTitle = document.getElementById('sessions-modal-title');
     DOM.sessionsListContainer = document.getElementById('sessions-list-container');
-    
+
     // User Management
     DOM.userManagementModal = document.getElementById('user-management-modal');
     DOM.userManagementModalTitle = document.getElementById('user-management-modal-title');
@@ -256,6 +259,9 @@ function initDOM() {
     DOM.botUsernameInput = document.getElementById('bot-username');
     DOM.groupIdInput = document.getElementById('group-id');
     DOM.adminChatIdInput = document.getElementById('admin-chat-id');
+    DOM.feedbackBotEnabledToggle = document.getElementById('feedback-bot-enabled-toggle');
+    DOM.feedbackBotTokenInput = document.getElementById('feedback-bot-token');
+    DOM.saveFeedbackBotBtn = document.getElementById('save-feedback-bot-btn');
     DOM.paginationLimitInput = document.getElementById('pagination-limit');
     DOM.saveGeneralSettingsBtn = document.getElementById('save-general-settings-btn');
     DOM.saveKpiSettingsBtn = document.getElementById('save-kpi-settings-btn');

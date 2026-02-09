@@ -120,7 +120,7 @@ async function showOperatorRequests(userId, chatId) {
                         .where('debt_requests.current_approver_type', 'operator');
                 }).orWhereNull('debt_requests.current_approver_id');
             })
-            .whereIn('debt_requests.status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER'])
+            .whereIn('debt_requests.status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER', 'REVERSED_BY_OPERATOR'])
             .where('debt_requests.locked', false)
             .select(
                 'debt_requests.*',
@@ -211,7 +211,7 @@ async function showNextOperatorRequest(userId, chatId) {
                         .where('debt_requests.current_approver_type', 'operator');
                 }).orWhereNull('debt_requests.current_approver_id');
             })
-            .whereIn('debt_requests.status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER'])
+            .whereIn('debt_requests.status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER', 'REVERSED_BY_OPERATOR'])
             .where('debt_requests.locked', false)
             .select(
                 'debt_requests.*',
@@ -235,7 +235,7 @@ async function showNextOperatorRequest(userId, chatId) {
                             this.where('current_approver_id', assignedOperatorId)
                                 .where('current_approver_type', 'operator');
                         })
-                        .whereIn('status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER'])
+                        .whereIn('status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER', 'REVERSED_BY_OPERATOR'])
                         .where('locked', false)
                         .where('id', '!=', nextRequest.id)
                         .count('* as count')
@@ -312,7 +312,7 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                 const otherRequests = await db('debt_requests')
                     .where('current_approver_id', operatorId)
                     .where('current_approver_type', 'operator')
-                    .whereIn('status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER'])
+                    .whereIn('status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER', 'REVERSED_BY_OPERATOR'])
                     .where('locked', false)
                     .where('id', '!=', request.id)
                     .select('id', 'request_uid')
@@ -427,7 +427,7 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                 try {
                     const { createDebtDataPage } = require('../../../utils/telegraph.js');
                     telegraphUrl = await createDebtDataPage({
-                        request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                        request_id: request.id,
                         request_uid: request.request_uid,
                         brand_name: request.brand_name,
                         filial_name: request.filial_name,
@@ -438,7 +438,8 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
                         total_amount: request.excel_total,
-                        isForCashier: false // ✅ MUHIM: Operator uchun klient bo'yicha format
+                        isForCashier: false,
+                        logContext: 'operator'
                     });
                     
                     if (telegraphUrl) {
@@ -448,7 +449,7 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                         // Qayta urinish
                         try {
                             telegraphUrl = await createDebtDataPage({
-                                request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                                request_id: request.id,
                                 request_uid: request.request_uid,
                                 brand_name: request.brand_name,
                                 filial_name: request.filial_name,
@@ -459,7 +460,8 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
                         total_amount: request.excel_total,
-                        isForCashier: false // ✅ MUHIM: Operator uchun klient bo'yicha format
+                        isForCashier: false,
+                        logContext: 'operator'
                     });
                         } catch (retryError) {
                             log.error(`[OPERATOR] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -470,7 +472,7 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                     // Qayta urinish
                     try {
                         telegraphUrl = await createDebtDataPage({
-                            request_id: request.id, // ✅ MUHIM: Mavjud URL'ni qayta ishlatish uchun
+                            request_id: request.id,
                             request_uid: request.request_uid,
                             brand_name: request.brand_name,
                             filial_name: request.filial_name,
@@ -481,7 +483,8 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
                         excel_headers: excelHeaders,
                         excel_columns: excelColumns,
                         total_amount: request.excel_total,
-                        isForCashier: false // ✅ MUHIM: Operator uchun klient bo'yicha format
+                        isForCashier: false,
+                        logContext: 'operator'
                     });
                     } catch (retryError) {
                         log.error(`[OPERATOR] [SHOW_REQUEST] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${request.id}, error=${retryError.message}`);
@@ -534,6 +537,7 @@ async function showRequestToOperator(request, operatorId, operatorUser, pendingC
         };
         
         log.info(`[OPERATOR] [SHOW_REQUEST] 3. Operatorlar guruhiga xabar yuborilmoqda: groupId=${groupId}, requestId=${request.id}, operatorId=${operatorId}, pendingCount=${pendingCount}`);
+        log.info(`[LINK_HABAR] operator: kimga=operatorlar_guruhi, requestId=${request.id}, request_uid=${request.request_uid}, telegraph_link=${telegraphUrl ? 'mavjud' : 'yo\'q'}, ma_lumotlar=${request.type === 'SET' ? 'faqat_telegraph_link' : 'oddiy'}, groupId=${groupId}`);
         
         let sentMessage;
         try {
@@ -724,7 +728,7 @@ async function handleOperatorApproval(query, bot) {
     const requestId = parseInt(parts[2]);
     const assignedOperatorId = parts.length > 3 ? parseInt(parts[3]) : null;
     
-        log.info(`[OPERATOR] [APPROVAL] 🔄 Operator tasdiqlash boshlanmoqda: requestId=${requestId}, userId=${userId}, chatId=${chatId}, assignedOperatorId=${assignedOperatorId}`);
+    log.info(`[OPERATOR] [APPROVAL] [START] Operator tasdiqlash boshlandi: requestId=${requestId}, userId=${userId}, chatId=${chatId}, assignedOperatorId=${assignedOperatorId}`);
     
     try {
         await bot.answerCallbackQuery(query.id, { text: 'Tasdiqlanmoqda...' });
@@ -732,7 +736,7 @@ async function handleOperatorApproval(query, bot) {
         // ✅ OPTIMALLASHTIRISH: Avval so'rovni tekshirish (eng tez)
         let request = await db('debt_requests')
             .where('id', requestId)
-            .whereIn('status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER'])
+            .whereIn('status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER', 'REVERSED_BY_OPERATOR'])
             .where('locked', false)
             .first();
         
@@ -744,7 +748,16 @@ async function handleOperatorApproval(query, bot) {
             
             if (requestWithoutStatus) {
                 log.warn(`[OPERATOR] [APPROVAL] ❌ So'rov topildi, lekin status mos kelmaydi yoki bloklangan: requestId=${requestId}, status=${requestWithoutStatus.status}, locked=${requestWithoutStatus.locked}`);
-                await bot.answerCallbackQuery(query.id, { text: `So'rov statusi mos kelmaydi yoki allaqachon tasdiqlanmoqda.`, show_alert: true });
+                // Eski tugmani olib tashlash va "Allaqachon tasdiqlangan" ko'rsatish — foydalanuvchi qayta bosmasin
+                try {
+                    await bot.editMessageText(
+                        `✅ So'rov allaqachon tasdiqlangan.\n\n📋 ID: ${requestWithoutStatus.request_uid || requestId}`,
+                        { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } }
+                    );
+                } catch (editErr) {
+                    log.debug(`[OPERATOR] [APPROVAL] Xabarni yangilashda xatolik (e'tiborsiz): messageId=${query.message.message_id}, err=${editErr.message}`);
+                }
+                // Boshida "Tasdiqlanmoqda..." yuborilgan, qayta answerCallbackQuery chaqirilmaydi
             } else {
                 log.warn(`[OPERATOR] [APPROVAL] ❌ So'rov topilmadi: requestId=${requestId}`);
                 await bot.answerCallbackQuery(query.id, { text: 'So\'rov topilmadi.', show_alert: true });
@@ -854,7 +867,7 @@ async function handleOperatorApproval(query, bot) {
         
         request = fullRequest; // To'liq ma'lumotlar bilan almashtirish
         
-        log.info(`[OPERATOR] [APPROVAL] 4. So'rov topildi: RequestId=${request.id}, RequestUID=${request.request_uid}, Status=${request.status}, BrandId=${request.brand_id}, BranchId=${request.branch_id}`);
+        log.info(`[OPERATOR] [APPROVAL] [STEP_1] So'rov topildi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}, status=${request.status}, brand=${request.brand_name}, branch=${request.filial_name}`);
         
         // So'rovni bloklash (double-check)
         const lockResult = await db('debt_requests')
@@ -867,10 +880,11 @@ async function handleOperatorApproval(query, bot) {
             });
         
         if (lockResult === 0) {
-            log.warn(`[OPERATOR] [APPROVAL] ⚠️ So'rov bloklangan: requestId=${requestId}`);
+            log.warn(`[OPERATOR] [APPROVAL] ❌ Lock muvaffaqiyatsiz (allaqachon tasdiqlanmoqda): requestId=${requestId}`);
             await bot.answerCallbackQuery(query.id, { text: 'Bu so\'rov allaqachon tasdiqlanmoqda.', show_alert: true });
             return;
         }
+        log.info(`[OPERATOR] [APPROVAL] [STEP_2] Lock muvaffaqiyatli: requestId=${requestId}, operatorId=${user.id}`);
         
         // Operatorning brendiga tegishli ekanligini tekshirish
         // Agar current_approver_id null bo'lsa, operatorning brendiga tegishli ekanligini tekshiramiz
@@ -956,14 +970,14 @@ async function handleOperatorApproval(query, bot) {
                 locked_at: null
             });
         
-        log.info(`[OPERATOR] [APPROVAL] 8.1. ✅ Status yangilandi: APPROVED_BY_OPERATOR`);
+        log.info(`[OPERATOR] [APPROVAL] [STEP_3] Status APPROVED_BY_OPERATOR: requestId=${requestId}, type=${request.type}. Keyingi: supervisor bor bo'lsa ularga, yo'q bo'lsa final guruhga.`);
         
         // Supervisor'larga yuborish (agar operatorlarga nazoratchi biriktirilgan bo'lsa)
         const { getSupervisorsForOperators } = require('../../../utils/supervisorAssignment.js');
         const supervisors = await getSupervisorsForOperators(requestId, request.brand_id);
         
         if (supervisors.length > 0) {
-            log.info(`[OPERATOR] [APPROVAL] 9.1. ✅ Supervisor'lar topildi: ${supervisors.length} ta`);
+            log.info(`[OPERATOR] [APPROVAL] [STEP_4A] Supervisor'lar topildi: requestId=${requestId}, count=${supervisors.length}. So'rov avval supervisor'larga yuboriladi.`);
             const { showRequestToSupervisor } = require('./supervisor.js');
             
             const fullRequest = await db('debt_requests')
@@ -981,15 +995,14 @@ async function handleOperatorApproval(query, bot) {
             
             if (fullRequest) {
                 await showRequestToSupervisor(fullRequest, supervisors, 'operator');
-                log.info(`[OPERATOR] [APPROVAL] 9.2. ✅ So'rov supervisor'larga yuborildi: requestId=${requestId}`);
+                log.info(`[OPERATOR] [APPROVAL] [STEP_5A] So'rov supervisor'larga yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}`);
             }
         } else {
-            log.info(`[OPERATOR] [APPROVAL] 9.1. ⚠️ Supervisor'lar topilmadi, final guruhga to'g'ridan-to'g'ri yuborilmoqda`);
+            log.info(`[OPERATOR] [APPROVAL] [STEP_4B] Supervisor'lar yo'q: requestId=${requestId}, type=${request.type}. Final guruhga to'g'ridan-to'g'ri yuboriladi (ketma-ketlik: operator→final, jarayon tugaydi).`);
             
             // Final guruhga yuborish (status FINAL_APPROVED ga o'zgaradi)
             await sendToFinalGroup(requestId);
-            log.info(`[OPERATOR] [APPROVAL] 📤 Final guruhga xabar yuborilmoqda: requestId=${requestId}`);
-            log.info(`[OPERATOR] [APPROVAL] ✅ Final guruhga xabar yuborildi: requestId=${requestId}, chatType=group`);
+            log.info(`[OPERATOR] [APPROVAL] [DONE_FINAL] Final guruhga xabar yuborildi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}. Status=FINAL_APPROVED, jarayon tugadi.`);
         }
         
         // Xabarni yangilash
@@ -1005,11 +1018,9 @@ async function handleOperatorApproval(query, bot) {
         // Eslatmalarni to'xtatish
         cancelReminders(requestId);
         
-        // Keyingi so'rovni avtomatik ko'rsatish
-        await showNextOperatorRequest(userId, chatId);
+        const clickedMessageId = query.message.message_id;
         
-        // Tasdiqlash xabari - original xabar + barcha tasdiqlashlar
-        // Agar SET so'rov bo'lsa va Excel ma'lumotlari bo'lsa, ularni parse qilish
+        // Tasdiqlash xabari: xabarni o'chirmasdan edit qilamiz — Operator: ism (@username), Status, Telegraph link qoladi
         if (request.type === 'SET' && request.excel_data) {
             let excelData = request.excel_data;
             let excelHeaders = request.excel_headers;
@@ -1042,39 +1053,37 @@ async function handleOperatorApproval(query, bot) {
             request.excel_columns = excelColumns;
         }
         
-        // Operator uchun: faqat avvalgilari tasdiqlashlar
         const approvalMessage = await formatRequestMessageWithApprovals(request, db, 'operator');
+        const statusLine = supervisors.length > 0 ? "Supervisor'larga yuborildi." : "Final guruhga yuborildi.";
+        const operatorLine = `Operator: ${user.fullname || 'Noma\'lum'}${user.username ? ' (@' + user.username + ')' : ''}`;
+        const header = `✅ So'rov tasdiqlandi!\n\nID: ${request.request_uid}\n${operatorLine}\nStatus: ${statusLine}\n\n`;
+        const fullApprovalMessage = header + approvalMessage;
         
-        // Xabarni yangilash (agar xabar hali mavjud bo'lsa)
-        // Eslatma: Agar xabar allaqachon o'chirilgan bo'lsa (navbatli ko'rsatish tufayli), xatolikni e'tiborsiz qoldirish
         try {
-        await bot.editMessageText(
-            approvalMessage,
-            {
+            await bot.editMessageText(fullApprovalMessage, {
                 chat_id: chatId,
-                message_id: query.message.message_id,
-                parse_mode: 'HTML'
-            }
-        );
+                message_id: clickedMessageId,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: [] }
+            });
+            const { markAsApproved } = require('../utils/messageTracker.js');
+            markAsApproved(chatId, clickedMessageId, requestId);
+            log.debug(`[OPERATOR] [APPROVAL] Xabar tasdiqlangan ko'rinishda yangilandi (o'chirilmadi): chatId=${chatId}, messageId=${clickedMessageId}`);
         } catch (editError) {
-            // Agar xabar topilmasa (o'chirilgan bo'lsa), yangi xabar yuborish
             const isMessageNotFound = editError.message?.includes('message to edit not found') ||
                                      editError.message?.includes('message not found') ||
-                                     editError.response?.body?.description?.includes('message to edit not found');
-            
-            if (isMessageNotFound) {
-                log.debug(`[OPERATOR] [APPROVAL] Xabar allaqachon o'chirilgan, yangi xabar yuborilmaydi (navbatli ko'rsatish tufayli): requestId=${requestId}, messageId=${query.message.message_id}`);
-                // Xabar o'chirilgan bo'lsa, yangi xabar yuborish shart emas
-                // chunki keyingi so'rov allaqachon ko'rsatilgan
-            } else {
-                // Boshqa xatoliklar uchun log qilish
+                                     (editError.response?.body?.description && editError.response.body.description.includes('message to edit not found'));
+            if (!isMessageNotFound) {
                 log.warn(`[OPERATOR] [APPROVAL] Xabarni yangilashda xatolik: requestId=${requestId}, error=${editError.message}`);
             }
         }
         
-        log.info(`[OPERATOR] [APPROVAL] ✅ Operator tasdiqladi: requestId=${requestId}, requestUID=${request.request_uid}, operatorId=${user.id}, operatorName=${user.fullname}, brand=${request.brand_name}, branch=${request.filial_name}`);
+        // Keyingi so'rovni avtomatik ko'rsatish
+        await showNextOperatorRequest(userId, chatId);
+        
+        log.info(`[OPERATOR] [APPROVAL] [DONE] Operator tasdiqlash yakunlandi: requestId=${requestId}, requestUID=${request.request_uid}, type=${request.type}, operatorId=${user.id}. So'rov supervisor'ga yoki final guruhga yuborildi (ketma-ketlik).`);
     } catch (error) {
-        log.error('Error handling operator approval:', error);
+        log.error(`[OPERATOR] [APPROVAL] [ERROR] requestId=${requestId}, error=${error.message}`, error);
         await bot.sendMessage(chatId, '❌ Xatolik yuz berdi.');
     }
 }
@@ -1114,7 +1123,7 @@ async function handleOperatorDebt(query, bot) {
                 'debt_svrs.name as svr_name'
             )
             .where('debt_requests.id', requestId)
-            .whereIn('debt_requests.status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER'])
+            .whereIn('debt_requests.status', ['APPROVED_BY_CASHIER', 'APPROVED_BY_SUPERVISOR', 'DEBT_MARKED_BY_CASHIER', 'REVERSED_BY_OPERATOR'])
             .first();
         
         if (!request) {
@@ -1210,6 +1219,7 @@ async function handleOperatorDebt(query, bot) {
         });
         
         log.info(`[OPERATOR_DEBT] Qarzi bor bosildi: requestId=${requestId}, userId=${user.id}, brandId=${request.brand_id}, branchId=${request.branch_id}`);
+        log.info(`[QARZI_BOR] [OPERATOR] 1. Tugma bosildi → State: UPLOAD_DEBT_EXCEL. So'rov: ${request.request_uid}, brend: ${request.brand_name}, filial: ${request.filial_name}. Keyingi: Operator Excel fayl yuboradi.`);
         
         // Xabarni callback query kelgan chatga yuborish (guruhda bo'lsa guruhga, shaxsiy chatda bo'lsa shaxsiy chatga)
         await bot.sendMessage(
@@ -1227,6 +1237,7 @@ async function handleOperatorDebt(query, bot) {
  */
 async function sendDebtResponse(requestId, userId, chatId, debtData) {
     log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] 🔄 Qardorlik javobi yuborilmoqda: requestId=${requestId}, operatorId=${userId}, chatId=${chatId}, debtRows=${debtData.excel_data?.length || 0}, totalAmount=${debtData.total_amount || 0}`);
+    log.info(`[QARZI_BOR] [OPERATOR] 2. sendDebtResponse boshlandi. requestId=${requestId}, operatorId=${userId}. Ma'lumot: excelQator=${debtData.excel_data?.length || 0}, totalAmount=${debtData.total_amount ?? 'yo\'q'}.`);
     try {
         const user = await userHelper.getUserByTelegram(chatId, userId);
         if (!user) {
@@ -1266,8 +1277,10 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     excel_data: debtData.excel_data,
                     excel_headers: debtData.excel_headers,
                     excel_columns: debtData.excel_columns,
-                    total_amount: debtData.total_amount
+                    total_amount: debtData.total_amount,
+                    logContext: 'operator_debt_response'
                 });
+                if (telegraphUrl) log.info(`[QARZI_BOR] [OPERATOR] Telegraph sahifa yaratildi (qarzdorlik ro'yxati): ${telegraphUrl}`);
                 
                 if (!telegraphUrl) {
                     log.warn(`[OPERATOR] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratilmadi (null qaytdi): requestId=${requestId}`);
@@ -1283,7 +1296,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                             excel_data: debtData.excel_data,
                             excel_headers: debtData.excel_headers,
                             excel_columns: debtData.excel_columns,
-                            total_amount: debtData.total_amount
+                            total_amount: debtData.total_amount,
+                            logContext: 'operator_debt_response_retry'
                         });
                     } catch (retryError) {
                         log.error(`[OPERATOR] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -1303,7 +1317,8 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                         excel_data: debtData.excel_data,
                         excel_headers: debtData.excel_headers,
                         excel_columns: debtData.excel_columns,
-                        total_amount: debtData.total_amount
+                        total_amount: debtData.total_amount,
+                        logContext: 'operator_debt_response_retry2'
                     });
                 } catch (retryError) {
                     log.error(`[OPERATOR] [SEND_DEBT_RESPONSE] Telegraph sahifa yaratishda qayta urinishda xatolik: requestId=${requestId}, error=${retryError.message}`);
@@ -1334,6 +1349,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
         // SET so'rovlar uchun: Agar farq bo'lsa va farqi ko'p bo'lsa (totalDifference > 0), teskari jarayon
         if (isSetRequest && hasDifferences && comparisonResult.totalDifference > 0) {
             log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] SET so'rovda farq topildi va teskari jarayon boshlanmoqda: requestId=${requestId}, totalDifference=${comparisonResult.totalDifference}, inputType=${debtData.input_type}`);
+            log.info(`[QARZI_BOR] [OPERATOR] 3. TESKARI JARAYON (SET, farq bor). Xabarlar: Menejer (preview yangilanadi), Rahbarlar guruhi, Final guruh. Status → REVERSED_BY_OPERATOR.`);
             
             // ✅ Operator uchun klient bo'yicha farqlar sahifasini yaratish
             let differencesTelegraphUrl = null;
@@ -1355,6 +1371,29 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     log.error(`[OPERATOR] [SEND_DEBT_RESPONSE] Klient bo'yicha farqlar sahifasini yaratishda xatolik: ${error.message}`);
                 }
             }
+            // Reja: debtData da Link 1 (telegraph) va Link 2 (farqlar) – formatRequestMessageWithApprovals va logApproval uchun
+            debtData.telegraph_url = telegraphUrl;
+            debtData.differences_telegraph_url = differencesTelegraphUrl;
+            
+            // Ro'yxatga qaytarish: so'rov yana operatorga biriktiriladi
+            await db('debt_requests').where('id', requestId).update({
+                status: 'REVERSED_BY_OPERATOR',
+                current_approver_id: user.id,
+                current_approver_type: 'operator'
+            });
+            await logApproval(requestId, user.id, 'operator', 'reversed', {
+                excel_file_path: debtData.excel_file_path,
+                image_file_path: debtData.image_file_path,
+                telegraph_url: debtData.telegraph_url,
+                differences_telegraph_url: debtData.differences_telegraph_url,
+                total_difference: comparisonResult.totalDifference,
+                differences_count: comparisonResult.differences.length,
+                comparison_result: comparisonResult
+            });
+            // Qaytarilish soni: shu so'rov (request_id) bo'yicha
+            const reversalRow = await db('debt_request_approvals').where('request_id', requestId).where('status', 'reversed').count('* as c').first();
+            const reversalCount = reversalRow && reversalRow.c != null ? parseInt(reversalRow.c, 10) : 1;
+            const reversalSuffix = reversalCount > 0 ? ` (${reversalCount}-marta)` : '';
             
             // Menejerga xabar yuborish (tasdiqlanganlar va qaytarilgan holatlar bilan)
             const manager = await db('users').where('id', request.created_by).first();
@@ -1394,17 +1433,12 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                         }
                     }
                     
-                    let reverseMessage = `⚠️ <b>Teskari jarayon</b>\n\n` +
+                    let reverseMessage = `⚠️ <b>Teskari jarayon${reversalSuffix}</b>\n\n` +
                         `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
-                    
-                    // ✅ Telegraph link qo'shish (farqlar ro'yxati bilan) - faqat farqlar sahifasi
-                    if (differencesTelegraphUrl) {
-                        reverseMessage += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
-                    }
-                    
-                    // Tasdiqlanganlar va qaytarilgan holatlar (debtData bilan)
+                    // Link 1 + Link 2 shablon ichida (formatRequestMessageWithApprovals)
                     const approvalMessage = await formatRequestMessageWithApprovals(fullRequest, db, 'manager', debtData);
                     reverseMessage += approvalMessage;
+                    log.info(`[REJA] [OPERATOR] Teskari xabar menejer uchun: Link1=${!!debtData.telegraph_url}, Link2=${!!debtData.differences_telegraph_url}`);
                 
                 const bot = getBot();
                 
@@ -1420,6 +1454,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                             }
                         );
                         log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] ✅ "So'rov muvaffaqiyatli yaratildi!" xabari "Teskari jarayon" formatiga o'zgartirildi: requestId=${requestId}, messageId=${fullRequest.preview_message_id}`);
+                        log.info(`[QARZI_BOR] [OPERATOR] Teskari jarayon: Menejer xabari yangilandi (preview → Teskari jarayon). chatId=${fullRequest.preview_chat_id}, messageId=${fullRequest.preview_message_id}`);
                     } catch (updateError) {
                         log.warn(`[OPERATOR] [SEND_DEBT_RESPONSE] ⚠️ "So'rov muvaffaqiyatli yaratildi!" xabarini yangilashda xatolik: requestId=${requestId}, error=${updateError.message}`);
                         // Xatolik bo'lsa, yangi xabar sifatida yuborish
@@ -1430,6 +1465,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     // Preview message ID yo'q bo'lsa, yangi xabar sifatida yuborish
                     await bot.sendMessage(manager.telegram_chat_id, reverseMessage, { parse_mode: 'HTML' });
                     log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] Menejerga teskari jarayon xabari yuborildi: requestId=${requestId}, managerId=${manager.id}, hasDifferencesTelegraphUrl=${!!differencesTelegraphUrl}`);
+                    log.info(`[QARZI_BOR] [OPERATOR] Teskari jarayon: xabar yuborildi → Menejer (yangi xabar). chatId=${manager.telegram_chat_id}`);
                 }
                 }
             }
@@ -1481,68 +1517,40 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     }
                 }
                 
-                let reverseMessage = `⚠️ <b>Teskari jarayon</b>\n\n` +
+                let reverseMessage = `⚠️ <b>Teskari jarayon${reversalSuffix}</b>\n\n` +
                     `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
                 
-                // ✅ Telegraph link qo'shish (farqlar ro'yxati bilan) - faqat farqlar sahifasi
-                if (differencesTelegraphUrl) {
-                    reverseMessage += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
-                }
-                
-                // Rahbarlar guruhiga yuborish
-                if (leadersGroup) {
-                    // Tasdiqlanganlar va qaytarilgan holatlar (rahbarlar uchun - 'leader' roli)
+                // Rahbarlar guruhiga yuborish – faqat SET (NORMAL da operatorga kelgunicha rahbar yo'q, menejer→kassir→operator)
+                if (leadersGroup && fullRequestForGroups.type === 'SET') {
                     const approvalMessageForLeaders = await formatRequestMessageWithApprovals(fullRequestForGroups, db, 'leader', debtData);
-                    let reverseMessageForLeaders = `⚠️ <b>Teskari jarayon</b>\n\n` +
+                    let reverseMessageForLeaders = `⚠️ <b>Teskari jarayon${reversalSuffix}</b>\n\n` +
                         `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
-                    
-                    // ✅ Telegraph link qo'shish (farqlar ro'yxati bilan) - faqat farqlar sahifasi
-                    if (differencesTelegraphUrl) {
-                        reverseMessageForLeaders += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
-                    }
                     reverseMessageForLeaders += approvalMessageForLeaders;
+                    log.info(`[REJA] [OPERATOR] Teskari xabar rahbarlar uchun: Link1=${!!debtData.telegraph_url}, Link2=${!!debtData.differences_telegraph_url}`);
                     
                     const bot = getBot();
                     await bot.sendMessage(leadersGroup.telegram_group_id, reverseMessageForLeaders, { parse_mode: 'HTML' });
                     log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] Rahbarlar guruhiga teskari jarayon xabari yuborildi: requestId=${requestId}, groupId=${leadersGroup.telegram_group_id}, hasDifferencesTelegraphUrl=${!!differencesTelegraphUrl}`);
+                    log.info(`[QARZI_BOR] [OPERATOR] Teskari jarayon: xabar yuborildi → Rahbarlar guruhi. groupId=${leadersGroup.telegram_group_id}`);
                 }
                 
-                // Final guruhga yuborish
+                // Final guruhga yuborish (Link 1 + Link 2 shablon ichida)
                 if (finalGroup) {
-                    // ✅ Final guruh uchun 'final' roli bilan chaqirish (agent ro'yxati yoki link)
                     const approvalMessageForFinal = await formatRequestMessageWithApprovals(fullRequestForGroups, db, 'final', debtData);
-                    let reverseMessageForFinal = `⚠️ <b>Teskari jarayon</b>\n\n` +
+                    let reverseMessageForFinal = `⚠️ <b>Teskari jarayon${reversalSuffix}</b>\n\n` +
                         `${reversedBy} tomonidan yuborilgan Excel ma'lumotlari so'rovdagi ma'lumotlar bilan farq qiladi.\n\n`;
-                    
-                    // ✅ Telegraph link qo'shish (faqat total bo'lsa, yoki farqlar sahifasi)
-                    if (differencesTelegraphUrl) {
-                        reverseMessageForFinal += `🔗 <a href="${differencesTelegraphUrl}">📊 Farqlar ro'yxati:</a>\n\n`;
-                    }
                     reverseMessageForFinal += approvalMessageForFinal;
+                    log.info(`[REJA] [OPERATOR] Teskari xabar final uchun: Link1=${!!debtData.telegraph_url}, Link2=${!!debtData.differences_telegraph_url}`);
                     
                     const bot = getBot();
                     await bot.sendMessage(finalGroup.telegram_group_id, reverseMessageForFinal, { parse_mode: 'HTML' });
                     log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] Final guruhga teskari jarayon xabari yuborildi: requestId=${requestId}, groupId=${finalGroup.telegram_group_id}, hasDifferencesTelegraphUrl=${!!differencesTelegraphUrl}`);
+                    log.info(`[QARZI_BOR] [OPERATOR] Teskari jarayon: xabar yuborildi → Final guruh. groupId=${finalGroup.telegram_group_id}`);
                 }
             }
             
-            // Status yangilash - teskari jarayon
-            await db('debt_requests')
-                .where('id', requestId)
-                .update({
-                    status: 'REVERSED_BY_OPERATOR',
-                    current_approver_id: null,
-                    current_approver_type: null
-                });
-            
-            // Tasdiqlashni log qilish (solishtirish ma'lumotlari bilan)
-            await logApproval(requestId, user.id, 'operator', 'reversed', {
-                excel_file_path: debtData.excel_file_path,
-                image_file_path: debtData.image_file_path,
-                total_difference: comparisonResult.totalDifference,
-                differences_count: comparisonResult.differences.length,
-                comparison_result: comparisonResult
-            });
+            log.info(`[QARZI_BOR] [OPERATOR] 5. Status yangilandi → REVERSED_BY_OPERATOR (teskari jarayon). requestId=${requestId}. Ro'yxatga qaytarildi.`);
+            log.info(`[REJA] [OPERATOR] logApproval reversed: telegraph_url=${!!debtData.telegraph_url}, differences_telegraph_url=${!!debtData.differences_telegraph_url}`);
             
             log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] Teskari jarayon yakunlandi: requestId=${requestId}, operatorId=${user.id}`);
             return; // Teskari jarayon - final guruhga yuborilmaydi
@@ -1587,6 +1595,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
         }
         
         // Xabarlarni yuborish
+        log.info(`[QARZI_BOR] [OPERATOR] 4. "Qarzi bor" xabari yuboriladi. Kimga: ${recipients.map(r => r.role).join(', ') || 'menejer'}.`);
         const bot = getBot();
         for (const recipient of recipients) {
             try {
@@ -1594,6 +1603,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                     parse_mode: 'HTML'
                 });
                 log.info(`[OPERATOR] [SEND_DEBT_RESPONSE] ✅ Qardorlik javobi yuborildi: requestId=${requestId}, recipientRole=${recipient.role}, recipientId=${recipient.id}, chatType=${recipient.role === 'leaders' ? 'group' : 'personal'}`);
+                log.info(`[QARZI_BOR] [OPERATOR] Xabar yuborildi → ${recipient.role === 'manager' ? 'Menejer (shaxsiy)' : recipient.role === 'leaders' ? 'Rahbarlar guruhi' : recipient.role}. chatId=${recipient.id}`);
             } catch (error) {
                 log.error(`Error sending debt response to ${recipient.role}:`, error);
             }
@@ -1619,6 +1629,7 @@ async function sendDebtResponse(requestId, userId, chatId, debtData) {
                 current_approver_id: null,
                 current_approver_type: null
             });
+        log.info(`[QARZI_BOR] [OPERATOR] 5. Status yangilandi → DEBT_FOUND_BY_OPERATOR. requestId=${requestId}. Jarayon tugadi.`);
         
         // Tasdiqlashni log qilish
         const logData = {

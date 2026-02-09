@@ -2,8 +2,8 @@
 // Barcha global holatlarni boshqarish
 
 export const state = {
-    settings: { 
-        app_settings: { columns: [], rows: [], locations: [] }, 
+    settings: {
+        app_settings: { columns: [], rows: [], locations: [] },
         pagination_limit: 20,
         branding_settings: { text: 'MANUS', color: '#4CAF50', animation: 'anim-glow-pulse', border: 'border-none' },
         telegram_bot_username: '',
@@ -31,7 +31,8 @@ export const state = {
             direction: 'desc'
         },
         selectedMonth: ''
-    }
+    },
+    feedbackManager: null
 };
 
 // Flatpickr va Chart.js instansiyalari
