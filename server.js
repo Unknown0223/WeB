@@ -179,8 +179,8 @@ if (isPostgres) {
                     agent: false // Keepalive agent'ni o'chirish, pool o'zi boshqaradi
                 },
                 max: 1,
-                idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash
-                connectionTimeoutMillis: 10000,
+                idleTimeoutMillis: 60000,
+                connectionTimeoutMillis: 15000,
                 // keepAlive ni o'chirish - pool o'zi ulanishlarni boshqaradi
                 // keepAlive: true - bu ba'zida SSL handshake muammolariga sabab bo'lishi mumkin
             });
@@ -192,14 +192,20 @@ if (isPostgres) {
                 createTableIfMissing: true
             };
         } catch (parseError) {
-            // Parse xatolik bo'lsa, connection string'ni ishlatish
-            log.warn('[SESSION] Connection string parse qilishda xatolik, connection string ishlatilmoqda:', parseError.message);
-            // Connection string'ga SSL parametrlarini qo'shish
+            // Parse xatolik bo'lsa ham pool max:1 bilan (Railway ulanish limiti)
+            log.warn('[SESSION] Connection string parse qilishda xatolik, pool bilan ishlatilmoqda:', parseError.message);
             if (!pgConnection.includes('?ssl=') && !pgConnection.includes('?sslmode=')) {
                 pgConnection = pgConnection + (pgConnection.includes('?') ? '&' : '?') + 'sslmode=require';
             }
+            const { Pool } = require('pg');
+            const fallbackPool = new Pool({
+                connectionString: pgConnection,
+                max: 1,
+                connectionTimeoutMillis: 15000,
+                idleTimeoutMillis: 60000
+            });
             pgConnectionConfig = {
-                conString: pgConnection,
+                pool: fallbackPool,
                 tableName: 'sessions',
                 createTableIfMissing: true
             };
@@ -369,6 +375,14 @@ app.get('*', (req, res) => {
     }
 });
 
+// 502 oldini olish: route xatolari processni crash qilmasin
+app.use((err, req, res, next) => {
+    log.error('[SERVER] Route xatolik:', err.message);
+    if (!res.headersSent) {
+        res.status(500).json({ error: 'Server xatolik', message: err.message });
+    }
+});
+
 // WebSocket ulanishlarini boshqarish
 wss.on('connection', (ws, req) => {
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
@@ -449,8 +463,15 @@ global.broadcastWebSocket = (type, payload) => {
     log.info(`🌐 APP_BASE_URL: ${process.env.APP_BASE_URL || 'NOT SET'}`);
     log.info('═══════════════════════════════════════════════════════════');
 
+    // 502 oldini olish: avval portni ochamiz, keyin DB init (Railway healthcheck darhol javob oladi)
+    server.listen(PORT, '0.0.0.0', () => {
+        const listenDuration = Date.now() - serverStartTime;
+        log.info(`✅ Server ${PORT} portida ishga tushdi (${listenDuration}ms)`);
+        log.info(`🌐 Healthcheck: http://0.0.0.0:${PORT}/health`);
+        if (process.send) process.send('ready');
+    });
+
     try {
-        // Database initialization BIRINCHI (listen'dan oldin – HTTP so'rovlar poolni to'ldirmasligi uchun)
         log.info('[INIT] Database initialization boshlandi...');
         const dbInitStartTime = Date.now();
         try {
@@ -654,17 +675,20 @@ global.broadcastWebSocket = (type, payload) => {
                         log.error('[INIT] [FEEDBACK_BOT] ❌ Feedback botni ishga tushirishda xatolik:', fbError.message);
                     }
 
-                    // 3. Maxsus so'rovlar boti
+                    // 3. Maxsus so'rovlar boti (serverni qayta ishga tushganda token bazadan o'qiladi)
                     try {
                         const { initializeSpecialRequestsBot } = require('./utils/specialRequestsBot.js');
                         const srToken = await getSetting('special_requests_bot_token', null);
                         const srEnabled = await getSetting('special_requests_bot_enabled', 'false');
                         const isSrEnabled = String(srEnabled).toLowerCase() === 'true' || String(srEnabled) === '1';
-                        if (isSrEnabled && srToken && srToken.trim() !== '') {
+                        const tokenMavjud = !!(srToken && String(srToken).trim());
+                        const tokenUzunlik = srToken ? String(srToken).trim().length : 0;
+                        log.info(`[INIT] [SPECIAL_REQUESTS_BOT] Bazadan o'qildi: enabled=${isSrEnabled}, tokenMavjud=${tokenMavjud}, tokenUzunlik=${tokenUzunlik}`);
+                        if (isSrEnabled && tokenMavjud) {
                             log.info('[INIT] [SPECIAL_REQUESTS_BOT] Ishga tushirilmoqda...');
                             await initializeSpecialRequestsBot();
                         } else {
-                            log.info('[INIT] [SPECIAL_REQUESTS_BOT] Maxsus so\'rovlar boti o\'chirilgan yoki token yo\'q');
+                            log.info('[INIT] [SPECIAL_REQUESTS_BOT] Maxsus so\'rovlar boti o\'chirilgan yoki token yo\'q (token kiritilmagan yoki saqlanmagan)');
                         }
                     } catch (srError) {
                         log.error('[INIT] [SPECIAL_REQUESTS_BOT] ❌ Maxsus so\'rovlar botini ishga tushirishda xatolik:', srError.message);
@@ -692,14 +716,6 @@ global.broadcastWebSocket = (type, payload) => {
             log.error(`📚 Stack: ${initError.stack}`);
             log.error('═══════════════════════════════════════════════════════════');
         }
-
-        // Har qanday holatda listen (DB init muvaffaqiyatsiz bo'lsa ham /health 503 qaytaradi)
-        server.listen(PORT, '0.0.0.0', () => {
-            const listenDuration = Date.now() - serverStartTime;
-            log.info(`✅ Server ${PORT} portida ishga tushdi (${listenDuration}ms)`);
-            log.info(`🌐 Healthcheck: http://0.0.0.0:${PORT}/health`);
-            if (process.send) process.send('ready');
-        });
     } catch (err) {
         serverInitError = err;
         const totalInitDuration = Date.now() - serverStartTime;

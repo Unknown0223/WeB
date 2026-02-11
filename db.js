@@ -22,11 +22,10 @@ function getDbConfig() {
     const hasDatabasePublicUrl = !!databasePublicUrl && databasePublicUrl.trim() !== '';
     const hasPostgresConfig = !!(process.env.POSTGRES_HOST && process.env.POSTGRES_DB);
     
-    // Railway.com'da DATABASE_PUBLIC_URL mavjud bo'lsa, uni ishlatish (agar DATABASE_URL bo'lmasa yoki reference bo'lsa)
-    if (isRailway && (!hasDatabaseUrl || isReference) && hasDatabasePublicUrl) {
-        // Agar DATABASE_URL reference bo'lsa yoki bo'lmasa, DATABASE_PUBLIC_URL ni ishlatish
+    // Railway: DATABASE_PUBLIC_URL bor bo'lsa uni ustun qilish (ichki URL ECONNREFUSED bermasligi uchun)
+    if (isRailway && hasDatabasePublicUrl) {
         databaseUrl = databasePublicUrl;
-        log.debug(`[DB] Using DATABASE_PUBLIC_URL as DATABASE_URL is ${isReference ? 'a reference (not resolved yet)' : 'not set'}`);
+        log.debug(`[DB] Using DATABASE_PUBLIC_URL (Railway)`);
     }
     
     // Debug ma'lumotlari (faqat Railway.com'da)
@@ -66,18 +65,17 @@ function getDbConfig() {
                     database: pgDatabase,
                     user: pgUser,
                     password: pgPassword,
-                    // Railway ichki tarmog'ida ko'pincha SSL majburiy emas.
-                    // SSL handshake muammolarini oldini olish uchun bu yerda SSL'ni majburlamaymiz.
+                    connectionTimeoutMillis: 10000,
                 },
                 migrations: {
                     directory: path.resolve(__dirname, 'migrations')
                 },
                 pool: {
-                    min: 1,
-                    max: 3,
-                    acquireTimeoutMillis: 10000,
-                    idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash, SSL handshake kamayishi
-                    createTimeoutMillis: 60000,
+                    min: 0,
+                    max: 2,
+                    acquireTimeoutMillis: 15000,
+                    idleTimeoutMillis: 60000,
+                    createTimeoutMillis: 20000,
                     destroyTimeoutMillis: 5000,
                     reapIntervalMillis: 5000, // 5s - kamroq tekshirish, kamroq overhead
                     createRetryIntervalMillis: 1000, // 1s - retry orasida biroz kutish
@@ -96,10 +94,11 @@ function getDbConfig() {
         // Connection string'ni tozalash - yangi qatorlarni olib tashlash
         databaseUrl = databaseUrl.replace(/\s+/g, '').trim();
         
-        // Eslatma: Railway Postgres'da SSL'ni majburan yoqish ba'zi holatlarda
-        // handshake muammolari keltirib chiqarishi mumkin. Shuning uchun connection string'ga
-        // sslmode qo'shmaymiz; kerak bo'lsa pg config orqali boshqariladi.
-        const connectionConfig = databaseUrl;
+        // connectionTimeoutMillis - ulanish rad etilsa tez xato (ECONNREFUSED) olish uchun
+        const connectionConfig = {
+            connectionString: databaseUrl,
+            connectionTimeoutMillis: 10000
+        };
         
         return {
             client: 'pg',
@@ -108,17 +107,17 @@ function getDbConfig() {
                 directory: path.resolve(__dirname, 'migrations')
             },
             pool: {
-                min: 1,
-                max: 3,
-                acquireTimeoutMillis: 10000,
-                idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash, SSL handshake kamayishi
-                createTimeoutMillis: 60000,
+                min: 0,
+                max: 2,
+                acquireTimeoutMillis: 15000,
+                idleTimeoutMillis: 60000,
+                createTimeoutMillis: 20000,
                 destroyTimeoutMillis: 5000,
-                reapIntervalMillis: 5000, // 5s - kamroq tekshirish, kamroq overhead
-                createRetryIntervalMillis: 1000, // 1s - retry orasida biroz kutish
+                reapIntervalMillis: 5000,
+                createRetryIntervalMillis: 1000,
                 propagateCreateError: false
             },
-            acquireConnectionTimeout: 10000,
+            acquireConnectionTimeout: 15000,
             asyncStackTraces: false,
             debug: false
         };
@@ -135,7 +134,6 @@ function getDbConfig() {
         
         if (pgHost && pgDatabase && pgUser && pgPassword) {
             // Railway.com'ning avtomatik yaratilgan PostgreSQL variable'laridan connection object yaratish
-            // Railway.com'da SSL kerak bo'lishi mumkin
             log.debug(`[DB] Using Railway.com's auto-generated PostgreSQL variables (PGHOST, PGDATABASE, etc.)`);
             log.debug(`[DB] Connection created from PGHOST=${pgHost}, PGDATABASE=${pgDatabase}, PGUSER=${pgUser}`);
             
@@ -147,24 +145,23 @@ function getDbConfig() {
                     database: pgDatabase,
                     user: pgUser,
                     password: pgPassword,
-                    // Railway ichki tarmog'ida ko'pincha SSL majburiy emas.
-                    // SSL handshake muammolarini oldini olish uchun bu yerda SSL'ni majburlamaymiz.
+                    connectionTimeoutMillis: 10000,
                 },
                 migrations: {
                     directory: path.resolve(__dirname, 'migrations')
                 },
                 pool: {
-                    min: 1,
-                    max: 3,
-                    acquireTimeoutMillis: 10000,
-                    idleTimeoutMillis: 120000, // 120s - ulanishlarni uzoqroq saqlash, SSL handshake kamayishi
-                    createTimeoutMillis: 60000,
+                    min: 0,
+                    max: 2,
+                    acquireTimeoutMillis: 15000,
+                    idleTimeoutMillis: 60000,
+                    createTimeoutMillis: 20000,
                     destroyTimeoutMillis: 5000,
-                    reapIntervalMillis: 5000, // 5s - kamroq tekshirish, kamroq overhead
-                    createRetryIntervalMillis: 1000, // 1s - retry orasida biroz kutish
+                    reapIntervalMillis: 5000,
+                    createRetryIntervalMillis: 1000,
                     propagateCreateError: false
                 },
-                acquireConnectionTimeout: 10000,
+                acquireConnectionTimeout: 15000,
                 asyncStackTraces: false,
                 debug: false
             };
