@@ -4364,7 +4364,7 @@ async function handleGenerateTelegramLink(userId, username) {
         const linkInput = document.getElementById('telegram-link-input');
         const linkDisplay = document.getElementById('telegram-link-display');
         const expiresInfo = document.getElementById('telegram-link-expires');
-        const copyBtn = document.getElementById('copy-telegram-link-btn');
+        const copyBtn = document.getElementById('copy-telegram-bot-link-btn');
         
         if (modal && linkInput && expiresInfo) {
             linkInput.value = result.botLink;

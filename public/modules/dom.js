@@ -92,6 +92,10 @@ export const DOM = {
     specialRequestsButtonsContainer: null,
     specialRequestsAddRowBtn: null,
     specialRequestsSaveBtn: null,
+    specialRequestsFilialContainer: null,
+    specialRequestsAddFilialRowBtn: null,
+    specialRequestsSumFilterType: null,
+    specialRequestsSumFilterValue: null,
     paginationLimitInput: null,
     saveGeneralSettingsBtn: null,
     saveKpiSettingsBtn: null,
@@ -275,6 +279,10 @@ function initDOM() {
     DOM.specialRequestsButtonsContainer = document.getElementById('special-requests-buttons-container');
     DOM.specialRequestsAddRowBtn = document.getElementById('special-requests-add-row');
     DOM.specialRequestsSaveBtn = document.getElementById('special-requests-save');
+    DOM.specialRequestsFilialContainer = document.getElementById('special-requests-filial-container');
+    DOM.specialRequestsAddFilialRowBtn = document.getElementById('special-requests-add-filial-row');
+    DOM.specialRequestsSumFilterType = document.getElementById('special-requests-sum-filter-type');
+    DOM.specialRequestsSumFilterValue = document.getElementById('special-requests-sum-filter-value');
     DOM.paginationLimitInput = document.getElementById('pagination-limit');
     DOM.saveGeneralSettingsBtn = document.getElementById('save-general-settings-btn');
     DOM.saveKpiSettingsBtn = document.getElementById('save-kpi-settings-btn');

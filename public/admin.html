@@ -1619,7 +1619,7 @@
                         </div>
                         <div class="form-group mb-0" style="min-width: 150px;">
                             <label>Turi</label>
-                            <select id="feedback-type-filter" class="form-control">
+                            <select id="feedback-type-filter" class="form-control" title="Turi" aria-label="Murojaat turi">
                                 <option value="">Barchasi</option>
                                 <option value="taklif">Taklif</option>
                                 <option value="shikoyat">Shikoyat</option>
@@ -1627,7 +1627,7 @@
                         </div>
                         <div class="form-group mb-0" style="min-width: 120px;">
                             <label>Ko'rish</label>
-                            <select id="feedback-limit-select" class="form-control">
+                            <select id="feedback-limit-select" class="form-control" aria-label="Ko'rish soni">
                                 <option value="10">10 ta</option>
                                 <option value="20" selected>20 ta</option>
                                 <option value="50">50 ta</option>
@@ -1711,18 +1711,35 @@
                                 </label>
                                 <input type="text" id="special-requests-group-id" class="form-control sr-input" placeholder="-1003865095533">
                             </div>
+                            <div class="form-group form-group-sum-filter">
+                                <label class="sr-label" for="special-requests-sum-filter-type">
+                                    <i data-feather="filter" class="sr-label-icon"></i>
+                                    Summa filtri (Сумма)
+                                </label>
+                                <div class="special-requests-sum-filter-row">
+                                    <select id="special-requests-sum-filter-type" class="form-control sr-input special-requests-sum-type" aria-label="Shart turi">
+                                        <option value="">O'chirilgan</option>
+                                        <option value="eq">Teng (=)</option>
+                                        <option value="gte">Katta yoki teng (≥)</option>
+                                        <option value="lte">Kichik yoki teng (≤)</option>
+                                    </select>
+                                    <label for="special-requests-sum-filter-value" class="sr-label-inline">Qiymat:</label>
+                                    <input type="text" id="special-requests-sum-filter-value" class="form-control sr-input special-requests-sum-value" placeholder="masalan: 1000000" inputmode="numeric" aria-label="Summa qiymati">
+                                </div>
+                                <small class="form-text text-muted">Faqat shu shartga mos Сумма li qatorlar guruhga yuboriladi. Bo'sh qoldirsangiz filtri ishlatilmaydi.</small>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Bo'limlar -->
+                    <!-- Bo'limlar (Brend) -->
                     <div class="card settings-card special-requests-card special-requests-sections-card">
                         <div class="settings-card-header">
                             <div class="settings-card-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);">
                                 <i data-feather="layers"></i>
                             </div>
                             <div>
-                                <h3 class="card-title">Bo'limlar</h3>
-                                <p class="card-subtitle">Brend nomi → Mas'ul (@username)</p>
+                                <h3 class="card-title">Bo'limlar (Brend)</h3>
+                                <p class="card-subtitle">Направление торговли → Mas'ul (@username)</p>
                             </div>
                         </div>
                         <div class="special-requests-card-body">
@@ -1737,6 +1754,26 @@
                                     <span>Saqlash</span>
                                 </button>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Filial -->
+                    <div class="card settings-card special-requests-card special-requests-filial-card">
+                        <div class="settings-card-header">
+                            <div class="settings-card-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                                <i data-feather="map-pin"></i>
+                            </div>
+                            <div>
+                                <h3 class="card-title">Filial</h3>
+                                <p class="card-subtitle">Территория → Mas'ul (@username)</p>
+                            </div>
+                        </div>
+                        <div class="special-requests-card-body">
+                            <div id="special-requests-filial-container" class="special-requests-rows"></div>
+                            <button type="button" class="btn btn-secondary special-requests-add-btn" id="special-requests-add-filial-row">
+                                <i data-feather="plus-circle"></i>
+                                <span>Qator qo'shish</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -4332,7 +4369,7 @@
                     style="color: rgba(255, 255, 255, 0.6); font-size: 12px; margin-bottom: 15px;">
                     <!-- Muddati bu yerda ko'rsatiladi -->
                 </div>
-                <button type="button" id="copy-telegram-link-btn" class="btn btn-primary"
+                <button type="button" id="copy-telegram-bot-link-btn" class="btn btn-primary"
                     style="width: 100%; padding: 12px; font-size: 16px; font-weight: 600;">
                     <i data-feather="copy"></i>
                     Havolani Nusxalash

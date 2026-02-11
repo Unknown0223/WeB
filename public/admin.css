@@ -240,6 +240,7 @@
 /* Modal */
 [data-theme="light"] .modal {
     background: rgba(0, 0, 0, 0.4);
+    -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
 }
 
@@ -3610,7 +3611,7 @@ input.form-control.comparison-input {
     overflow: visible;
     display: flex;
     flex-direction: column;
-    min-height: auto;
+    min-height: 0;
     height: auto;
 }
 
@@ -5402,6 +5403,7 @@ input.form-control.comparison-input {
 
 .special-requests-card {
     transition: transform 0.25s ease, box-shadow 0.25s ease;
+    min-width: 0; /* grid ichida overflow ni oldini olish */
 }
 
 .special-requests-card:hover {
@@ -5411,10 +5413,20 @@ input.form-control.comparison-input {
 
 .special-requests-card-body {
     padding: 24px;
+    min-width: 0;
+    overflow: visible;
 }
 
 .special-requests-card-body .form-group {
     padding: 0;
+}
+
+.special-requests-card-body .form-group .form-text.text-muted {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
 }
 
 .special-requests-toggle-wrap {
@@ -5426,6 +5438,7 @@ input.form-control.comparison-input {
     align-items: center;
     gap: 12px;
     cursor: pointer;
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -5461,11 +5474,61 @@ input.form-control.comparison-input {
     border-radius: 10px;
     padding: 12px 14px;
     transition: border-color 0.2s, box-shadow 0.2s;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.special-requests-sum-filter-row .sr-input {
+    width: auto;
 }
 
 .sr-input:focus {
     border-color: var(--blue-color);
     box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
+}
+
+.special-requests-sum-filter-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.special-requests-sum-filter-row select.sr-input {
+    flex: 0 0 auto;
+    min-width: 200px;
+    width: auto;
+}
+.special-requests-sum-filter-row .sr-label-inline {
+    flex: 0 0 auto;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0;
+    padding: 0 4px;
+    white-space: nowrap;
+}
+.special-requests-sum-filter-row input.sr-input.special-requests-sum-value {
+    flex: 1 1 180px;
+    min-width: 180px;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.form-group-sum-filter .special-requests-sum-filter-row {
+    margin-top: 8px;
+}
+@media (max-width: 480px) {
+    .special-requests-sum-filter-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .special-requests-sum-filter-row select.sr-input,
+    .special-requests-sum-filter-row input.sr-input {
+        min-width: 100%;
+        width: 100%;
+    }
+    .special-requests-sum-filter-row .sr-label-inline {
+        padding: 4px 0 0;
+    }
 }
 
 /* Bo'limlar qatorlari */
@@ -6002,9 +6065,9 @@ input.form-control.comparison-input {
     font-weight: 500;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
+    appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234facfe' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 14px center;
@@ -8311,6 +8374,7 @@ input.form-control.comparison-input {
 .template-tag {
     position: relative;
     cursor: pointer;
+    -webkit-user-select: none;
     user-select: none;
     overflow: visible;
     /* Tugmalar ko'rinishi uchun */
@@ -8848,6 +8912,7 @@ input.form-control.comparison-input {
         height: 100%;
         background: rgba(0, 0, 0, 0.7);
         z-index: 1000;
+        -webkit-backdrop-filter: blur(4px);
         backdrop-filter: blur(4px);
     }
 
@@ -8977,7 +9042,6 @@ input.form-control.comparison-input {
     /* Data table mobil uchun */
     .table-responsive {
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
     }
 
     .data-table {
@@ -9015,7 +9079,6 @@ input.form-control.comparison-input {
         margin: 10px auto;
         max-height: 90vh;
         overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
         padding: 15px;
     }
 
@@ -9075,7 +9138,6 @@ input.form-control.comparison-input {
     /* KPI table mobil uchun */
     .kpi-table-container {
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
     }
 
     /* Location filter mobil uchun */
@@ -17346,11 +17408,12 @@ tr:hover .quick-actions {
 }
 
 /* Day Details Modal - Edit History Scroll */
-#edit-history-content {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(79, 172, 254, 0.5) rgba(255, 255, 255, 0.05);
+@supports (scrollbar-width: thin) {
+    #edit-history-content {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(79, 172, 254, 0.5) rgba(255, 255, 255, 0.05);
+    }
 }
-
 #edit-history-content::-webkit-scrollbar {
     width: 8px;
 }
@@ -17823,6 +17886,7 @@ tr:hover .quick-actions {
     gap: 16px;
     padding: 20px;
     cursor: pointer;
+    -webkit-user-select: none;
     user-select: none;
     transition: all 0.3s ease;
     background: rgba(255, 255, 255, 0.02);
@@ -18352,6 +18416,7 @@ tr:hover .quick-actions {
     border-radius: 6px;
     transition: background 0.2s;
     margin-bottom: 5px;
+    -webkit-user-select: none;
     user-select: none;
 }
 

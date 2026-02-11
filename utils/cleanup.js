@@ -4,6 +4,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { createLogger } = require('./logger.js');
+const { db } = require('../db.js');
 
 const log = createLogger('CLEANUP');
 
@@ -90,6 +91,23 @@ async function cleanupTempDirectory(maxAgeHours = 1) {
 }
 
 /**
+ * Maxsus so'rovlar: 3 kundan eski yozuvlarni special_requests_messages jadvalidan o'chirish
+ */
+async function cleanupSpecialRequestsMessages() {
+    try {
+        const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+        const deleted = await db('special_requests_messages').where('created_at', '<', cutoff).del();
+        if (deleted > 0) {
+            log.info(`Cleanup (special_requests_messages): ${deleted} ta eski yozuv o'chirildi (3 kundan eski)`);
+        }
+        return { deleted };
+    } catch (error) {
+        log.error('special_requests_messages tozalashda xatolik:', error);
+        return { deleted: 0 };
+    }
+}
+
+/**
  * Barcha vaqtinchalik papkalarni tozalash
  * @param {number} maxAgeHours - Maksimal yashash vaqti (soat). Default: 1 soat
  */
@@ -115,15 +133,21 @@ async function cleanupAllTempFiles(maxAgeHours = 1) {
 function startCleanupInterval(intervalHours = 1, maxAgeHours = 1) {
     const intervalMs = intervalHours * 60 * 60 * 1000;
     
-    // Birinchi marta darhol ishga tushirish (barcha papkalar)
+    // Birinchi marta darhol ishga tushirish (barcha papkalar + maxsus so'rovlar)
     cleanupAllTempFiles(maxAgeHours).catch(err => {
         log.error('Birinchi cleanup xatolik:', err);
     });
-    
+    cleanupSpecialRequestsMessages().catch(err => {
+        log.error('Special requests cleanup xatolik:', err);
+    });
+
     // Keyin muntazam interval'da
     const interval = setInterval(() => {
         cleanupAllTempFiles(maxAgeHours).catch(err => {
             log.error('Cleanup interval xatolik:', err);
+        });
+        cleanupSpecialRequestsMessages().catch(err => {
+            log.error('Special requests cleanup xatolik:', err);
         });
     }, intervalMs);
     
@@ -136,6 +160,7 @@ module.exports = {
     cleanupUploadsDirectory,
     cleanupTempDirectory,
     cleanupAllTempFiles,
+    cleanupSpecialRequestsMessages,
     startCleanupInterval
 };
 

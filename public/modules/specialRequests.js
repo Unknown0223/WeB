@@ -32,9 +32,26 @@ function renderButtonsRows(buttons) {
         const div = document.createElement('div');
         div.className = 'special-requests-row';
         div.innerHTML = `
-            <input type="text" class="special-requests-label" placeholder="Bo'lim (masalan: LLK)" value="${escapeHtml(row.label || '')}">
+            <input type="text" class="special-requests-label" placeholder="Bo'lim (masalan: SOF)" value="${escapeHtml(row.label || '')}">
             <input type="text" class="special-requests-username" placeholder="@username" value="${escapeHtml(row.username || '')}">
             <button type="button" class="btn btn-danger btn-sm special-requests-remove-row" data-index="${index}" title="O'chirish"><i data-feather="trash-2"></i></button>
+        `;
+        container.appendChild(div);
+    });
+    if (typeof feather !== 'undefined') feather.replace();
+}
+
+function renderFilialRows(filialButtons) {
+    const container = DOM.specialRequestsFilialContainer;
+    if (!container) return;
+    container.innerHTML = '';
+    (filialButtons || []).forEach((row, index) => {
+        const div = document.createElement('div');
+        div.className = 'special-requests-row';
+        div.innerHTML = `
+            <input type="text" class="special-requests-filial-label" placeholder="Filial (masalan: BOZ)" value="${escapeHtml(row.label || '')}">
+            <input type="text" class="special-requests-filial-username" placeholder="@username" value="${escapeHtml(row.username || '')}">
+            <button type="button" class="btn btn-danger btn-sm special-requests-filial-remove-row" data-index="${index}" title="O'chirish"><i data-feather="trash-2"></i></button>
         `;
         container.appendChild(div);
     });
@@ -45,6 +62,37 @@ function escapeHtml(s) {
     const div = document.createElement('div');
     div.textContent = s == null ? '' : String(s);
     return div.innerHTML;
+}
+
+/** Faqat raqamlardan iborat qatorni olish (bo'shliq, vergul olib tashlanadi) */
+function parseSumRaw(str) {
+    if (str == null) return '';
+    return String(str).replace(/\s/g, '').replace(/,/g, '').replace(/\D/g, '');
+}
+
+/** Raqamni 3 xonali guruhda ko'rsatish (10 000 000) */
+function formatSumDisplay(str) {
+    const raw = parseSumRaw(str);
+    if (!raw) return '';
+    return raw.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+/** Summa inputini 3 xonali formatda yangilash (kiritilganda va blur da) */
+function formatSumInputOnInput(el) {
+    if (!el) return;
+    const start = el.selectionStart;
+    const oldVal = el.value;
+    const raw = parseSumRaw(oldVal);
+    const formatted = formatSumDisplay(raw);
+    if (oldVal === formatted) return;
+    const digitsBeforeCursor = (oldVal.slice(0, start).match(/\d/g) || []).length;
+    el.value = formatted;
+    let pos = 0;
+    let digits = 0;
+    for (; pos < formatted.length && digits < digitsBeforeCursor; pos++) {
+        if (/\d/.test(formatted[pos])) digits++;
+    }
+    el.setSelectionRange(pos, pos);
 }
 
 function collectButtons() {
@@ -62,10 +110,31 @@ function collectButtons() {
     return buttons;
 }
 
+function collectFilialButtons() {
+    const container = DOM.specialRequestsFilialContainer;
+    if (!container) return [];
+    const rows = container.querySelectorAll('.special-requests-row');
+    const buttons = [];
+    rows.forEach((row) => {
+        const labelInp = row.querySelector('.special-requests-filial-label');
+        const usernameInp = row.querySelector('.special-requests-filial-username');
+        const label = labelInp ? labelInp.value.trim() : '';
+        const username = usernameInp ? usernameInp.value.trim() : '';
+        if (label || username) buttons.push({ label, username });
+    });
+    return buttons;
+}
+
 function addRow() {
     const buttons = collectButtons();
     buttons.push({ label: '', username: '' });
     renderButtonsRows(buttons);
+}
+
+function addFilialRow() {
+    const buttons = collectFilialButtons();
+    buttons.push({ label: '', username: '' });
+    renderFilialRows(buttons);
 }
 
 function bindRemoveRows() {
@@ -82,6 +151,20 @@ function bindRemoveRows() {
     });
 }
 
+function bindFilialRemoveRows() {
+    if (!DOM.specialRequestsFilialContainer) return;
+    DOM.specialRequestsFilialContainer.addEventListener('click', (e) => {
+        const btn = e.target.closest('.special-requests-filial-remove-row');
+        if (!btn) return;
+        const buttons = collectFilialButtons();
+        const index = parseInt(btn.getAttribute('data-index'), 10);
+        if (!Number.isNaN(index) && index >= 0 && index < buttons.length) {
+            buttons.splice(index, 1);
+            renderFilialRows(buttons);
+        }
+    });
+}
+
 export async function loadSpecialRequestsPage() {
     try {
         const config = await getConfig();
@@ -91,7 +174,10 @@ export async function loadSpecialRequestsPage() {
             DOM.specialRequestsBotToken.placeholder = config.tokenSet ? '••••••••' : 'Token';
         }
         if (DOM.specialRequestsGroupId) DOM.specialRequestsGroupId.value = config.groupId || '';
+        if (DOM.specialRequestsSumFilterType) DOM.specialRequestsSumFilterType.value = config.sumFilterType || '';
+        if (DOM.specialRequestsSumFilterValue) DOM.specialRequestsSumFilterValue.value = formatSumDisplay(config.sumFilterValue || '');
         renderButtonsRows(config.buttons || []);
+        renderFilialRows(config.filialButtons || []);
     } catch (err) {
         showToast(err.message || 'Yuklashda xatolik', 'error');
     }
@@ -101,18 +187,25 @@ function bindSpecialRequestsSave() {
     if (!DOM.specialRequestsSaveBtn) return;
     DOM.specialRequestsSaveBtn.addEventListener('click', async () => {
         const enabled = DOM.specialRequestsBotEnabled ? DOM.specialRequestsBotEnabled.checked : false;
-        let token = DOM.specialRequestsBotToken ? DOM.specialRequestsBotToken.value.trim() : '';
+        const tokenRaw = DOM.specialRequestsBotToken ? DOM.specialRequestsBotToken.value.trim() : '';
         const groupId = DOM.specialRequestsGroupId ? DOM.specialRequestsGroupId.value.trim() : '';
+        const sumFilterType = DOM.specialRequestsSumFilterType ? DOM.specialRequestsSumFilterType.value.trim() : '';
+        const sumFilterValueRaw = DOM.specialRequestsSumFilterValue ? DOM.specialRequestsSumFilterValue.value : '';
+        const sumFilterValue = parseSumRaw(sumFilterValueRaw);
         const buttons = collectButtons();
+        const filialButtons = collectFilialButtons();
 
-        if (token.length > 0 && token.length < 20) {
+        // Token faqat yangi kiritilganda yuboriladi (bo'sh yoki placeholder bo'lsa yuborilmaydi – bazadagi saqlanadi)
+        const isPlaceholderOrEmpty = !tokenRaw || tokenRaw === '••••••••' || tokenRaw.includes('...');
+        if (!isPlaceholderOrEmpty && tokenRaw.length < 20) {
             showToast('Token noto\'g\'ri', 'error');
             return;
         }
-        if (token === '' || token === '••••••••' || token.includes('...')) token = undefined;
+        const payload = { enabled, groupId, buttons, filialButtons, sumFilterType, sumFilterValue };
+        if (!isPlaceholderOrEmpty) payload.token = tokenRaw;
 
         try {
-            await saveConfig({ enabled, token, groupId, buttons });
+            await saveConfig(payload);
             showToast('Saqlandi', 'success');
             loadSpecialRequestsPage();
         } catch (err) {
@@ -128,9 +221,17 @@ export function initSpecialRequestsPage() {
     }
     state.specialRequestsInitialized = true;
     bindRemoveRows();
+    bindFilialRemoveRows();
     if (DOM.specialRequestsAddRowBtn) {
         DOM.specialRequestsAddRowBtn.addEventListener('click', addRow);
     }
+    if (DOM.specialRequestsAddFilialRowBtn) {
+        DOM.specialRequestsAddFilialRowBtn.addEventListener('click', addFilialRow);
+    }
     bindSpecialRequestsSave();
+    if (DOM.specialRequestsSumFilterValue) {
+        DOM.specialRequestsSumFilterValue.addEventListener('input', () => formatSumInputOnInput(DOM.specialRequestsSumFilterValue));
+        DOM.specialRequestsSumFilterValue.addEventListener('blur', () => formatSumInputOnInput(DOM.specialRequestsSumFilterValue));
+    }
     loadSpecialRequestsPage();
 }
