@@ -5382,6 +5382,255 @@ input.form-control.comparison-input {
     height: 18px;
 }
 
+/* ========== Maxsus so'rovlar sahifasi ========== */
+.special-requests-page .page-description {
+    margin-bottom: 24px;
+}
+
+.special-requests-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: start;
+}
+
+@media (max-width: 1024px) {
+    .special-requests-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.special-requests-card {
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.special-requests-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.special-requests-card-body {
+    padding: 24px;
+}
+
+.special-requests-card-body .form-group {
+    padding: 0;
+}
+
+.special-requests-toggle-wrap {
+    margin-bottom: 20px;
+}
+
+.special-requests-toggle-wrap .switch-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.special-requests-toggle-wrap .switch-text {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.sr-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.sr-label-icon {
+    width: 16px;
+    height: 16px;
+    opacity: 0.85;
+}
+
+.special-requests-card-body .form-group {
+    margin-bottom: 20px;
+}
+
+.special-requests-card-body .form-group:last-of-type {
+    margin-bottom: 0;
+}
+
+.sr-input {
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.sr-input:focus {
+    border-color: var(--blue-color);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
+}
+
+/* Bo'limlar qatorlari */
+.special-requests-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.special-requests-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.special-requests-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(79, 172, 254, 0.3);
+}
+
+.special-requests-row .special-requests-label {
+    flex: 0 0 140px;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.special-requests-row .special-requests-label:focus {
+    outline: none;
+    border-color: var(--blue-color);
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.2);
+}
+
+.special-requests-row .special-requests-username {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.special-requests-row .special-requests-username::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.special-requests-row .special-requests-username:focus {
+    outline: none;
+    border-color: var(--blue-color);
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.2);
+}
+
+.special-requests-row .special-requests-remove-row {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.85;
+    transition: opacity 0.2s, transform 0.2s, background 0.2s;
+}
+
+.special-requests-row .special-requests-remove-row:hover {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+.special-requests-row .special-requests-remove-row:active {
+    transform: scale(0.95);
+}
+
+.special-requests-row .special-requests-remove-row svg {
+    width: 18px;
+    height: 18px;
+}
+
+.special-requests-add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-radius: 12px;
+    border: 2px dashed var(--border-color);
+    background: transparent;
+    color: var(--text-secondary);
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.special-requests-add-btn:hover {
+    border-color: var(--blue-color);
+    color: var(--blue-color);
+    background: rgba(0, 123, 255, 0.08);
+}
+
+.special-requests-add-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+.special-requests-actions {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.special-requests-save-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 28px;
+    border-radius: 12px;
+    font-weight: 600;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.special-requests-save-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 123, 255, 0.35);
+}
+
+.special-requests-save-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+[data-theme="light"] .special-requests-row {
+    background: var(--hover-bg);
+    border-color: var(--border-color);
+}
+
+[data-theme="light"] .special-requests-row:hover {
+    background: var(--surface-color);
+    border-color: var(--blue-color);
+}
+
+[data-theme="light"] .special-requests-row .special-requests-label,
+[data-theme="light"] .special-requests-row .special-requests-username {
+    background: var(--surface-color);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .special-requests-add-btn:hover {
+    background: rgba(37, 99, 235, 0.1);
+}
+
 /* Admin Control Card */
 .admin-control-card {
     background: linear-gradient(135deg, rgba(30, 37, 48, 0.95) 0%, rgba(45, 55, 72, 0.95) 100%);

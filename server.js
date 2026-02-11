@@ -653,6 +653,22 @@ global.broadcastWebSocket = (type, payload) => {
                     } catch (fbError) {
                         log.error('[INIT] [FEEDBACK_BOT] ❌ Feedback botni ishga tushirishda xatolik:', fbError.message);
                     }
+
+                    // 3. Maxsus so'rovlar boti
+                    try {
+                        const { initializeSpecialRequestsBot } = require('./utils/specialRequestsBot.js');
+                        const srToken = await getSetting('special_requests_bot_token', null);
+                        const srEnabled = await getSetting('special_requests_bot_enabled', 'false');
+                        const isSrEnabled = String(srEnabled).toLowerCase() === 'true' || String(srEnabled) === '1';
+                        if (isSrEnabled && srToken && srToken.trim() !== '') {
+                            log.info('[INIT] [SPECIAL_REQUESTS_BOT] Ishga tushirilmoqda...');
+                            await initializeSpecialRequestsBot();
+                        } else {
+                            log.info('[INIT] [SPECIAL_REQUESTS_BOT] Maxsus so\'rovlar boti o\'chirilgan yoki token yo\'q');
+                        }
+                    } catch (srError) {
+                        log.error('[INIT] [SPECIAL_REQUESTS_BOT] ❌ Maxsus so\'rovlar botini ishga tushirishda xatolik:', srError.message);
+                    }
                 })();
             } else {
                 log.info('[INIT] [BOT] Bot token topilmadi, bot ishga tushirilmadi');

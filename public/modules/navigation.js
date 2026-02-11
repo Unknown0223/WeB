@@ -145,6 +145,16 @@ export async function navigateTo(pageId, hideLoaderAfter = false) {
                 state.feedbackManager.fetchFeedback();
             }
 
+            if (pageId === 'special-requests') {
+                (async () => {
+                    try {
+                        const { initSpecialRequestsPage } = await import('./specialRequests.js');
+                        initSpecialRequestsPage();
+                    } catch (error) {
+                        console.error('Maxsus so\'rovlar sahifasini yuklashda xatolik:', error);
+                    }
+                })();
+            }
 
             // Agar loader yashirilishi kerak bo'lsa
             if (hideLoaderAfter) {

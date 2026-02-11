@@ -85,6 +85,13 @@ export const DOM = {
     feedbackBotEnabledToggle: null,
     feedbackBotTokenInput: null,
     saveFeedbackBotBtn: null,
+    // Maxsus so'rovlar
+    specialRequestsBotEnabled: null,
+    specialRequestsBotToken: null,
+    specialRequestsGroupId: null,
+    specialRequestsButtonsContainer: null,
+    specialRequestsAddRowBtn: null,
+    specialRequestsSaveBtn: null,
     paginationLimitInput: null,
     saveGeneralSettingsBtn: null,
     saveKpiSettingsBtn: null,
@@ -262,6 +269,12 @@ function initDOM() {
     DOM.feedbackBotEnabledToggle = document.getElementById('feedback-bot-enabled-toggle');
     DOM.feedbackBotTokenInput = document.getElementById('feedback-bot-token');
     DOM.saveFeedbackBotBtn = document.getElementById('save-feedback-bot-btn');
+    DOM.specialRequestsBotEnabled = document.getElementById('special-requests-bot-enabled');
+    DOM.specialRequestsBotToken = document.getElementById('special-requests-bot-token');
+    DOM.specialRequestsGroupId = document.getElementById('special-requests-group-id');
+    DOM.specialRequestsButtonsContainer = document.getElementById('special-requests-buttons-container');
+    DOM.specialRequestsAddRowBtn = document.getElementById('special-requests-add-row');
+    DOM.specialRequestsSaveBtn = document.getElementById('special-requests-save');
     DOM.paginationLimitInput = document.getElementById('pagination-limit');
     DOM.saveGeneralSettingsBtn = document.getElementById('save-general-settings-btn');
     DOM.saveKpiSettingsBtn = document.getElementById('save-kpi-settings-btn');

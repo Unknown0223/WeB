@@ -24,6 +24,7 @@ router.use('/exchange-rates', require('./exchangeRates.js'));
 router.use('/comparison', require('./comparison.js'));
 router.use('/notifications', require('./notifications.js'));
 router.use('/feedback', require('./feedback.js'));
+router.use('/special-requests', require('./specialRequests.js'));
 
 // Debt-approval routes
 router.use('/debt-approval/brands', require('./debt-approval/brands.js'));
