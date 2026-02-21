@@ -122,7 +122,9 @@ function getCell(row, headers, colIndex, rowKeyMap) {
     // sheet_to_json(..., { header: 1 }) qatorlarni massiv qilib qaytaradi – indeks orqali olamiz
     if (Array.isArray(row)) {
         const v = row[colIndex];
-        return v == null ? '' : String(v).trim();
+        if (v == null || v === '') return '';
+        if (typeof v === 'number' && !Number.isNaN(v)) return String(v);
+        return String(v).trim();
     }
     const headerName = headers[colIndex];
     if (headerName == null) return '';
@@ -148,25 +150,47 @@ function normalizeFilterValue(val) {
     return String(val == null ? '' : val).trim().toLowerCase();
 }
 
+/** Консигнация ustunidagi qiymat "Да" hisoblanadimi (qabul qilinadigan variantlar) */
+const KONSIGNATSIYA_YES = ['да', 'yes', '1', 'true', '+', 'д', 'ha', 'ja'];
+/** Тип ustunidagi qiymat "Заказ" hisoblanadimi */
+const TIP_ZAKAZ = ['заказ', 'order', 'zakaz'];
+
+function matchesConsignatsiyaYes(normalized) {
+    if (!normalized) return false;
+    return KONSIGNATSIYA_YES.some(v => v === normalized || normalized.includes(v));
+}
+
+function matchesTipZakaz(normalized) {
+    if (!normalized) return false;
+    return TIP_ZAKAZ.some(v => v === normalized || normalized.includes(v));
+}
+
 /**
- * Сумма qiymatini raqamga aylantirish (bo'shliq, vergul olib tashlanadi)
+ * Сумма qiymatini raqamga aylantirish (bo'shliq, vergul/nuqta formatlari)
+ * Qo'llab-quvvatlanadi: "10 000 000", "10,5", "10.5", "10.000.000" (nuqta ming ajratgich)
  */
 function parseSummaValue(val) {
     if (val == null || val === '') return NaN;
-    const s = String(val).replace(/\s/g, '').replace(/,/g, '.');
+    let s = String(val).replace(/\s/g, '');
+    if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) {
+        s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+        s = s.replace(/,/g, '.');
+    }
     const n = parseFloat(s);
     return Number.isFinite(n) ? n : NaN;
 }
 
 /**
  * Filtrlash: Консигнация = "Да", Тип = "Заказ", ixtiyoriy Сумма sharti (teng / >= / <=)
+ * Ustunlar faqat NOMI bo'yicha aniqlanadi (tartib o'zgarsa ham ishlaydi).
  * @param {Object} [sumFilter] - { type: 'eq'|'gte'|'lte', value: number }, bo'lmasa summa filtri qo'llanmaydi
  */
 function filterSpecialRequestRows(data, columns, headers, rowKeyMap, sumFilter) {
     if (!data || !columns || !headers) return [];
     const filtered = [];
     const hasSumFilter = sumFilter && (sumFilter.type === 'eq' || sumFilter.type === 'gte' || sumFilter.type === 'lte') && Number.isFinite(sumFilter.value);
-    // data[0] – sarlavha qatori, ma'lumot data[1] dan boshlanadi
+    const sampleRows = [];
     for (let i = 1; i < data.length; i++) {
         const row = data[i];
         const rawKons = getCell(row, headers, columns['Консигнация'], rowKeyMap);
@@ -174,10 +198,10 @@ function filterSpecialRequestRows(data, columns, headers, rowKeyMap, sumFilter) 
         const konsignatsiya = normalizeFilterValue(rawKons);
         const tip = normalizeFilterValue(rawTip);
         if (i <= 5) {
-            log.debug(`[SPECIAL_REQUESTS_EXCEL] Qator ${i} (ma'lumot): Консигнация(raw)=${JSON.stringify(rawKons)} → norm="${konsignatsiya}", Тип(raw)=${JSON.stringify(rawTip)} → norm="${tip}"`);
+            log.debug(`[SPECIAL_REQUESTS_EXCEL] Qator ${i}: Консигнация(raw)=${JSON.stringify(rawKons)} → norm="${konsignatsiya}", Тип(raw)=${JSON.stringify(rawTip)} → norm="${tip}"`);
         }
-        if (konsignatsiya !== 'да') continue;
-        if (tip !== 'заказ') continue;
+        if (!matchesConsignatsiyaYes(konsignatsiya)) continue;
+        if (!matchesTipZakaz(tip)) continue;
         if (hasSumFilter) {
             const rawSum = getCell(row, headers, columns['Сумма'], rowKeyMap);
             const sumNum = parseSummaValue(rawSum);
@@ -189,13 +213,37 @@ function filterSpecialRequestRows(data, columns, headers, rowKeyMap, sumFilter) 
     }
     const sumInfo = hasSumFilter ? `, Сумма ${sumFilter.type === 'eq' ? '=' : sumFilter.type === 'gte' ? '>=' : '<='} ${sumFilter.value}` : '';
     log.info(`[SPECIAL_REQUESTS_EXCEL] Filtr natija: jami ${Math.max(0, data.length - 1)} ma'lumot qatori, shartga mos ${filtered.length} ta (Консигнация=Да, Тип=Заказ${sumInfo})`);
+    if (filtered.length === 0 && data.length > 1) {
+        const sampleRows = [];
+        for (let i = 1; i <= Math.min(5, data.length - 1); i++) {
+            const row = data[i];
+            const rawKons = getCell(row, headers, columns['Консигнация'], rowKeyMap);
+            const rawTip = getCell(row, headers, columns['Тип'], rowKeyMap);
+            const rawSum = getCell(row, headers, columns['Сумма'], rowKeyMap);
+            const normKons = normalizeFilterValue(rawKons);
+            const normTip = normalizeFilterValue(rawTip);
+            const sumNum = parseSummaValue(rawSum);
+            sampleRows.push({
+                qator: i + 1,
+                Консигнация: rawKons || '(bo\'sh)',
+                normKons,
+                okKons: matchesConsignatsiyaYes(normKons),
+                Тип: rawTip || '(bo\'sh)',
+                normTip,
+                okTip: matchesTipZakaz(normTip),
+                Сумма: rawSum || '(bo\'sh)',
+                sumNum: Number.isFinite(sumNum) ? sumNum : null,
+                okSum: !hasSumFilter || (sumFilter.type === 'gte' && sumNum >= sumFilter.value) || (sumFilter.type === 'lte' && sumNum <= sumFilter.value) || (sumFilter.type === 'eq' && sumNum === sumFilter.value)
+            });
+        }
+        log.info(`[SPECIAL_REQUESTS_EXCEL] Shartga mos 0 qator. Birinchi 5 qator tahlili: ${JSON.stringify(sampleRows, null, 0)}`);
+    }
     return filtered;
 }
 
 /**
- * Excel buffer/sheet dan ma'lumotlarni o'qish va filtrlash
- * @param {Object} workbook - xlsx workbook
- * @param {{ type: 'eq'|'gte'|'lte', value: number }} [sumFilter] - Сумма bo'yicha shart (ixtiyoriy)
+ * Excel buffer/sheet dan ma'lumotlarni o'qish va filtrlash.
+ * Sarlavha qatori 1, 2 yoki 3-qator bo'lishi mumkin (ustunlar NOMI bo'yicha aniqlanadi).
  */
 function parseSpecialRequestWorkbook(workbook, sumFilter) {
     const xlsx = require('xlsx');
@@ -203,33 +251,52 @@ function parseSpecialRequestWorkbook(workbook, sumFilter) {
         return { ok: false, missing: REQUIRED_COLUMNS };
     }
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const range = sheet['!ref'] ? xlsx.utils.decode_range(sheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
-    const headers = [];
-    for (let c = range.s.c; c <= range.e.c; c++) {
-        const cell = sheet[xlsx.utils.encode_cell({ r: 0, c })];
-        headers.push(cell ? String(cell.v || '').trim() : '');
+    const rawData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
+    if (!rawData || rawData.length < 2) {
+        return { ok: false, missing: REQUIRED_COLUMNS };
     }
-    const validation = validateSpecialRequestColumns(headers);
-    if (!validation.ok) {
-        return { ok: false, missing: validation.missing };
+    let headerRowIndex = -1;
+    let headers = [];
+    let columns = null;
+    for (let r = 0; r < Math.min(5, rawData.length); r++) {
+        const candidateHeaders = (rawData[r] || []).map(c => c != null ? String(c).trim() : '');
+        const validation = validateSpecialRequestColumns(candidateHeaders);
+        if (validation.ok) {
+            const cols = detectSpecialRequestColumns(candidateHeaders);
+            if (cols) {
+                headerRowIndex = r;
+                headers = candidateHeaders;
+                columns = cols;
+                if (r > 0) log.info(`[SPECIAL_REQUESTS_EXCEL] Sarlavha qatori ${r + 1}-qator sifatida aniqlandi (ustunlar nomi bo'yicha).`);
+                break;
+            }
+        }
     }
-    const columns = detectSpecialRequestColumns(headers);
-    if (!columns) {
-        return { ok: false, missing: validation.missing };
+    if (headerRowIndex < 0 || !columns) {
+        const firstRowHeaders = (rawData[0] || []).map(c => c != null ? String(c).trim() : '');
+        const validation = validateSpecialRequestColumns(firstRowHeaders);
+        log.warn(`[SPECIAL_REQUESTS_EXCEL] Kerakli ustunlar topilmadi. Yetishmayotgan: ${(validation.missing || []).join(', ')}. Birinchi qator sarlavhalar: ${JSON.stringify(firstRowHeaders)}`);
+        return { ok: false, missing: validation.missing || REQUIRED_COLUMNS };
     }
-    // header: 1 = birinchi qator sarlavha, ma'lumot ikkinchi qatordan boshlanadi
-    const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+    const data = [headers].concat(rawData.slice(headerRowIndex + 1));
     const rowKeyMap = data.length > 0 ? buildRowKeyMap(data[0], headers) : {};
+    const idxKons = columns['Консигнация'];
+    const idxTip = columns['Тип'];
+    const idxSum = columns['Сумма'];
+    log.info(`[SPECIAL_REQUESTS_EXCEL] Sarlavha qatori: ${headerRowIndex + 1}-qator. Ustun indekslari: Консигнация=${idxKons}, Тип=${idxTip}, Сумма=${idxSum}. Sarlavhalar (indeks→nomi): ${headers.map((h, i) => (h ? `${i}:${h}` : '')).filter(Boolean).slice(0, 20).join(', ')}${headers.length > 20 ? '...' : ''}`);
     if (data.length > 1) {
-        const idxKons = columns['Консигнация'];
-        const idxTip = columns['Тип'];
-        const firstDataRow = data[1];
-        const konsVal = getCell(firstDataRow, headers, idxKons, rowKeyMap);
-        const tipVal = getCell(firstDataRow, headers, idxTip, rowKeyMap);
-        log.debug(`[SPECIAL_REQUESTS_EXCEL] Birinchi ma'lumot qatori (2-qator): Консигнация=${JSON.stringify(konsVal)}, Тип=${JSON.stringify(tipVal)}`);
+        const samples = [];
+        for (let i = 1; i <= Math.min(3, data.length - 1); i++) {
+            const row = data[i];
+            const rawKons = getCell(row, headers, idxKons, rowKeyMap);
+            const rawTip = getCell(row, headers, idxTip, rowKeyMap);
+            const rawSum = getCell(row, headers, idxSum, rowKeyMap);
+            samples.push({ qator: i + 1, Консигнация: rawKons, Тип: rawTip, Сумма: rawSum });
+        }
+        log.info(`[SPECIAL_REQUESTS_EXCEL] Birinchi 3 ma'lumot qatorida o'qilgan qiymatlar: ${JSON.stringify(samples)}`);
     }
     const filteredRows = filterSpecialRequestRows(data, columns, headers, rowKeyMap, sumFilter);
-    const totalDataRows = Math.max(0, data.length - 1); // header dan tashqari
+    const totalDataRows = Math.max(0, data.length - 1);
     log.info(`[SPECIAL_REQUESTS_EXCEL] Parse: jami ma'lumot qatorlari=${totalDataRows}, filtrlangan=${filteredRows.length}`);
     return { ok: true, columns, headers, filteredRows, rowKeyMap, totalDataRows };
 }

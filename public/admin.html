@@ -361,6 +361,10 @@
                     <i data-feather="bar-chart-2"></i>
                     <span>Interaktiv hisobotlar</span>
                 </a>
+                <a href="#expense-total" class="nav-link" data-page="expense-total" data-permission="reports:view_all,dashboard:view">
+                    <i data-feather="pie-chart"></i>
+                    <span>Sarflar hisoboti (Total)</span>
+                </a>
                 <a href="#comparison" class="nav-link" data-page="comparison" data-permission="comparison:view">
                     <i data-feather="shuffle"></i>
                     <span>Qiymatlarni Solishtirish</span>
@@ -990,6 +994,142 @@
                 </div>
 
                 <div id="pivot-container"></div>
+            </section>
+
+            <!-- Sarflar hisoboti (Total) — 3 ta alohida import + Total (filial/brend avtomatik) -->
+            <section id="expense-total" class="page expense-total-page" data-permission="reports:view_all,dashboard:view">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">
+                            <i data-feather="pie-chart"></i>
+                            Sarflar hisoboti (Total)
+                        </h1>
+                        <p class="page-description">
+                            OYLIKLAR, RASXODLAR va SAVDO listlarini alohida-alohida import qiling. Total jadvali avtomatik hisoblanadi; yangi filial yoki brend importda bo‘lsa, kerakli joyida avtomatik ko‘rinadi.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 3 ta alohida import -->
+                <div class="expense-total-imports" id="expense-total-imports">
+                    <div class="expense-import-card" data-list="oyliklar">
+                        <div class="expense-import-header">
+                            <i data-feather="users"></i>
+                            <h3>OYLIKLAR</h3>
+                            <span class="expense-import-status" id="expense-import-status-oyliklar">Import qilinmagan</span>
+                        </div>
+                        <p class="expense-import-desc">Xodimlar oyliklari — Filial, Brend, Oylik turi, Summa</p>
+                        <div class="expense-import-actions">
+                            <input type="file" id="expense-file-oyliklar" class="expense-file-input" accept=".xlsx,.xls" hidden>
+                            <button type="button" class="btn btn-secondary" id="expense-btn-oyliklar"><i data-feather="upload"></i> Fayl tanlash</button>
+                            <span class="expense-file-name" id="expense-file-name-oyliklar"></span>
+                        </div>
+                    </div>
+                    <div class="expense-import-card" data-list="rasxodlar">
+                        <div class="expense-import-header">
+                            <i data-feather="credit-card"></i>
+                            <h3>RASXODLAR</h3>
+                            <span class="expense-import-status" id="expense-import-status-rasxodlar">Import qilinmagan</span>
+                        </div>
+                        <p class="expense-import-desc">Filial xarajatlari — Hudud, xarajat turi, jami</p>
+                        <div class="expense-import-actions">
+                            <input type="file" id="expense-file-rasxodlar" class="expense-file-input" accept=".xlsx,.xls" hidden>
+                            <button type="button" class="btn btn-secondary" id="expense-btn-rasxodlar"><i data-feather="upload"></i> Fayl tanlash</button>
+                            <span class="expense-file-name" id="expense-file-name-rasxodlar"></span>
+                        </div>
+                    </div>
+                    <div class="expense-import-card" data-list="savdo">
+                        <div class="expense-import-header">
+                            <i data-feather="trending-up"></i>
+                            <h3>SAVDO</h3>
+                            <span class="expense-import-status" id="expense-import-status-savdo">Import qilinmagan</span>
+                        </div>
+                        <p class="expense-import-desc">Savdo — Brend, Sklad, Noyabr summasi</p>
+                        <div class="expense-import-actions">
+                            <input type="file" id="expense-file-savdo" class="expense-file-input" accept=".xlsx,.xls" hidden>
+                            <button type="button" class="btn btn-secondary" id="expense-btn-savdo"><i data-feather="upload"></i> Fayl tanlash</button>
+                            <span class="expense-file-name" id="expense-file-name-savdo"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bitta tugma: fayllar tanlanganidan keyin jarayonni boshlash -->
+                <div class="expense-total-start-row">
+                    <button type="button" class="btn btn-primary btn-lg" id="expense-total-start-btn">
+                        <i data-feather="play-circle"></i>
+                        <span>Jarayonni boshlash</span>
+                    </button>
+                    <p class="expense-total-start-hint">Fayllarni belgilang, keyin ushbu tugmani bosing — tanlangan fayllar yuklanadi va Total hisoblanadi.</p>
+                </div>
+
+                <!-- Filtrlar: Hudud va Brend bo'yicha jadvalni qisqartirish (import dan keyin to'ldiriladi) -->
+                <div class="expense-total-controls card mt-30" id="expense-total-controls">
+                    <div class="card-body">
+                        <h4 class="mb-15">Filtrlar</h4>
+                        <p class="expense-total-filters-hint mb-15 text-secondary">Jadvalni hudud yoki brend bo'yicha filtrlash uchun tanlang.</p>
+                        <div class="expense-total-filters">
+                            <div class="form-group">
+                                <label for="expense-total-month">Oy</label>
+                                <select id="expense-total-month" class="form-control">
+                                    <option value="2025-11">Noyabr 2025</option>
+                                    <option value="2025-10">Oktabr 2025</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="expense-total-filial">Hudud / Filial</label>
+                                <select id="expense-total-filial" class="form-control">
+                                    <option value="">Barchasi</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="expense-total-brend">Brend</label>
+                                <select id="expense-total-brend" class="form-control">
+                                    <option value="">Barchasi</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary kartochkalar -->
+                <div class="expense-total-summary-cards" id="expense-total-summary-cards">
+                    <div class="expense-summary-card expense-summary-oylik">
+                        <div class="expense-summary-icon"><i data-feather="users"></i></div>
+                        <div class="expense-summary-content">
+                            <span class="expense-summary-label">Jami oyliklar</span>
+                            <span class="expense-summary-value" id="expense-summary-oylik-value">—</span>
+                        </div>
+                    </div>
+                    <div class="expense-summary-card expense-summary-rasxod">
+                        <div class="expense-summary-icon"><i data-feather="credit-card"></i></div>
+                        <div class="expense-summary-content">
+                            <span class="expense-summary-label">Jami sarflar</span>
+                            <span class="expense-summary-value" id="expense-summary-rasxod-value">—</span>
+                        </div>
+                    </div>
+                    <div class="expense-summary-card expense-summary-savdo">
+                        <div class="expense-summary-icon"><i data-feather="trending-up"></i></div>
+                        <div class="expense-summary-content">
+                            <span class="expense-summary-label">Jami savdo</span>
+                            <span class="expense-summary-value" id="expense-summary-savdo-value">—</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Total jadvali (ИТОГ ustunlari, dinamik qatorlar) -->
+                <div class="card expense-total-table-card mt-30">
+                    <div class="card-header-with-actions">
+                        <h3 class="card-title">Total (ИТОГ)</h3>
+                    </div>
+                    <div class="expense-total-table-wrapper">
+                        <!-- JS: har bir guruh (РЕСПУБЛИКА, hudud) alohida jadval — fayldagi ИТОГ guruhlari kabi -->
+                        <div id="expense-total-tables"></div>
+                    </div>
+                    <div class="expense-total-empty" id="expense-total-empty">
+                        <i data-feather="inbox"></i>
+                        <p>3 ta listni (OYLIKLAR, RASXODLAR, SAVDO) import qiling. Keyin Total avtomatik hisoblanadi.</p>
+                    </div>
+                </div>
             </section>
 
             <!-- Qiymatlarni Solishtirish -->

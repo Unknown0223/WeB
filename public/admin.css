@@ -19126,3 +19126,416 @@ body.admin-page {
     font-size: 14px;
     font-weight: 500;
 }
+
+/* ============================================ */
+/* Sarflar hisoboti (Total) — zamonaviy, o'qilishi oson */
+/* ============================================ */
+.expense-total-page .page-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.expense-total-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+}
+
+.expense-total-controls .form-group {
+    margin-bottom: 0;
+    min-width: 160px;
+}
+
+.expense-total-search-wrap {
+    min-width: 220px;
+}
+
+.expense-total-summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+}
+
+.expense-summary-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    transition: box-shadow var(--transition-speed), border-color var(--transition-speed);
+}
+
+.expense-summary-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-color: var(--blue-color);
+}
+
+.expense-summary-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-primary);
+}
+
+.expense-summary-total .expense-summary-icon {
+    background: rgba(220, 53, 69, 0.15);
+    color: var(--red-color);
+}
+
+.expense-summary-count .expense-summary-icon {
+    background: rgba(0, 123, 255, 0.15);
+    color: var(--blue-color);
+}
+
+.expense-summary-avg .expense-summary-icon {
+    background: rgba(40, 167, 69, 0.15);
+    color: var(--green-color);
+}
+
+.expense-summary-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.expense-summary-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.expense-summary-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+}
+
+.expense-total-table-card {
+    overflow: hidden;
+}
+
+.expense-total-table-wrapper {
+    overflow: visible;
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
+}
+
+/* Har bir guruh (РЕСПУБЛИКА, hudud) — alohida jadval, fayldagi ИТОГ tuzilmasiga mos */
+#expense-total-tables {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.expense-total-group {
+    margin-bottom: 2rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    background: var(--surface-color);
+}
+
+.expense-total-group:last-child {
+    margin-bottom: 0;
+}
+
+.expense-total-group-caption {
+    caption-side: top;
+    padding: 14px 18px 12px;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--text-primary);
+    background: var(--header-bg);
+    border-bottom: 2px solid var(--border-color);
+    text-align: left;
+}
+
+[data-theme="light"] .expense-total-group-caption {
+    background: var(--header-bg);
+}
+
+.expense-total-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.expense-total-table th,
+.expense-total-table td {
+    padding: 14px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Ustun sarlavhalari pastga scroll qilganda ham ko‘rinadi (sticky) */
+.expense-total-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--header-bg);
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 1px 0 var(--border-color);
+}
+
+[data-theme="light"] .expense-total-table thead th {
+    background: var(--header-bg);
+}
+
+.expense-total-table th.sortable {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.expense-total-table th.sortable:hover {
+    color: var(--blue-color);
+}
+
+.expense-total-table tbody tr {
+    transition: background 0.15s;
+}
+
+.expense-total-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="light"] .expense-total-table tbody tr:hover {
+    background: var(--hover-bg);
+}
+
+.expense-total-table .col-num {
+    width: 56px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.expense-total-table .col-category {
+    min-width: 200px;
+}
+
+.expense-total-table .col-amount {
+    min-width: 140px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.expense-total-table .col-date {
+    width: 110px;
+}
+
+.expense-total-table .col-note {
+    min-width: 160px;
+    color: var(--text-secondary);
+}
+
+.expense-total-table td.col-amount {
+    font-weight: 600;
+    color: var(--red-color);
+}
+
+.expense-total-footer-row td {
+    background: var(--header-bg);
+    font-size: 15px;
+    padding: 16px;
+    border-bottom: none;
+}
+
+.expense-total-footer-row .fw-600 {
+    color: var(--text-primary);
+}
+
+.expense-total-table-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.expense-total-export-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.expense-total-empty {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-secondary);
+}
+
+.expense-total-empty svg {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+.expense-total-empty.hidden {
+    display: none !important;
+}
+
+.expense-total-table-wrapper.hidden {
+    display: none !important;
+}
+
+/* 3 ta alohida import kartochkalari */
+.expense-total-imports {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    margin-top: 24px;
+}
+
+.expense-import-card {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.expense-import-card:hover {
+    border-color: var(--blue-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.expense-import-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.expense-import-header svg {
+    width: 24px;
+    height: 24px;
+    color: var(--blue-color);
+}
+
+.expense-import-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.expense-import-status {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.expense-import-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 16px 0;
+    line-height: 1.4;
+}
+
+.expense-import-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.expense-file-name {
+    font-size: 12px;
+    color: var(--text-secondary);
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.expense-total-start-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 24px;
+    margin: 20px 0 24px;
+    padding: 16px 20px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.expense-total-start-row .btn-lg {
+    padding: 10px 24px;
+    font-size: 15px;
+}
+
+.expense-total-start-hint {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.expense-total-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.expense-total-filters .form-group {
+    min-width: 160px;
+    margin-bottom: 0;
+}
+
+/* Total jadvali: header qator, ИТОГО, ustunlar */
+.expense-total-header-row td {
+    background: var(--header-bg);
+    padding: 12px 16px;
+    color: var(--blue-color);
+    font-size: 14px;
+}
+
+.expense-total-itogo-row td {
+    background: rgba(0, 123, 255, 0.08);
+    font-weight: 600;
+}
+
+.expense-total-table-itog .col-brend {
+    min-width: 140px;
+}
+
+.expense-total-table-itog .col-num {
+    min-width: 110px;
+    text-align: right;
+}
+
+.expense-pct-warning {
+    color: var(--danger-color, #dc3545);
+    font-weight: 600;
+}
+
+.expense-total-table-itog .col-pct {
+    min-width: 80px;
+    text-align: right;
+}
+
+.text-right {
+    text-align: right;
+}
+
+.mb-15 {
+    margin-bottom: 15px;
+}
+
+.text-end {
+    text-align: right;
+}
+
+.fw-600 {
+    font-weight: 600;
+}

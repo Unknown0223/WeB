@@ -1493,24 +1493,20 @@ router.post('/upload-excel', isAuthenticated, upload.single('excel'), async (req
         const missingColumns = requiredColumns.filter(col => parsed.columns[col] === null || parsed.columns[col] === undefined);
         
         if (missingColumns.length > 0) {
-            // Temporary faylni o'chirish
+            log.warn(`[DEBT_REQUEST] Excel ustunlari topilmadi. Yetishmayotgan: ${missingColumns.join(', ')}. Fayldagi sarlavhalar: ${JSON.stringify(parsed.headers)}`);
             try {
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                }
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
             } catch (unlinkError) {
                 log.warn(`Faylni o'chirishda xatolik: ${unlinkError.message}`);
             }
-            
             const missingNames = {
                 'id': 'ID (Ид клиента)',
                 'name': 'Name (Клиент)',
                 'summa': 'Summa (Общий)'
             };
-            
             return res.status(400).json({
                 success: false,
-                error: `Excel faylda quyidagi ustunlar topilmadi: ${missingColumns.map(c => missingNames[c]).join(', ')}. Iltimos, faylda barcha kerakli ustunlar mavjudligini tekshiring.`
+                error: `Excel faylda quyidagi ustunlar topilmadi: ${missingColumns.map(c => missingNames[c]).join(', ')}. Ustunlar faqat nomi bo'yicha aniqlanadi — sarlavhalar to'g'ri ekanligini tekshiring.`
             });
         }
         

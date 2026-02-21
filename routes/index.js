@@ -22,6 +22,7 @@ router.use('/brands', require('./brands.js'));
 router.use('/security', require('./security.js'));
 router.use('/exchange-rates', require('./exchangeRates.js'));
 router.use('/comparison', require('./comparison.js'));
+router.use('/expense-total', require('./expenseTotal.js'));
 router.use('/notifications', require('./notifications.js'));
 router.use('/feedback', require('./feedback.js'));
 router.use('/special-requests', require('./specialRequests.js'));

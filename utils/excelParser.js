@@ -62,10 +62,16 @@ function checkPartialMatch(text1, text2) {
     return false;
 }
 
+/** Sarlavha matnini normallashtirish (bo'shliq, tirnoq) — ustun nomi bilan solishtirish uchun */
+function normalizeHeader(h) {
+    if (h == null) return '';
+    return String(h).trim().replace(/\s+/g, ' ').replace(/[\u2018\u2019\u02BC]/g, "'").toLowerCase();
+}
+
 /**
- * Ustun nomlarini avtomatik aniqlash
+ * Ustun nomlarini avtomatik aniqlash — faqat nomi bo'yicha (tartib o'zgarsa ham ishlaydi)
  * @param {Array} headers - Excel fayldagi ustun nomlari ro'yxati
- * @returns {Object} Aniqlangan ustunlar {id, name, summa, svr, brand}
+ * @returns {Object} Aniqlangan ustunlar {id, name, summa, svr, brand, agent, agent_code} (qiymat = indeks)
  */
 function detectColumns(headers) {
     const detected = {
@@ -74,104 +80,63 @@ function detectColumns(headers) {
         summa: null,
         svr: null,
         brand: null,
-        agent: null, // ✅ Qo'shilgan: Агент ustuni
-        agent_code: null // ✅ Qo'shilgan: Код агента ustuni
+        agent: null,
+        agent_code: null
     };
-    
-    // ID ustuni variantlari
+
     const idVariants = [
-        'ид клиента', 'id клиента', 'client id', 'id', 'id_klienta',
-        'client_id', 'clientid', 'клиент id', 'клиент_id'
+        'ид клиента', 'id клиента', 'client id', 'id_klienta', 'client_id', 'clientid',
+        'клиент id', 'клиент_id', 'ид', 'id ', ' kod', 'код клиента'
     ];
-    
-    // Name ustuni variantlari
     const nameVariants = [
-        'клиент', 'client', 'name', 'klient', 'клиент name',
-        'client name', 'clientname', 'mijoz', 'mijoz nomi'
+        'клиент', 'client', 'name', 'klient', 'клиент name', 'client name', 'clientname',
+        'mijoz', 'mijoz nomi', 'ф.и.о', 'f.i.o', 'фио', 'fio', 'контрагент', 'контрагент name'
     ];
-    
-    // Summa ustuni variantlari
     const summaVariants = [
-        'общий', 'total', 'summa', 'dolg_sum', 'amount', 'сумма',
-        'sum', 'jami', 'jami summa', 'общая сумма', 'qarz', 'qarz summa'
+        'общий', 'total', 'summa', 'dolg_sum', 'amount', 'сумма', 'sum', 'jami',
+        'jami summa', 'общая сумма', 'qarz', 'qarz summa', 'долг', 'задолженность',
+        'общая сумма долга', 'долг общий', 'сумма долга', 'итого', 'итого долг'
     ];
-    
-    // SVR ustuni variantlari
     const svrVariants = [
         'супервайзер', 'supervisor', 'svr', 'supervayzer', 'supervisor name',
-        'svr name', 'supervayzer nomi', 'supervisor nomi'
+        'svr name', 'supervayzer nomi', 'supervisor nomi', 'супервайзер name', 'свър'
     ];
-    
-    // Brend ustuni variantlari
     const brandVariants = [
-        'направление торговли', 'trade direction', 'brend', 'brand',
-        'brand name', 'brend nomi', 'brand nomi', 'направление',
-        'trade_direction', 'tradedirection'
+        'направление торговли', 'trade direction', 'brend', 'brand', 'brand name',
+        'brend nomi', 'brand nomi', 'направление', 'trade_direction', 'tradedirection',
+        'направление торговли'
     ];
-    
-    // ✅ Агент ustuni variantlari
     const agentVariants = [
-        'агент', 'agent', 'agent name', 'agent_name', 'agentname',
-        'агент name', 'агент_name', 'agent nomi'
+        'агент', 'agent', 'agent name', 'agent_name', 'agentname', 'агент name', 'агент_name', 'agent nomi'
     ];
-    
-    // ✅ Код агента ustuni variantlari
     const agentCodeVariants = [
-        'код агента', 'agent code', 'agent_code', 'agentcode',
-        'код_агента', 'agent id', 'agent_id', 'agentid',
-        'код агента', 'agent kod', 'agent_kod'
+        'код агента', 'agent code', 'agent_code', 'agentcode', 'код_агента',
+        'agent id', 'agent_id', 'agentid', 'agent kod', 'agent_kod'
     ];
-    
-    // Har bir ustunni tekshirish
+
+    const match = (headerNorm, variants) => variants.some(v => headerNorm.includes(v));
+
     headers.forEach((header, index) => {
-        if (!header) return;
-        
-        const headerLower = String(header).toLowerCase().trim();
-        
-        // ID ustuni
-        if (!detected.id && idVariants.some(variant => headerLower.includes(variant))) {
-            detected.id = index;
-            log.debug(`[DETECT] ID ustuni topildi: "${header}" (index: ${index})`);
-        }
-        
-        // Name ustuni
-        if (!detected.name && nameVariants.some(variant => headerLower.includes(variant))) {
-            detected.name = index;
-            log.debug(`[DETECT] Name ustuni topildi: "${header}" (index: ${index})`);
-        }
-        
-        // Summa ustuni
-        if (!detected.summa && summaVariants.some(variant => headerLower.includes(variant))) {
-            detected.summa = index;
-            log.debug(`[DETECT] Summa ustuni topildi: "${header}" (index: ${index})`);
-        }
-        
-        // SVR ustuni
-        if (!detected.svr && svrVariants.some(variant => headerLower.includes(variant))) {
-            detected.svr = index;
-            log.debug(`[DETECT] SVR ustuni topildi: "${header}" (index: ${index})`);
-        }
-        
-        // Brend ustuni
-        if (!detected.brand && brandVariants.some(variant => headerLower.includes(variant))) {
-            detected.brand = index;
-            log.debug(`[DETECT] Brend ustuni topildi: "${header}" (index: ${index})`);
-        }
-        
-        // ✅ Агент ustuni
-        if (!detected.agent && agentVariants.some(variant => headerLower.includes(variant))) {
-            detected.agent = index;
-            log.debug(`[DETECT] Агент ustuni topildi: "${header}" (index: ${index})`);
-        }
-        
-        // ✅ Код агента ustuni
-        if (!detected.agent_code && agentCodeVariants.some(variant => headerLower.includes(variant))) {
-            detected.agent_code = index;
-            log.debug(`[DETECT] Код агента ustuni topildi: "${header}" (index: ${index})`);
-        }
+        const raw = header != null ? String(header).trim() : '';
+        if (!raw) return;
+        const headerNorm = normalizeHeader(raw);
+
+        if (!detected.id && match(headerNorm, idVariants)) { detected.id = index; log.debug(`[DETECT] ID: "${raw}" -> index ${index}`); }
+        if (!detected.name && match(headerNorm, nameVariants)) { detected.name = index; log.debug(`[DETECT] Name: "${raw}" -> index ${index}`); }
+        if (!detected.summa && match(headerNorm, summaVariants)) { detected.summa = index; log.debug(`[DETECT] Summa: "${raw}" -> index ${index}`); }
+        if (!detected.svr && match(headerNorm, svrVariants)) { detected.svr = index; log.debug(`[DETECT] SVR: "${raw}" -> index ${index}`); }
+        if (!detected.brand && match(headerNorm, brandVariants)) { detected.brand = index; log.debug(`[DETECT] Brand: "${raw}" -> index ${index}`); }
+        if (!detected.agent && match(headerNorm, agentVariants)) { detected.agent = index; log.debug(`[DETECT] Agent: "${raw}" -> index ${index}`); }
+        if (!detected.agent_code && match(headerNorm, agentCodeVariants)) { detected.agent_code = index; log.debug(`[DETECT] Agent code: "${raw}" -> index ${index}`); }
     });
-    
-    log.debug(`[DETECT] Ustunlar aniqlandi:`, detected);
+
+    const required = ['id', 'name', 'summa'];
+    const missing = required.filter(k => detected[k] == null);
+    if (missing.length > 0) {
+        log.warn(`[DETECT] Qarzdorlik tasdiqlash: kerakli ustunlar topilmadi: ${missing.join(', ')}. Fayldagi sarlavhalar: [${headers.map(h => h != null ? `"${String(h).trim()}"` : '').join(', ')}]`);
+    } else {
+        log.info(`[DETECT] Qarzdorlik Excel: ustunlar nomi bo'yicha aniqlandi. ID=${detected.id}, Name=${detected.name}, Summa=${detected.summa}. Sarlavhalar: ${headers.filter(Boolean).join(' | ')}`);
+    }
     return detected;
 }
 
@@ -384,22 +349,42 @@ async function parseExcelFile(filePath, requestData = {}) {
         }
         
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        
-        // Birinchi qatorni sarlavha sifatida olish
-        const range = XLSX.utils.decode_range(sheet['!ref']);
-        const headers = [];
-        
-        for (let col = range.s.c; col <= range.e.c; col++) {
-            const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
-            const cell = sheet[cellAddress];
-            headers.push(cell ? String(cell.v).trim() : '');
+        const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+        if (!rawRows || rawRows.length === 0) {
+            throw new Error('Excel varaq bo\'sh');
         }
+
+        // Sarlavha qatorini topish: birinchi 5 qatordan kerakli ustunlar (id, name, summa) nomi bo'yicha topiladigan birinchi qator
+        const maxHeaderRow = Math.min(5, rawRows.length);
+        let headerRowIndex = 0;
+        let headers = (rawRows[0] || []).map(c => c != null ? String(c).trim() : '');
+        let columns = detectColumns(headers);
+        if (columns.id == null || columns.name == null || columns.summa == null) {
+            for (let r = 1; r < maxHeaderRow; r++) {
+                const candidateHeaders = (rawRows[r] || []).map(c => c != null ? String(c).trim() : '');
+                const candidateCols = detectColumns(candidateHeaders);
+                if (candidateCols.id != null && candidateCols.name != null && candidateCols.summa != null) {
+                    headerRowIndex = r;
+                    headers = candidateHeaders;
+                    columns = candidateCols;
+                    log.info(`[PARSE] Qarzdorlik Excel: sarlavha qatori ${r + 1}-qator sifatida aniqlandi (1-emas).`);
+                    break;
+                }
+            }
+        }
+
+        // Ma'lumot qatorlari: sarlavhadan keyingi qatorlar, ob'ektlar (sarlavha nomi = kalit)
+        const dataRows = rawRows.slice(headerRowIndex + 1);
+        const data = dataRows.map(rowArr => {
+            const obj = {};
+            headers.forEach((h, i) => {
+                const val = rowArr[i];
+                if (h) obj[h] = val !== undefined && val !== null ? val : null;
+            });
+            return obj;
+        });
         
-        // Ma'lumotlarni o'qish
-        const data = XLSX.utils.sheet_to_json(sheet, { header: headers });
-        
-        // Ustunlarni aniqlash
-        const columns = detectColumns(headers);
+        // Ustunlar allaqachon aniqlangan (nom bo'yicha)
         
         // Moslik tekshiruvi va filtrlash
         const validationResult = validateAndFilterRows(data, columns, requestData, headers);

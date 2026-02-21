@@ -95,6 +95,17 @@ export async function navigateTo(pageId, hideLoaderAfter = false) {
                 setupPivot();
             }
 
+            if (pageId === 'expense-total') {
+                (async () => {
+                    try {
+                        const { setupExpenseTotal } = await import('./expenseTotal.js');
+                        setupExpenseTotal();
+                    } catch (e) {
+                        console.error('Sarflar hisoboti (Total) yuklashda xatolik:', e);
+                    }
+                })();
+            }
+
             if (pageId === 'comparison' && hasPermission(state.currentUser, 'comparison:view')) {
                 (async () => {
                     try {
